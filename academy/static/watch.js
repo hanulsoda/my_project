@@ -5,6 +5,7 @@ video.src = `/media/${id}`;
 
 let chapters = [];  // { start, title, card, bar }
 let lines = [];     // { start, text, li }
+let pages = [];     // { start, item }
 
 function seek(t) {
   video.currentTime = t;
@@ -37,17 +38,18 @@ function render({ title, analysis }) {
   document.title = title;
   $("title").textContent = title;
   if (!analysis) {
-    const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·대본·퀴즈가 생깁니다.";
-    for (const tab of ["guide", "transcript", "quiz", "ask"]) $(`tab-${tab}`).replaceChildren(notice(msg));
+    const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·페이지·대본·퀴즈가 생깁니다.";
+    for (const tab of ["guide", "pages", "transcript", "quiz", "ask"]) $(`tab-${tab}`).replaceChildren(notice(msg));
     return;
   }
   renderTranscript(analysis.segments);
+  renderPages(analysis.pages || []);
   setupAsk();
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);
     renderQuiz(analysis.guide.quiz);
   } else {
-    const msg = "요점 정리를 아직 만들지 못했습니다. 대본과 질문하기는 사용할 수 있습니다.";
+    const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지·대본·질문하기는 사용할 수 있습니다.";
     $("tab-guide").replaceChildren(notice(msg));
     $("tab-quiz").replaceChildren(notice(msg));
   }
@@ -74,6 +76,27 @@ function renderGuide(guide, duration) {
     bar.append(segment);
     return { start: c.start, title: c.title, card, bar: segment };
   });
+}
+
+// ---- 페이지: 교재의 어느 화면을 설명하는지 그림으로 찾아 이동 ----
+function renderPages(list) {
+  const box = $("tab-pages");
+  if (!list.length) {
+    box.replaceChildren(notice("페이지 정보가 없습니다. 선생님이 분석을 다시 실행하면 생깁니다."));
+    return;
+  }
+  const grid = el("ul", { class: "pages" });
+  pages = list.map((p, n) => {
+    const item = el("li", {}, el("button", {
+      class: "page",
+      "aria-label": `${n + 1}번째 화면, ${fmt(p.start)}로 이동`,
+      onclick: () => seek(p.start),
+    }, el("img", { src: `/api/videos/${id}/pages/${n}.jpg`, alt: "" }),
+       el("span", { class: "time" }, fmt(p.start))));
+    grid.append(item);
+    return { start: p.start, item };
+  });
+  box.replaceChildren(notice("지금 보고 있는 교재 화면을 찾아 누르면 그 설명으로 이동합니다."), grid);
 }
 
 // ---- 대본 + 검색 ----
@@ -262,8 +285,14 @@ function currentItem(items, t) {
   return found;
 }
 
-let activeChapter = null, activeLine = null;
+let activeChapter = null, activeLine = null, activePage = null;
 function showCurrent(t) {
+  const page = currentItem(pages, t);
+  if (page !== activePage) {
+    activePage?.item.classList.remove("active");
+    page?.item.classList.add("active");
+    activePage = page;
+  }
   const chapter = currentItem(chapters, t);
   if (chapter !== activeChapter) {
     activeChapter?.card.classList.remove("active");

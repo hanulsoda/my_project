@@ -39,10 +39,20 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
                 return video
         raise HTTPException(404, "영상을 찾을 수 없습니다")
 
+    status_cache = {}  # 영상 id → (파일 수정 시각·크기, 요점 정리 유무). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
+
+    def analysis_status(video_id):
+        path = Path(data_dir) / f"{video_id}.json"
+        if not path.exists():
+            return {"analyzed": False, "guide": False}
+        stamp = (path.stat().st_mtime_ns, path.stat().st_size)
+        if status_cache.get(video_id, (None,))[0] != stamp:
+            status_cache[video_id] = (stamp, bool(load_analysis(data_dir, video_id).get("guide")))
+        return {"analyzed": True, "guide": status_cache[video_id][1]}
+
     @app.get("/api/videos")
     def list_videos():
-        return [{"id": v["id"], "title": v["title"],
-                 "analyzed": (Path(data_dir) / f"{v['id']}.json").exists()}
+        return [{"id": v["id"], "title": v["title"], **analysis_status(v["id"])}
                 for v in find_videos(video_dir)]
 
     @app.get("/api/videos/{video_id}")
@@ -50,6 +60,14 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
         video = get_video(video_id)
         return {"id": video_id, "title": video["title"],
                 "analysis": load_analysis(data_dir, video_id)}
+
+    @app.get("/api/videos/{video_id}/pages/{n}.jpg")
+    def page_thumbnail(video_id: str, n: int):
+        get_video(video_id)
+        path = Path(data_dir) / video_id / f"{n}.jpg"
+        if not path.exists():
+            raise HTTPException(404, "페이지 그림이 없습니다")
+        return FileResponse(path, media_type="image/jpeg")
 
     @app.get("/media/{video_id}")
     def media(video_id: str):

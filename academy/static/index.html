@@ -23,7 +23,8 @@
           el("a", { href: `watch.html?id=${v.id}` },
             el("span", { class: "video-title" }, v.title),
             el("span", { class: "meta" },
-              el("span", { class: v.analyzed ? "badge ready" : "badge" }, v.analyzed ? "요점 정리" : "분석 전"),
+              el("span", { class: v.analyzed ? "badge ready" : "badge" },
+                v.guide ? "요점 정리" : v.analyzed ? "대본·페이지" : "분석 전"),
               watched))));
       }
     });

@@ -27,15 +27,39 @@ def setup(tmp_path):
     return client, ids, calls
 
 
-def test_lists_videos_with_analysis_status(setup):
-    client, ids, _ = setup
+def test_lists_videos_with_analysis_and_guide_status(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강.mp4", "2강.mp4", "3강.mp4"]:
+        (video_dir / name).write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": SEGMENTS, "guide": GUIDE})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": None})
+    client = TestClient(create_app(video_dir, data_dir, None))
 
-    res = client.get("/api/videos")
-
-    assert res.json() == [
-        {"id": ids["1강"], "title": "1강", "analyzed": True},
-        {"id": ids["2강"], "title": "2강", "analyzed": False},
+    assert client.get("/api/videos").json() == [
+        {"id": ids["1강"], "title": "1강", "analyzed": True, "guide": True},
+        {"id": ids["2강"], "title": "2강", "analyzed": True, "guide": False},
+        {"id": ids["3강"], "title": "3강", "analyzed": False, "guide": False},
     ]
+
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": GUIDE})
+    assert client.get("/api/videos").json()[1]["guide"] is True
+
+
+def test_serves_page_thumbnails(setup, tmp_path):
+    client, ids, _ = setup
+    thumbs = tmp_path / "data" / ids["1강"]
+    thumbs.mkdir()
+    (thumbs / "0.jpg").write_bytes(b"\xff\xd8jpeg")
+
+    res = client.get(f"/api/videos/{ids['1강']}/pages/0.jpg")
+
+    assert res.content == b"\xff\xd8jpeg"
+    assert res.headers["content-type"] == "image/jpeg"
+    assert client.get(f"/api/videos/{ids['1강']}/pages/1.jpg").status_code == 404
+    assert client.get(f"/api/videos/{ids['1강']}/pages/..%2Fx.jpg").status_code in (404, 422)
+    assert client.get("/api/videos/nope/pages/0.jpg").status_code == 404
 
 
 def test_video_detail(setup):

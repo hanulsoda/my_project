@@ -11,7 +11,7 @@ GUIDE = {"summary": "요약", "chapters": [], "quiz": []}
 
 class Recorder:
     def __init__(self, fail_on=None, segments=SEGMENTS, guide=GUIDE):
-        self.transcribed, self.guided = [], []
+        self.transcribed, self.guided, self.page_dirs = [], [], []
         self.fail_on = fail_on
         self.segments = segments
         self.guide = guide
@@ -25,6 +25,10 @@ class Recorder:
     def make_guide(self, title, segments):
         self.guided.append(title)
         return self.guide
+
+    def detect_pages(self, path, out_dir):
+        self.page_dirs.append(out_dir)
+        return [{"start": 0.0}]
 
 
 def make_videos(root, *names):
@@ -139,3 +143,32 @@ def test_guide_corrections_fix_the_saved_transcript(tmp_path):
 
     segments = load_analysis(tmp_path / "data", ids["1강"])["segments"]
     assert segments[0]["text"] == "요령의 격률과 관용의 격률"
+
+
+def test_finds_pages_and_adds_them_to_already_analyzed_videos(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4")
+    data_dir = tmp_path / "data"
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": SEGMENTS, "guide": GUIDE})
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide, detect_pages=rec.detect_pages)
+
+    assert rec.page_dirs == [data_dir / ids["1강"], data_dir / ids["2강"]]
+    assert rec.transcribed == ["2강.mp4"]
+    assert rec.guided == ["2강"]
+    assert load_analysis(data_dir, ids["1강"])["pages"] == [{"start": 0.0}]
+
+
+def test_without_guide_skips_claude_and_the_guide_can_be_added_later(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    first, later = Recorder(), Recorder()
+
+    failures = analyze_all(tmp_path / "videos", tmp_path / "data", first.transcribe, None,
+                           detect_pages=first.detect_pages)
+    analyze_all(tmp_path / "videos", tmp_path / "data", later.transcribe, later.make_guide,
+                detect_pages=later.detect_pages)
+
+    assert failures == 0
+    assert first.transcribed == ["1강.mp4"]
+    assert (later.transcribed, later.page_dirs, later.guided) == ([], [], ["1강"])
+    assert load_analysis(tmp_path / "data", ids["1강"])["guide"] == GUIDE
