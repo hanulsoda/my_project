@@ -19,11 +19,11 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False) -> int
     failures = 0
     for n, video in enumerate(videos, 1):
         print(f"[{n}/{len(videos)}] {video['title']}", flush=True)
-        data = None if force else load_analysis(data_dir, video["id"])
-        if data and data.get("guide"):
-            print("  이미 분석됨, 건너뜀")
-            continue
         try:
+            data = None if force else load_analysis(data_dir, video["id"])
+            if data and data.get("guide"):
+                print("  이미 분석됨, 건너뜀")
+                continue
             if not data:
                 print("  받아쓰는 중...", flush=True)
                 segments, duration = transcribe(video["path"])

@@ -167,12 +167,15 @@ function setupAsk() {
   question.onkeydown = (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
   };
+  let busy = false;  // 답을 기다리는 동안 Enter로 같은 질문이 또 전송되지 않게 막습니다.
   form.onsubmit = async (e) => {
     e.preventDefault();
     const text = question.value.trim();
-    if (!text) return;
+    if (!text || busy) return;
+    busy = true;
     const button = form.querySelector("button");
     button.disabled = true;
+    question.value = "";
     say("user", text);
     const reply = say("assistant", "답변을 만드는 중…");
     try {
@@ -189,11 +192,12 @@ function setupAsk() {
       if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : `서버 오류 (${res.status})`);
       reply.replaceChildren(...linkify(body.answer));
       history.push({ role: "user", content: text }, { role: "assistant", content: body.answer });
-      question.value = "";
     } catch (err) {
       reply.textContent = `답변을 받지 못했습니다. ${err.message}`;
       reply.classList.add("error");
+      if (!question.value) question.value = text;  // 다시 보낼 수 있게 질문을 되돌려 놓습니다.
     } finally {
+      busy = false;
       button.disabled = false;
     }
   };

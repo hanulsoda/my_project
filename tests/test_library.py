@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from academy.library import find_videos, load_analysis, save_analysis
 
 
@@ -41,3 +45,29 @@ def test_save_and_load_analysis(tmp_path):
 
     assert load_analysis(tmp_path / "data", "abc") == data
     assert load_analysis(tmp_path / "data", "없는영상") is None
+
+
+def test_interrupted_save_keeps_previous_analysis(tmp_path, monkeypatch):
+    save_analysis(tmp_path, "abc", {"title": "원래 내용"})
+    real_write_text = Path.write_text
+
+    def write_half_then_fail(self, text, *args, **kwargs):  # 저장 도중 네트워크가 끊긴 상황
+        real_write_text(self, text[: len(text) // 2], *args, **kwargs)
+        raise OSError("연결 끊김")
+
+    monkeypatch.setattr(Path, "write_text", write_half_then_fail)
+    with pytest.raises(OSError):
+        save_analysis(tmp_path, "abc", {"title": "새 내용", "segments": [{"start": 0, "end": 1, "text": "안녕"}]})
+    monkeypatch.undo()
+
+    assert load_analysis(tmp_path, "abc") == {"title": "원래 내용"}
+
+
+def test_skips_nas_trash_thumbnails_and_hidden_files(tmp_path):
+    touch(tmp_path / "수학" / "1강.mp4")
+    touch(tmp_path / "#recycle" / "수학" / "지난학기 3강.mp4")  # 시놀로지 휴지통
+    touch(tmp_path / "수학" / "@eaDir" / "1강.mp4" / "SYNOPHOTO_FILM_M.mp4")  # 시놀로지 썸네일
+    touch(tmp_path / "수학" / "._1강.mp4")  # 맥이 만드는 숨김 파일
+    touch(tmp_path / ".숨김" / "2강.mp4")
+
+    assert [v["title"] for v in find_videos(tmp_path)] == ["수학/1강"]

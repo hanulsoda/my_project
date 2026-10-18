@@ -108,3 +108,16 @@ def test_cli_tells_user_when_no_videos_found(tmp_path, make_dir):
 
     assert result.returncode == 1
     assert str(video_dir.resolve()) in result.stderr
+
+
+def test_broken_analysis_file_fails_only_that_video(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / f"{ids['1강']}.json").write_text('{"title": "1강",}', encoding="utf-8")  # 손으로 고치다 생긴 오타
+    rec = Recorder()
+
+    failures = analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)
+
+    assert failures == 1
+    assert load_analysis(data_dir, ids["2강"])["guide"] == GUIDE

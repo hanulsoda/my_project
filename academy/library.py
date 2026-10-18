@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -17,8 +18,12 @@ def _lecture_order(path: Path):
 def find_videos(video_dir: Path) -> list[dict]:
     videos = []
     for path in sorted(Path(video_dir).rglob("*"), key=_lecture_order):
+        rel_path = path.relative_to(video_dir)
+        # 시놀로지 휴지통(#recycle)·썸네일(@eaDir)과 숨김 파일(.으로 시작)은 강의가 아닙니다.
+        if any(part[0] in ".@#" for part in rel_path.parts):
+            continue
         if path.is_file() and path.suffix.lower() in VIDEO_EXTS:
-            rel = path.relative_to(video_dir).as_posix()
+            rel = rel_path.as_posix()
             videos.append({
                 "id": hashlib.sha1(rel.encode()).hexdigest()[:12],
                 "title": rel.rsplit(".", 1)[0],
@@ -37,4 +42,7 @@ def load_analysis(data_dir: Path, video_id: str) -> dict | None:
 def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     path = Path(data_dir) / f"{video_id}.json"
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp = path.with_suffix(".tmp")
+    # 임시 파일에 다 쓴 뒤 바꿔치기해서, 저장 중에 끊겨도 기존 파일은 멀쩡하게 남깁니다.
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)

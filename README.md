@@ -68,7 +68,7 @@ export LD_LIBRARY_PATH=$(python -c 'import os, nvidia.cublas, nvidia.cudnn; prin
 for /f "usebackq delims=" %p in (`python -c "import os, nvidia.cublas, nvidia.cudnn; print(os.path.join(list(nvidia.cublas.__path__)[0], 'bin') + ';' + os.path.join(list(nvidia.cudnn.__path__)[0], 'bin'))"`) do set "PATH=%p;%PATH%"
 ```
 
-GPU를 쓸 수 없으면 자동으로 CPU를 씁니다.
+NVIDIA 그래픽카드가 있는데 위 명령을 빠뜨리면 `Library libcublas.so.12 is not found or cannot be loaded`(윈도우는 `cublas64_12.dll`) 같은 오류로 모든 영상이 실패합니다. 그때는 위 명령을 실행한 뒤 다시 분석하세요. NVIDIA 그래픽카드가 없는 컴퓨터는 자동으로 CPU를 씁니다.
 
 ## 사용 방법
 
