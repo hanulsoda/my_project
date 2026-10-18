@@ -60,17 +60,22 @@ def whisper_transcriber():
 
 
 def main():
-    import anthropic
-
-    from academy.ai import make_study_guide
-
     parser = argparse.ArgumentParser(description="강의 영상 일괄 분석")
     parser.add_argument("--force", action="store_true", help="이미 분석된 영상도 다시 분석")
     args = parser.parse_args()
 
+    video_dir = Path(os.environ.get("VIDEO_DIR", "videos"))
+    if not find_videos(video_dir):
+        sys.exit(f"영상을 찾지 못했습니다: {video_dir.resolve()}\n"
+                 "이 폴더에 mp4, webm, m4v, mov 영상을 넣어 주세요.")
+
+    import anthropic
+
+    from academy.ai import make_study_guide
+
     client = anthropic.Anthropic()
     failures = analyze_all(
-        Path(os.environ.get("VIDEO_DIR", "videos")),
+        video_dir,
         Path(os.environ.get("DATA_DIR", "data")),
         whisper_transcriber(),
         lambda title, segments: make_study_guide(client, title, segments),

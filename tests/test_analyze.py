@@ -1,5 +1,14 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
 from academy.analyze import analyze_all
 from academy.library import find_videos, load_analysis, save_analysis
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 SEGMENTS = [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]
 GUIDE = {"summary": "요약", "chapters": [], "quiz": []}
@@ -85,3 +94,17 @@ def test_silent_video_skips_claude(tmp_path):
 
     assert rec.guided == []
     assert load_analysis(tmp_path / "data", ids["무음"])["guide"]["chapters"] == []
+
+
+@pytest.mark.parametrize("make_dir", [True, False], ids=["empty-folder", "missing-folder"])
+def test_cli_tells_user_when_no_videos_found(tmp_path, make_dir):
+    video_dir = tmp_path / "videos"
+    if make_dir:
+        video_dir.mkdir()
+    env = {**os.environ, "VIDEO_DIR": str(video_dir), "DATA_DIR": str(tmp_path / "data")}
+
+    result = subprocess.run([sys.executable, "-m", "academy.analyze"], cwd=PROJECT_ROOT,
+                            env=env, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert str(video_dir.resolve()) in result.stderr

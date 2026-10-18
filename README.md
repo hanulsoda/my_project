@@ -32,11 +32,43 @@ data/ (영상마다 분석 결과 JSON 1개)
 
 Python 3.10 이상이 필요합니다.
 
+리눅스·맥:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+윈도우(명령 프롬프트). 관리자 권한이 아닌 일반 창에서, 내 사용자 폴더처럼 시스템 폴더가 아닌 곳에서 실행하세요.
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### NVIDIA GPU 쓰기 (선택)
+
+NVIDIA 그래픽카드가 있으면 받아쓰기가 훨씬 빨라집니다. `nvidia-smi`를 실행해 오른쪽 위 `CUDA Version`이 12 이상이면 쓸 수 있습니다. 아래를 한 번 설치하고, **분석을 실행하는 창에서 매번** 라이브러리 위치를 알려 줍니다.
+
+```bash
+pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*"
+```
+
+리눅스:
+
+```bash
+export LD_LIBRARY_PATH=$(python -c 'import os, nvidia.cublas, nvidia.cudnn; print(os.path.join(list(nvidia.cublas.__path__)[0], "lib") + ":" + os.path.join(list(nvidia.cudnn.__path__)[0], "lib"))')
+```
+
+윈도우(명령 프롬프트):
+
+```bat
+for /f "usebackq delims=" %p in (`python -c "import os, nvidia.cublas, nvidia.cudnn; print(os.path.join(list(nvidia.cublas.__path__)[0], 'bin') + ';' + os.path.join(list(nvidia.cudnn.__path__)[0], 'bin'))"`) do set "PATH=%p;%PATH%"
+```
+
+GPU를 쓸 수 없으면 자동으로 CPU를 씁니다.
 
 ## 사용 방법
 
@@ -58,12 +90,15 @@ ffmpeg -i 강의.avi -c:v libx264 -c:a aac 강의.mp4
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+윈도우(명령 프롬프트)에서는 `set ANTHROPIC_API_KEY=sk-ant-...` 입니다. 두 방법 모두 그 창에서만 유지되니, 창을 새로 열면 다시 설정합니다.
+
 ### 3. 영상 분석
 
 ```bash
 python -m academy.analyze
 ```
 
+- 영상을 하나도 못 찾으면 찾아본 폴더 경로를 알려 주고 멈춥니다. 다른 폴더를 쓰려면 `VIDEO_DIR`을 설정하세요(아래 "설정" 참고).
 - 처음 실행할 때 Whisper 음성 인식 모델(약 1.6GB)을 내려받습니다.
 - **이미 분석된 영상은 건너뜁니다.** 새 영상을 올린 뒤 다시 실행하면 새 영상만 분석합니다.
 - 중간에 실패한 영상이 있어도 나머지는 계속 진행합니다. 다시 실행하면 실패한 영상만 이어서 분석하고, 받아쓰기까지 끝난 영상은 받아쓰기를 다시 하지 않습니다.
@@ -73,7 +108,7 @@ python -m academy.analyze
 ### 4. 서버 실행
 
 ```bash
-uvicorn academy.server:app --host 0.0.0.0 --port 8000
+python -m uvicorn academy.server:app --host 0.0.0.0 --port 8000
 ```
 
 학생은 `http://서버주소:8000` 으로 접속합니다. 분석하는 동안에도 서버를 켜 둘 수 있고, 분석이 끝난 영상부터 요점 정리가 나타납니다.
