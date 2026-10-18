@@ -6,6 +6,8 @@
 import logging
 import os
 from pathlib import Path
+from threading import Lock, Thread
+from time import monotonic
 from typing import Literal
 
 import anthropic
@@ -17,6 +19,9 @@ from pydantic import BaseModel, Field
 from academy.library import find_videos, load_analysis
 
 STATIC_DIR = Path(__file__).parent / "static"
+# NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
+REFRESH_SECONDS = 300  # 이보다 오래된 목록은 뒤에서 다시 훑습니다
+MISS_SECONDS = 30  # 모르는 id가 와도 이 안에 훑었으면 다시 훑지 않습니다
 
 
 class Turn(BaseModel):
@@ -33,11 +38,30 @@ class AskRequest(BaseModel):
 def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
     app = FastAPI(title="학원 학습 플레이어")
 
+    library = {"at": None, "videos": [], "by_id": {}}
+    scan_lock = Lock()
+
+    def scan(max_age):
+        with scan_lock:  # 한 번에 하나만 훑고, 기다리는 사이 다른 요청이 훑었으면 그 결과를 씁니다.
+            if library["at"] is None or monotonic() - library["at"] > max_age:
+                videos = find_videos(video_dir)
+                library.update(at=monotonic(), videos=videos, by_id={v["id"]: v for v in videos})
+
+    def current_library():
+        if library["at"] is None:
+            scan(REFRESH_SECONDS)
+        elif monotonic() - library["at"] > REFRESH_SECONDS and not scan_lock.locked():
+            Thread(target=scan, args=(REFRESH_SECONDS,), daemon=True).start()  # 그동안은 이전 목록으로 답합니다
+        return library
+
     def get_video(video_id):
-        for video in find_videos(video_dir):
-            if video["id"] == video_id:
-                return video
-        raise HTTPException(404, "영상을 찾을 수 없습니다")
+        video = current_library()["by_id"].get(video_id)
+        if video is None:  # 새로 올라온 영상일 수 있습니다
+            scan(MISS_SECONDS)
+            video = library["by_id"].get(video_id)
+        if video is None:
+            raise HTTPException(404, "영상을 찾을 수 없습니다")
+        return video
 
     status_cache = {}  # 영상 id → (파일 수정 시각·크기, 요점 정리 유무). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
 
@@ -53,7 +77,7 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
     @app.get("/api/videos")
     def list_videos():
         return [{"id": v["id"], "title": v["title"], **analysis_status(v["id"])}
-                for v in find_videos(video_dir)]
+                for v in current_library()["videos"]]
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
