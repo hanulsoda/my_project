@@ -32,11 +32,54 @@ data/ (영상마다 분석 결과 JSON 1개)
 
 Python 3.10 이상이 필요합니다.
 
+리눅스·맥:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+윈도우 (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+`Activate.ps1`이 "스크립트를 실행할 수 없습니다"로 막히면 명령 프롬프트(cmd)에서 `.venv\Scripts\activate`로 켜도 됩니다. 새 터미널을 열 때마다 venv를 다시 켜야 합니다.
+
+### NVIDIA GPU 쓰기 (선택)
+
+GPU로 받아쓰면 훨씬 빠릅니다(RTX 3060 기준 1시간 강의에 약 3분). GPU가 있으면 자동으로 쓰지만, GPU용 라이브러리(cuBLAS·cuDNN)는 따로 설치해야 합니다. 이것 없이 분석하면 `libcublas.so.12`(윈도우는 `cublas64_12.dll`) `is not found` 오류로 받아쓰기가 실패합니다.
+
+```bash
+pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*"
+```
+
+그리고 **분석을 실행하는 터미널에서 매번** 라이브러리 위치를 알려 줍니다.
+
+리눅스:
+
+```bash
+export LD_LIBRARY_PATH=$(python -c 'import nvidia.cublas.lib as a, nvidia.cudnn.lib as b; print(a.__path__[0] + ":" + b.__path__[0])')
+```
+
+윈도우 (PowerShell):
+
+```powershell
+$env:PATH = (python -c "import os, nvidia.cublas, nvidia.cudnn; print(';'.join(os.path.join(m.__path__[0], 'bin') for m in (nvidia.cublas, nvidia.cudnn)))") + ";" + $env:PATH
+```
+
+GPU가 여러 개면 영상을 나눠서 동시에 받아쓸 수 있습니다. 리눅스에서는 터미널 두 개에서 각각 실행합니다.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m academy.analyze --part 1/2
+CUDA_VISIBLE_DEVICES=1 python -m academy.analyze --part 2/2
+```
+
+GPU를 다른 프로그램(예: ollama)과 같이 쓰면 메모리가 모자라 실패할 수 있습니다. 받아쓰기에는 GPU 메모리가 약 1.5GB 필요합니다.
 
 ## 사용 방법
 
@@ -52,11 +95,15 @@ ffmpeg -i 강의.avi -c:v libx264 -c:a aac 강의.mp4
 
 ### 2. Claude API 키 설정
 
-[Claude Console](https://platform.claude.com/)에서 API 키를 만든 뒤 설정합니다.
+[Claude Console](https://platform.claude.com/)에서 API 키를 만든 뒤 설정합니다. 키는 비밀번호처럼 다루세요. 채팅이나 문서에 붙여 넣지 말고, 이 프로그램 전용 키를 만들어 Console에서 사용 한도를 걸어 두면 안전합니다.
+
+리눅스·맥: 아래 명령을 실행하고 키를 붙여 넣습니다. 입력한 키는 화면과 명령 기록에 남지 않고, 지금 터미널에서만 유지됩니다.
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+read -rsp "API 키: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
 ```
+
+윈도우: 시작 메뉴에서 "계정의 환경 변수 편집"을 열고 [새로 만들기]를 누릅니다. 변수 이름은 `ANTHROPIC_API_KEY`, 값에는 키를 붙여 넣습니다. 그다음 터미널을 새로 열면 적용됩니다.
 
 ### 3. 영상 분석
 
@@ -68,7 +115,8 @@ python -m academy.analyze
 - **이미 분석된 영상은 건너뜁니다.** 새 영상을 올린 뒤 다시 실행하면 새 영상만 분석합니다.
 - 중간에 실패한 영상이 있어도 나머지는 계속 진행합니다. 다시 실행하면 실패한 영상만 이어서 분석하고, 받아쓰기까지 끝난 영상은 받아쓰기를 다시 하지 않습니다.
 - 모든 영상을 처음부터 다시 분석하려면 `python -m academy.analyze --force`.
-- 받아쓰기는 서버 성능에 따라 오래 걸립니다. CPU만 있으면 영상 길이만큼 이상 걸릴 수 있고, NVIDIA GPU가 있으면 자동으로 사용해서 훨씬 빠릅니다.
+- 받아쓰기는 서버 성능에 따라 오래 걸립니다. CPU만 있으면 영상 길이만큼 이상 걸릴 수 있고, NVIDIA GPU가 있으면 훨씬 빠릅니다(위의 "NVIDIA GPU 쓰기" 참고).
+- 영상 폴더가 없거나 비어 있으면 그 사실을 알려 주고 끝납니다. `VIDEO_DIR` 설정을 확인하세요.
 
 ### 4. 서버 실행
 
@@ -98,6 +146,7 @@ Claude Opus 5.5 요금(입력 100만 토큰당 $4, 출력 $20)으로 계산한 �
 
 ## 알아 둘 점
 
+- **받아쓰기 오타는 대본에도 자동으로 고쳐집니다.** 받아쓰기는 소리 나는 대로 적어서 "격률"을 "경률"로 쓰는 식으로 틀리곤 합니다. 요점 정리를 만들 때 Claude가 이런 오타 목록을 함께 찾아 대본에 반영하므로 대본 검색과 질문하기에도 바른 용어가 쓰입니다. 바꾼 목록은 `data/` JSON의 `guide.corrections`에 남습니다.
 - **AI 요점 정리와 퀴즈는 틀릴 수 있습니다.** 받아쓰기에 잘못 들린 단어가 있거나 AI가 잘못 요약할 수 있으니 선생님이 한 번 검토해 주세요. `data/` 폴더의 JSON 파일을 직접 고칠 수 있습니다.
 - **메모·북마크·이어보기는 학생 각자의 브라우저에 저장됩니다.** 다른 기기나 다른 브라우저에서는 보이지 않습니다.
 - **로그인 기능이 없습니다.** 주소를 아는 사람은 누구나 영상을 보고 질문할 수 있고, 질문할 때마다 API 비용이 듭니다. 학원 내부망에서만 쓰거나, 외부에 공개하려면 로그인을 먼저 붙여야 합니다.

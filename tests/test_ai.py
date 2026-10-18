@@ -20,6 +20,11 @@ GUIDE = {
         {"question": "보기 범위를 벗어난 정답", "choices": ["가", "나"], "answer": 5,
          "explanation": "", "time": "00:00"},
     ],
+    "corrections": [
+        {"wrong": "근의 공시", "right": "근의 공식"},
+        {"wrong": "공", "right": "곡"},
+        {"wrong": "같음", "right": "같음"},
+    ],
 }
 
 
@@ -48,6 +53,12 @@ def test_study_guide_converts_times_sorts_chapters_and_drops_broken_quiz():
     assert guide["chapters"][0]["title"] == "도입"
     assert len(guide["quiz"]) == 1
     assert guide["quiz"][0]["time"] == 75
+
+
+def test_study_guide_keeps_only_real_multi_letter_corrections():
+    guide = make_study_guide(FakeClient(GUIDE), "수학/1강", SEGMENTS)
+
+    assert guide["corrections"] == [{"wrong": "근의 공시", "right": "근의 공식"}]
 
 
 def test_study_guide_request_sends_transcript_and_json_schema():

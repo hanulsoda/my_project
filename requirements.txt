@@ -2,6 +2,8 @@ anthropic>=1.15
 fastapi>=0.143
 uvicorn>=0.54
 faster-whisper>=1.2
+# shortcut: faster-whisper 1.2.1이 PyAV 19에서 깨짐(metadata_errors 인자), faster-whisper가 고치면 제거
+av<19
 # 테스트용
 pytest>=9
 httpx>=0.28
