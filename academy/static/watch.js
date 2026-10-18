@@ -2,6 +2,8 @@ const id = new URLSearchParams(location.search).get("id");
 const $ = (elementId) => document.getElementById(elementId);
 const video = $("video");
 video.src = `/media/${id}`;
+// 영상을 열어 둔 채 12시간이 지나면 재생이 401로 막히므로, 그때도 로그인 안내로 바꿉니다.
+video.addEventListener("error", () => fetch(`/api/videos/${id}`).then(reloadIfLoggedOut));
 
 let chapters = [];  // { start, title, card, bar }
 let lines = [];     // { start, text, li }

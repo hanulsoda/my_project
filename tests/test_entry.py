@@ -26,7 +26,8 @@ def test_sign_is_hmac_sha256_hex():
     ("abc", hmac_hex("enter:abc"), False),
     ("1e9", hmac_hex("enter:1e9"), False),
     ("", hmac_hex("enter:"), False),
-], ids=["valid", "expired", "wrong-key", "no-sig", "no-exp", "not-number", "float-like", "empty"])
+    (str(NOW + 300), "한글", False),  # 주소창에서 바뀐 서명
+], ids=["valid", "expired", "wrong-key", "no-sig", "no-exp", "not-number", "float-like", "empty", "non-ascii-sig"])
 def test_entry_link_accepts_valid_and_rejects_bad(exp, sig, expected):
     assert entry_link_ok(SECRET, exp, sig, NOW) is expected
 
@@ -39,6 +40,6 @@ def test_pass_round_trip_and_expiry():
     assert pass_ok("x" * 32, value, NOW) is False
 
 
-@pytest.mark.parametrize("value", [None, "", "abc", "x.y", "123.", ".abc"])
+@pytest.mark.parametrize("value", [None, "", "abc", "x.y", "123.", ".abc", "9999999999.\xe9\xe9"])
 def test_pass_rejects_malformed(value):
     assert pass_ok(SECRET, value, NOW) is False

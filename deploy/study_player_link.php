@@ -1,9 +1,8 @@
 <?php
 // 학원 사이트에서 학습 플레이어로 들어가는 입장 링크를 만듭니다. 링크는 5분 동안만 유효합니다.
-// 1) 로그인한 학생만 보는 페이지에서 이 파일을 require 합니다.
-// 2) 버튼 예시: echo '<a href="' . htmlspecialchars(study_player_link('https://study.학원도메인', STUDY_PLAYER_SECRET)) . '">강의 보기</a>';
-//    (이 주석 안에 PHP 끝 표시를 쓰면 그 자리에서 PHP가 끝나 버리므로 echo 형태로 적었습니다.)
-// 3) 비밀 키(STUDY_PLAYER_SECRET)는 플레이어의 docker-compose.yml에 넣은 ENTRY_SECRET과 같은 값이어야 합니다.
+// 사용법은 docs/시놀로지-설치.md 6단계를 보세요. 보통 study_go.php에서 이렇게 씁니다:
+//   header('Location: ' . study_player_link('https://study.학원도메인', $secret));
+// $secret은 플레이어의 docker-compose.yml에 넣은 ENTRY_SECRET과 같은 값이어야 합니다.
 
 function study_player_link(string $base_url, string $secret): string
 {

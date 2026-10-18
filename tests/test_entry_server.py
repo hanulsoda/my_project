@@ -99,3 +99,11 @@ def test_entry_settings_reads_and_trims():
 def test_required_entry_refuses_missing_or_short_secret(flag, secret):
     with pytest.raises(SystemExit):
         entry_settings({"REQUIRE_ENTRY": flag, "ENTRY_SECRET": secret})
+
+
+def test_non_ascii_pass_cookie_is_blocked_not_crashing(make_client):
+    client, _ = make_client()
+
+    res = client.get("/api/videos", headers={b"cookie": b"study_pass=9999999999.\xe9\xe9"})
+
+    assert res.status_code == 401

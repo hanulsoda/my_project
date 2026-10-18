@@ -24,7 +24,8 @@ def _valid(secret: str, prefix: str, expiry: str | None, sig: str | None, now: f
             return False
     except ValueError:
         return False
-    return hmac.compare_digest(sign(secret, f"{prefix}:{expiry}"), sig)
+    # 바이트로 비교: 문자열 비교는 한글 같은 문자가 섞이면 예외를 내서 500 오류가 납니다.
+    return hmac.compare_digest(sign(secret, f"{prefix}:{expiry}").encode(), sig.encode())
 
 
 def entry_link_ok(secret: str, exp: str | None, sig: str | None, now: float) -> bool:
