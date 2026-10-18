@@ -1,6 +1,5 @@
-anthropic>=1.15
-fastapi>=0.143
-uvicorn>=0.54
+-r requirements-server.txt
+# 영상 분석용
 faster-whisper>=1.2
 av<19  # PyAV 19는 faster-whisper 1.2.1과 맞지 않아 음성을 읽지 못함 (metadata_errors 인자 제거됨)
 # 테스트용

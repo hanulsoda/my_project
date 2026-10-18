@@ -1,0 +1,4 @@
+# 학생용 웹 서버에 필요한 것만 (시놀로지 Docker 이미지에 들어감)
+anthropic>=1.15
+fastapi>=0.143
+uvicorn>=0.54

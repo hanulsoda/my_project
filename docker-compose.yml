@@ -1,0 +1,15 @@
+# 시놀로지 Container Manager > 프로젝트에서 이 파일을 엽니다. 설치 방법: docs/시놀로지-설치.md
+services:
+  study-player:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /volume1/video:/videos:ro   # 앞부분을 DS918+의 강의 영상 폴더 경로로 바꾸세요 (:ro = 읽기만)
+      - ./data:/data                # 분석 결과 폴더 (이 파일이 있는 폴더 안의 data)
+    environment:
+      REQUIRE_ENTRY: "1"            # 비밀 키 없이는 시작하지 않음 (그대로 두세요)
+      ENTRY_SECRET: ""              # 입장 링크 비밀 키 (64자 권장). 학원 사이트 PHP와 같은 값
+      SITE_URL: ""                  # 학원 사이트 주소. 막힘 화면에 링크로 나옵니다
+      ANTHROPIC_API_KEY: ""         # Claude API 키 (질문하기에 필요)
