@@ -70,6 +70,10 @@ for /f "usebackq delims=" %p in (`python -c "import os, nvidia.cublas, nvidia.cu
 
 NVIDIA 그래픽카드가 있는데 위 명령을 빠뜨리면 `Library libcublas.so.12 is not found or cannot be loaded`(윈도우는 `cublas64_12.dll`) 같은 오류로 모든 영상이 실패합니다. 그때는 위 명령을 실행한 뒤 다시 분석하세요. NVIDIA 그래픽카드가 없는 컴퓨터는 자동으로 CPU를 씁니다.
 
+### 시놀로지에 올리기
+
+학원 사이트에 로그인한 학생만 집에서도 쓸 수 있게 DS918+에 올리는 방법은 [docs/시놀로지-설치.md](docs/시놀로지-설치.md)를 보세요.
+
 ## 사용 방법
 
 ### 1. 영상 준비
