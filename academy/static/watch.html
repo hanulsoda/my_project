@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>학습 플레이어</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="watch-page">
+  <header class="top">
+    <a class="back" href="./">← 강의 목록</a>
+    <h1 id="title"></h1>
+  </header>
+  <main class="watch">
+    <section class="player">
+      <video id="video" controls preload="metadata"></video>
+      <div id="chapter-bar" class="chapter-bar" hidden></div>
+      <p id="now" class="now"></p>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <nav class="tabs">
+        <button data-tab="guide" class="active">요점 정리</button>
+        <button data-tab="transcript">대본</button>
+        <button data-tab="quiz">퀴즈</button>
+        <button data-tab="ask">질문하기</button>
+        <button data-tab="notes">메모</button>
+      </nav>
+
+      <div class="tab-body" id="tab-guide"></div>
+
+      <div class="tab-body" id="tab-transcript" hidden>
+        <div class="search-box">
+          <input id="search" type="search" placeholder="대본에서 찾기 (예: 근의 공식)">
+          <span id="search-count"></span>
+        </div>
+        <ol id="lines" class="lines"></ol>
+      </div>
+
+      <div class="tab-body" id="tab-quiz" hidden></div>
+
+      <div class="tab-body" id="tab-ask" hidden>
+        <div id="chat" class="chat">
+          <p class="notice">강의 내용에서 궁금한 점을 물어보세요. 답변 속 시간을 누르면 그 장면으로 이동합니다.</p>
+        </div>
+        <form id="ask-form" class="ask-form">
+          <textarea id="question" rows="3" maxlength="2000"
+                    placeholder="예: 근의 공식에서 판별식이 왜 중요한가요?"></textarea>
+          <div class="row">
+            <label><input type="checkbox" id="use-time" checked> 지금 보는 장면 기준으로 질문</label>
+            <button type="submit">질문하기</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="tab-body" id="tab-notes" hidden>
+        <form id="note-form" class="note-form">
+          <input id="note-text" placeholder="지금 장면에 메모 (비워 두면 북마크)">
+          <button type="submit">추가</button>
+        </form>
+        <ul id="notes" class="notes"></ul>
+      </div>
+    </section>
+  </main>
+  <script src="common.js"></script>
+  <script src="watch.js"></script>
+</body>
+</html>

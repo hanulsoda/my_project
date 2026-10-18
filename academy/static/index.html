@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>강의 목록</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top"><h1>강의 목록</h1></header>
+  <main class="list-page">
+    <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
+    <ul id="videos" class="video-list"></ul>
+  </main>
+  <script src="common.js"></script>
+  <script>
+    fetch("/api/videos").then((r) => r.json()).then((videos) => {
+      document.getElementById("empty").hidden = videos.length > 0;
+      for (const v of videos) {
+        const pos = store.get(`pos:${v.id}`);
+        const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
+        document.getElementById("videos").append(el("li", {},
+          el("a", { href: `watch.html?id=${v.id}` },
+            el("span", { class: "video-title" }, v.title),
+            el("span", { class: "meta" },
+              el("span", { class: v.analyzed ? "badge ready" : "badge" }, v.analyzed ? "요점 정리" : "분석 전"),
+              watched))));
+      }
+    });
+  </script>
+</body>
+</html>
