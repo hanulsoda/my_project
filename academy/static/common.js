@@ -17,6 +17,13 @@ function fmt(seconds) {
   return h ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
 }
 
+// 들어온 지 12시간이 지나 401을 받으면 새로 고쳐서 로그인 안내 화면을 보여 줍니다.
+function reloadIfLoggedOut(res) {
+  if (res.status !== 401) return res;
+  location.reload();
+  return new Promise(() => {});  // 새로 고치는 동안 뒤이은 처리를 멈춥니다.
+}
+
 // 시청 위치와 메모는 학생 각자의 브라우저에 저장됩니다.
 const store = {
   get(key) {

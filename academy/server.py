@@ -3,20 +3,39 @@
 실행: uvicorn academy.server:app --host 0.0.0.0 --port 8000
 """
 
+import html
 import logging
 import os
+import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
 import anthropic
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from academy.entry import MIN_SECRET_LEN, PASS_TTL, entry_link_ok, make_pass, pass_ok
 from academy.library import find_videos, load_analysis
 
 STATIC_DIR = Path(__file__).parent / "static"
+PASS_COOKIE = "study_pass"
+LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
+
+
+def _denied_page(site_url: str) -> HTMLResponse:
+    link = f'<p><a href="{html.escape(site_url)}">학원 사이트로 가기</a></p>' if site_url else ""
+    return HTMLResponse(
+        '<!doctype html><html lang="ko"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1"><title>학습 플레이어</title></head>'
+        '<body style="font-family:sans-serif;max-width:480px;margin:15vh auto;padding:0 16px;line-height:1.6">'
+        f'<h1 style="font-size:20px">{LOGIN_NOTICE}</h1>'
+        '<p>학습 플레이어는 학원 사이트의 "강의 보기"로만 들어올 수 있습니다. '
+        '들어온 지 12시간이 지났다면 다시 들어와 주세요.</p>'
+        f"{link}</body></html>",
+        status_code=401)
 
 
 class Turn(BaseModel):
@@ -30,8 +49,31 @@ class AskRequest(BaseModel):
     current_time: float | None = None
 
 
-def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
+def create_app(video_dir: Path, data_dir: Path, answer,
+               entry_secret: str = "", site_url: str = "") -> FastAPI:
     app = FastAPI(title="학원 학습 플레이어")
+
+    if entry_secret:
+        # 학원 사이트의 입장 링크로 받은 통과 쿠키가 있어야 화면·영상·질문을 쓸 수 있습니다.
+        @app.middleware("http")
+        async def require_pass(request: Request, call_next):
+            path = request.url.path
+            if path == "/enter" or pass_ok(entry_secret, request.cookies.get(PASS_COOKIE), time.time()):
+                return await call_next(request)
+            if path.startswith(("/api/", "/media/")):
+                return JSONResponse({"detail": LOGIN_NOTICE}, status_code=401)
+            return _denied_page(site_url)
+
+    @app.get("/enter")
+    def enter(request: Request, exp: str | None = None, sig: str | None = None):
+        if not entry_secret:
+            return RedirectResponse("/", 303)
+        if not entry_link_ok(entry_secret, exp, sig, time.time()):
+            return _denied_page(site_url)
+        res = RedirectResponse("/", 303)
+        res.set_cookie(PASS_COOKIE, make_pass(entry_secret, time.time()), max_age=PASS_TTL,
+                       httponly=True, samesite="lax", secure=request.url.scheme == "https")
+        return res
 
     def get_video(video_id):
         for video in find_videos(video_dir):
@@ -87,6 +129,17 @@ def _claude_answer():
     return answer
 
 
+def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
+    """(입장 링크 비밀 키, 학원 사이트 주소). 복사하다 붙은 앞뒤 공백은 지웁니다."""
+    secret = env.get("ENTRY_SECRET", "").strip()
+    # "1"뿐 아니라 "true"·"yes"도 켜진 것으로 봅니다. 꺼진 것으로 잘못 읽으면 인터넷에 그대로 열리기 때문입니다.
+    if env.get("REQUIRE_ENTRY", "").strip() not in ("", "0") and len(secret) < MIN_SECRET_LEN:
+        raise SystemExit(f"ENTRY_SECRET(입장 링크 비밀 키)가 없거나 {MIN_SECRET_LEN}자보다 짧아서 서버를 시작하지 않습니다. "
+                         "docker-compose.yml에 학원 사이트와 같은 비밀 키를 넣어 주세요.")
+    return secret, env.get("SITE_URL", "").strip()
+
+
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
-                 _claude_answer())
+                 _claude_answer(),
+                 *entry_settings(os.environ))

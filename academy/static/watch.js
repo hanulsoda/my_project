@@ -29,6 +29,7 @@ for (const tab of document.querySelectorAll(".tabs button")) {
 
 // ---- 데이터 불러오기 ----
 fetch(`/api/videos/${id}`)
+  .then(reloadIfLoggedOut)
   .then((r) => (r.ok ? r.json() : Promise.reject()))
   .then(render)
   .catch(() => { $("title").textContent = "영상을 찾을 수 없습니다"; });
@@ -179,7 +180,7 @@ function setupAsk() {
     say("user", text);
     const reply = say("assistant", "답변을 만드는 중…");
     try {
-      const res = await fetch(`/api/videos/${id}/ask`, {
+      const res = await reloadIfLoggedOut(await fetch(`/api/videos/${id}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -187,7 +188,7 @@ function setupAsk() {
           history: history.slice(-20),
           current_time: $("use-time").checked ? video.currentTime : null,
         }),
-      });
+      }));
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : `서버 오류 (${res.status})`);
       reply.replaceChildren(...linkify(body.answer));

@@ -14,7 +14,7 @@
   </main>
   <script src="common.js"></script>
   <script>
-    fetch("/api/videos").then((r) => r.json()).then((videos) => {
+    fetch("/api/videos").then(reloadIfLoggedOut).then((r) => r.json()).then((videos) => {
       document.getElementById("empty").hidden = videos.length > 0;
       for (const v of videos) {
         const pos = store.get(`pos:${v.id}`);
