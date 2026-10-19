@@ -228,6 +228,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .choice.right { border-color: var(--right); background: var(--right-soft); }
 .choice.wrong { border-color: var(--wrong); background: var(--wrong-soft); }
 .feedback { margin-top: 8px; line-height: 1.6; }
+.quiz-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* 질문하기 */
 #tab-ask { display: flex; flex-direction: column; gap: 12px; }

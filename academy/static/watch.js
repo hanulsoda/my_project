@@ -123,14 +123,26 @@ function highlight(text, q) {
 }
 
 // ---- 복습 퀴즈 ----
-function renderQuiz(quiz) {
+// 틀린 문제는 문제 글로 기억합니다. 다시 분석해 문제 순서가 바뀌어도 섞이지 않습니다.
+const wrongKey = `wrong:${id}`;
+
+function renderQuiz(quiz, only = null) {
   const box = $("tab-quiz");
   if (!quiz.length) { box.replaceChildren(notice("이 강의에는 퀴즈가 없습니다.")); return; }
+  const savedWrong = () => (store.get(wrongKey) || []).filter((text) => quiz.some((q) => q.question === text));
+  const shown = only ? quiz.filter((q) => only.includes(q.question)) : quiz;
   let answered = 0, correct = 0;
   const score = el("p", { class: "score" });
-  const updateScore = () => { score.textContent = `${quiz.length}문제 중 ${answered}문제 풀이 · ${correct}개 정답`; };
+  const updateScore = () => { score.textContent = `${shown.length}문제 중 ${answered}문제 풀이 · ${correct}개 정답`; };
   updateScore();
-  const cards = quiz.map((q, n) => {
+  const retryWrong = el("button", { class: "retry retry-wrong", onclick: () => renderQuiz(quiz, savedWrong()) });
+  const updateRetryWrong = () => {
+    const n = savedWrong().length;
+    retryWrong.hidden = n === 0;
+    retryWrong.textContent = `틀린 문제만 다시 풀기 (${n}개)`;
+  };
+  updateRetryWrong();
+  const cards = shown.map((q) => {
     const feedback = el("div", { class: "feedback", hidden: "" });
     const choices = q.choices.map((choice, i) => el("button", {
       class: "choice",
@@ -138,6 +150,11 @@ function renderQuiz(quiz) {
         answered++;
         if (i === q.answer) correct++;
         updateScore();
+        const wrong = new Set(savedWrong());
+        if (i === q.answer) wrong.delete(q.question);
+        else wrong.add(q.question);
+        store.set(wrongKey, [...wrong]);
+        updateRetryWrong();
         choices.forEach((b, k) => {
           b.disabled = true;
           if (k === q.answer) b.classList.add("right");
@@ -149,9 +166,13 @@ function renderQuiz(quiz) {
         feedback.hidden = false;
       },
     }, `${i + 1}. ${choice}`));
-    return el("article", { class: "question" }, el("h3", {}, `Q${n + 1}. ${q.question}`), ...choices, feedback);
+    const number = quiz.indexOf(q) + 1;  // 틀린 문제만 풀 때도 원래 번호
+    return el("article", { class: "question" }, el("h3", {}, `Q${number}. ${q.question}`), ...choices, feedback);
   });
-  box.replaceChildren(score, ...cards, el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, "다시 풀기"));
+  box.replaceChildren(score, ...cards,
+    el("div", { class: "quiz-actions" },
+      el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, only ? "전체 문제 풀기" : "다시 풀기"),
+      retryWrong));
 }
 
 // ---- AI에게 질문하기 ----
