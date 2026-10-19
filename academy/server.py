@@ -167,8 +167,11 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         res.headers["X-Frame-Options"] = "DENY"  # 다른 사이트가 플레이어를 자기 화면 안에 몰래 띄우지 못하게
         res.headers["Referrer-Policy"] = "same-origin"  # 강의 주소를 바깥 사이트로 흘리지 않게
         path = request.url.path
-        if path.startswith(("/media/", "/frames/")) or path.endswith(".jpg"):
+        if path.startswith(("/media/", "/frames/")):
             res.headers["Cache-Control"] = "private"  # 학생 브라우저만 보관, 중간 프록시는 보관 금지
+        elif path.startswith("/api/") and path.endswith(".jpg"):
+            # 페이지 그림은 다시 분석하면 같은 번호에 다른 그림이 들어가서, 쓸 때마다 바뀌었는지 묻게 합니다.
+            res.headers["Cache-Control"] = "private, no-cache"
         elif path.startswith("/api/"):
             res.headers["Cache-Control"] = "no-store"  # 학교·PC방 공용 컴퓨터에 대본·질문이 남지 않게
         return res
@@ -211,6 +214,18 @@ def create_app(video_dir: Path, data_dir: Path, answer,
 
     status_cache = {}  # 영상 id → (파일 수정 시각·크기, 요점 정리 유무). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
 
+    def analysis_of(video_id):
+        """영상의 분석 결과. 선생님이 손으로 고치다 깨진 파일은 없는 것으로 보고 로그에 남깁니다.
+        그래야 "영상을 찾을 수 없습니다" 대신 영상은 볼 수 있고, 어느 파일인지 로그에서 찾을 수 있습니다."""
+        try:
+            data = load_analysis(data_dir, video_id)
+            if data is None or (isinstance(data, dict) and isinstance(data.get("segments"), list)):
+                return data
+        except ValueError:
+            pass
+        logging.warning("형식이 맞지 않는 분석 파일: %s", Path(data_dir) / f"{video_id}.json")
+        return None
+
     def analysis_status(video_id):
         path = Path(data_dir) / f"{video_id}.json"
         try:
@@ -219,12 +234,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
             return {"analyzed": False, "guide": False}
         stamp = (stat.st_mtime_ns, stat.st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
-            try:
-                guide = bool(load_analysis(data_dir, video_id).get("guide"))
-            except (ValueError, AttributeError):  # 손으로 고치다 깨진 파일 하나 때문에 목록 전체가 멈추지 않게
-                logging.warning("형식이 맞지 않는 분석 파일: %s", path)
-                guide = False
-            status_cache[video_id] = (stamp, guide)
+            status_cache[video_id] = (stamp, bool((analysis_of(video_id) or {}).get("guide")))
         return {"analyzed": True, "guide": status_cache[video_id][1]}
 
     @app.get("/api/videos")
@@ -236,7 +246,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
     def video_detail(video_id: str):
         video = get_video(video_id)
         return {"id": video_id, "title": video["title"],
-                "analysis": load_analysis(data_dir, video_id)}
+                "analysis": analysis_of(video_id)}
 
     @app.get("/api/search")
     def search(q: str = Query(min_length=2, max_length=100)):
@@ -265,7 +275,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
     @app.get("/api/videos/{video_id}/subtitles.vtt")
     def subtitles(video_id: str):
         get_video(video_id)
-        data = load_analysis(data_dir, video_id)
+        data = analysis_of(video_id)
         if not data:
             raise HTTPException(404, "아직 분석되지 않은 영상입니다")
         return Response(subtitles_vtt(data["segments"]), media_type="text/vtt")
@@ -295,7 +305,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
     @app.post("/api/videos/{video_id}/ask")
     def ask(video_id: str, req: AskRequest, request: Request):
         get_video(video_id)
-        data = load_analysis(data_dir, video_id)
+        data = analysis_of(video_id)
         if not data or not data["segments"]:
             raise HTTPException(409, "아직 분석되지 않은 영상이라 질문할 수 없습니다")
         # 입장 통과(쿠키)마다 셉니다. 입장 확인을 끈 학원 내부망에서는 아무도 쿠키를 확인하지 않아 마음대로

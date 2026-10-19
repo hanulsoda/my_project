@@ -122,6 +122,20 @@ def test_one_broken_analysis_file_does_not_break_the_list(setup, tmp_path, text)
     assert [(v["title"], v["guide"]) for v in res.json()] == [("1강", False), ("2강", False)]
 
 
+@pytest.mark.parametrize("text", ['{"title": "1강",}', "[1, 2]", '{"title": "1강"}'],
+                         ids=["typo", "not-object", "no-segments"])
+def test_broken_analysis_file_still_lets_students_watch(setup, tmp_path, text, caplog):
+    client, ids, _ = setup
+    (tmp_path / "data" / f"{ids['1강']}.json").write_text(text, encoding="utf-8")  # 선생님이 손으로 고치다 깨뜨림
+
+    detail = client.get(f"/api/videos/{ids['1강']}")
+
+    assert detail.status_code == 200 and detail.json()["analysis"] is None  # "영상을 찾을 수 없습니다" 대신 영상은 재생
+    assert client.get(f"/api/videos/{ids['1강']}/subtitles.vtt").status_code == 404
+    assert client.post(f"/api/videos/{ids['1강']}/ask", json={"question": "질문"}).status_code == 409
+    assert "형식이 맞지 않는 분석 파일" in caplog.text  # 선생님은 Container Manager 로그에서 어느 파일인지 봄
+
+
 def test_serves_page_thumbnails(setup, tmp_path):
     client, ids, _ = setup
     thumbs = tmp_path / "data" / ids["1강"]
@@ -132,7 +146,8 @@ def test_serves_page_thumbnails(setup, tmp_path):
 
     assert res.content == b"\xff\xd8jpeg"
     assert res.headers["content-type"] == "image/jpeg"
-    assert res.headers["cache-control"] == "private"  # 그림은 대본과 달리 브라우저에 보관해도 됨
+    # 브라우저에 보관하되, 다시 분석하면 같은 번호에 다른 그림이 들어가므로 쓸 때마다 바뀌었는지 확인
+    assert res.headers["cache-control"] == "private, no-cache"
     assert client.get(f"/api/videos/{ids['1강']}/pages/1.jpg").status_code == 404
     assert client.get(f"/api/videos/{ids['1강']}/pages/..%2Fx.jpg").status_code in (404, 422)
     assert client.get("/api/videos/nope/pages/0.jpg").status_code == 404

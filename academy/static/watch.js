@@ -25,9 +25,14 @@ function notice(text) {
 }
 
 // ---- 탭 ----
+// 화면 낭독기도 지금 열린 탭을 알 수 있게 aria-pressed로 알립니다 (←/→는 10초 이동 단축키라 탭 이동에 쓰지 않음).
 for (const tab of document.querySelectorAll(".tabs button")) {
+  tab.setAttribute("aria-pressed", tab.classList.contains("active"));
   tab.onclick = () => {
-    for (const other of document.querySelectorAll(".tabs button")) other.classList.toggle("active", other === tab);
+    for (const other of document.querySelectorAll(".tabs button")) {
+      other.classList.toggle("active", other === tab);
+      other.setAttribute("aria-pressed", other === tab);
+    }
     for (const body of document.querySelectorAll(".tab-body")) body.hidden = body.id !== `tab-${tab.dataset.tab}`;
   };
 }
@@ -366,7 +371,9 @@ function showCurrent(t) {
   const page = currentItem(pages, t);
   if (page !== activePage) {
     activePage?.item.classList.remove("active");
+    activePage?.item.removeAttribute("aria-current");
     page?.item.classList.add("active");
+    page?.item.setAttribute("aria-current", "true");
     activePage = page;
   }
   const chapter = currentItem(chapters, t);

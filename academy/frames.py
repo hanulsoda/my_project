@@ -41,9 +41,9 @@ def _frame_at(container, stream, t: int):
     return None
 
 
-def _jpeg(frame) -> bytes:
+def _jpeg(frame, long_side: int = LONG_SIDE) -> bytes:
     # 세로 영상도 긴 쪽을 줄입니다. 사진이 20장을 넘으면 API가 한 변 2000px 넘는 사진을 거절합니다.
-    scale = min(1, LONG_SIDE / max(frame.width, frame.height))
+    scale = min(1, long_side / max(frame.width, frame.height))
     img = frame.reformat(width=round(frame.width * scale), height=round(frame.height * scale)).to_image()
     if frame.rotation:  # 휴대폰 영상은 "돌려서 보여 줘"라는 정보만 붙어 있으므로 직접 세웁니다.
         img = img.rotate(frame.rotation, expand=True)

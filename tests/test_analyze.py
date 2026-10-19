@@ -230,6 +230,27 @@ def test_finds_pages_and_adds_them_to_already_analyzed_videos(tmp_path):
     assert load_analysis(data_dir, ids["1강"])["pages"] == [{"start": 0.0}]
 
 
+def test_page_detection_failure_does_not_block_the_guide(tmp_path, capsys):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder()
+    tries = []
+
+    def broken_pages(path, out_dir):
+        tries.append(path.name)
+        raise ValueError("페이지를 읽지 못함")  # 깨진 파일, 시각 정보가 없는 화면 등
+
+    first = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames,
+                        detect_pages=broken_pages)
+    second = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames,
+                         detect_pages=broken_pages)
+
+    data = load_analysis(tmp_path / "data", ids["1강"])
+    assert (first, second) == (0, 0)  # 페이지는 덤이라 실패로 세지 않음
+    assert data["guide"] == GUIDE and data["pages"] == []
+    assert tries == ["1강.mp4"]  # 다음 실행에서 같은 영상을 계속 다시 시도하지 않음
+    assert "페이지" in capsys.readouterr().err
+
+
 def test_without_guide_skips_claude_and_the_guide_can_be_added_later(tmp_path):
     ids = make_videos(tmp_path / "videos", "1강.mp4")
     first, later = Recorder(), Recorder()
