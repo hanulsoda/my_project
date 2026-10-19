@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 
 from academy.ai import answer_question, fmt_time, make_study_guide, parse_time, transcript_text
@@ -11,8 +13,8 @@ SEGMENTS = [
 GUIDE = {
     "summary": "이차방정식과 근의 공식을 다룹니다.",
     "chapters": [
-        {"start": "01:15", "title": "근의 공식", "points": ["공식 유도"]},
-        {"start": "00:00", "title": "도입", "points": ["이차방정식의 정의"]},
+        {"start": "01:15", "title": "근의 공식", "points": ["공식 유도"], "board": ""},
+        {"start": "00:00", "title": "도입", "points": ["이차방정식의 정의"], "board": ""},
     ],
     "quiz": [
         {"question": "근의 공식은?", "choices": ["가", "나", "다", "라"], "answer": 1,
@@ -59,8 +61,10 @@ def test_study_guide_request_sends_transcript_and_json_schema():
     assert req["model"] == "claude-opus-5-5"
     assert req["fallbacks"] == "default"
     assert req["output_config"]["format"]["type"] == "json_schema"
-    assert "[01:15] 근의 공식을 봅시다." in req["messages"][0]["content"]
-    assert "수학/1강" in req["messages"][0]["content"]
+    first_block = req["messages"][0]["content"][0]
+    assert first_block["type"] == "text"
+    assert "[01:15] 근의 공식을 봅시다." in first_block["text"]
+    assert "수학/1강" in first_block["text"]
 
 
 def test_refusal_raises():
@@ -94,3 +98,43 @@ def test_answer_question_without_current_time():
     answer_question(client, "1강", SEGMENTS, "질문", [], current_time=None)
 
     assert client.requests[0]["messages"] == [{"role": "user", "content": "질문"}]
+
+
+FRAMES = [(0, b"\xff\xd8A"), (60, b"\xff\xd8B"), (120, b"\xff\xd8C")]
+BOARD_GUIDE = {
+    "summary": "요약",
+    "chapters": [
+        {"start": "00:00", "title": "정의", "points": ["x²"], "board": "01:05"},
+        {"start": "01:00", "title": "설명", "points": ["말로 설명"], "board": ""},
+        {"start": "02:00", "title": "예제", "points": ["예제"], "board": "abc"},
+    ],
+    "quiz": [],
+}
+
+
+def test_guide_request_sends_transcript_then_frames():
+    client = FakeClient(BOARD_GUIDE)
+
+    make_study_guide(client, "수학/1강", SEGMENTS, FRAMES)
+
+    blocks = client.requests[0]["messages"][0]["content"]
+    assert blocks[0]["type"] == "text" and "[01:15] 근의 공식을 봅시다." in blocks[0]["text"]
+    pairs = [(blocks[i], blocks[i + 1]) for i in range(1, len(blocks), 2)]
+    assert [label["text"] for label, _ in pairs] == ["[00:00] 화면", "[01:00] 화면", "[02:00] 화면"]
+    assert pairs[0][1] == {"type": "image", "source": {
+        "type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(b"\xff\xd8A").decode()}}
+
+
+def test_board_maps_to_nearest_frame_or_none():
+    guide = make_study_guide(FakeClient(BOARD_GUIDE), "1강", SEGMENTS, FRAMES)
+
+    assert [c["board"] for c in guide["chapters"]] == [60, None, None]
+
+
+def test_no_frames_means_no_board():
+    client = FakeClient(BOARD_GUIDE)
+
+    guide = make_study_guide(client, "1강", SEGMENTS)
+
+    assert [c["board"] for c in guide["chapters"]] == [None, None, None]
+    assert all(b["type"] == "text" for b in client.requests[0]["messages"][0]["content"])

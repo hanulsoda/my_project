@@ -1,9 +1,13 @@
 """Claude API로 요점 정리·퀴즈를 만들고, 학생 질문에 답합니다."""
 
+import base64
 import json
 import os
+import re
+from collections.abc import Sequence
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5-5")
+BOARD_TIME = re.compile(r"\d+(:\d{1,2}){1,2}")
 
 GUIDE_PROMPT = """당신은 학원 강의를 학생용 학습 자료로 정리하는 선생님입니다.
 강의 받아쓰기 대본이 주어집니다. 각 줄 앞의 [분:초]는 그 말이 나온 시점입니다.
@@ -15,6 +19,9 @@ GUIDE_PROMPT = """당신은 학원 강의를 학생용 학습 자료로 정리�
   start는 그 설명이 시작되는 대본 줄의 시점을 "분:초" 형식 그대로 적습니다.
   points에는 학생이 복습할 때 꼭 알아야 할 핵심 내용을 2~5개, 각각 한 문장으로 적습니다.
   공식, 정의, 예제 풀이 순서처럼 시험에 나올 만한 내용을 우선합니다.
+  board에는 그 챕터의 판서가 가장 잘 보이는 화면 사진의 시점을 "분:초"로 적습니다. 판서가 보이는 사진이 없으면 빈 문자열입니다.
+- 대본 뒤에 "[분:초] 화면" 표시와 함께 강의 화면 사진이 붙어 있을 수 있습니다. 사진에 보이는 판서(칠판·태블릿에 쓴
+  수식, 도표, 정리)를 읽어 요점에 반영하고, 수식은 x² + 2x + 1 처럼 텍스트로 옮겨 적으세요.
 - quiz: 강의 내용만으로 풀 수 있는 4지선다 문제 5개. answer는 정답 보기의 번호(0부터 시작).
   explanation에는 왜 그 답인지 한두 문장으로, time에는 관련 설명이 나오는 시점("분:초")을 적습니다."""
 
@@ -28,8 +35,9 @@ GUIDE_SCHEMA = {
                 "start": {"type": "string"},
                 "title": {"type": "string"},
                 "points": {"type": "array", "items": {"type": "string"}},
+                "board": {"type": "string"},
             },
-            "required": ["start", "title", "points"],
+            "required": ["start", "title", "points", "board"],
             "additionalProperties": False,
         }},
         "quiz": {"type": "array", "items": {
@@ -94,18 +102,32 @@ def _ask_claude(client, **request) -> str:
     return "".join(b.text for b in response.content if b.type == "text")
 
 
-def make_study_guide(client, title: str, segments: list[dict]) -> dict:
+def _board_frame(text: str, frames: Sequence[tuple[int, bytes]]) -> int | None:
+    """모델이 고른 "분:초"를 보낸 장면 중 가장 가까운 장면의 초로. 형식이 틀리면 사진 없음."""
+    if not frames or not BOARD_TIME.fullmatch(text.strip()):
+        return None
+    t = parse_time(text)
+    return min((seconds for seconds, _ in frames), key=lambda seconds: abs(seconds - t))
+
+
+def make_study_guide(client, title: str, segments: list[dict],
+                     frames: Sequence[tuple[int, bytes]] = ()) -> dict:
+    content = [{"type": "text", "text": f"강의 제목: {title}\n\n<대본>\n{transcript_text(segments)}\n</대본>"}]
+    for seconds, jpeg in frames:
+        content += [{"type": "text", "text": f"[{fmt_time(seconds)}] 화면"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                 "data": base64.b64encode(jpeg).decode()}}]
     text = _ask_claude(
         client,
         max_tokens=16000,
         output_config={"effort": "high", "format": {"type": "json_schema", "schema": GUIDE_SCHEMA}},
         system=GUIDE_PROMPT,
-        messages=[{"role": "user", "content":
-                   f"강의 제목: {title}\n\n<대본>\n{transcript_text(segments)}\n</대본>"}],
+        messages=[{"role": "user", "content": content}],
     )
     guide = json.loads(text)
     for chapter in guide["chapters"]:
         chapter["start"] = parse_time(chapter["start"])
+        chapter["board"] = _board_frame(chapter["board"], frames)
     guide["chapters"].sort(key=lambda c: c["start"])
     guide["quiz"] = [q for q in guide["quiz"] if 0 <= q["answer"] < len(q["choices"])]
     for q in guide["quiz"]:
