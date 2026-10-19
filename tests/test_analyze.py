@@ -3,7 +3,7 @@ import sys
 import numpy as np
 import pytest
 
-from academy.analyze import analyze_all, main, part_arg, voice_channel
+from academy.analyze import analyze_all, main, part_arg, tidy_repeats, voice_channel
 from academy.library import find_videos, load_analysis, save_analysis
 
 SEGMENTS = [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]
@@ -185,3 +185,24 @@ def test_voice_channel_keeps_normal_stereo_as_is():
 def test_voice_channel_recovers_voice_from_phase_inverted_stereo():
     # 두 채널을 그냥 평균 내면 0이 되어 받아쓸 말소리가 사라집니다.
     assert np.allclose(voice_channel(VOICE, -VOICE), VOICE)
+
+
+def seg(start, end, text):
+    return {"start": start, "end": end, "text": text}
+
+
+def test_tidy_merges_lines_repeated_back_to_back():
+    segments = [seg(0, 1, "자 보자"), seg(1, 2, "니"), seg(2, 3, "니"), seg(3, 4, "니"), seg(4, 5, "다음")]
+
+    assert tidy_repeats(segments) == [seg(0, 1, "자 보자"), seg(1, 4, "니"), seg(4, 5, "다음")]
+
+
+def test_tidy_keeps_repeats_that_are_not_back_to_back():
+    segments = [seg(0, 1, "그치?"), seg(1, 2, "이건 원관념"), seg(2, 3, "그치?")]
+
+    assert tidy_repeats(segments) == segments
+
+
+def test_tidy_keeps_one_of_a_word_repeated_four_or_more_times_in_a_line():
+    assert tidy_repeats([seg(0, 9, "ㄱ, ㄴ, ㅇ, ㅇ, ㅇ, ㅇ, ㅇ,")]) == [seg(0, 9, "ㄱ, ㄴ, ㅇ,")]
+    assert tidy_repeats([seg(0, 9, "네 네 네 알겠어요")]) == [seg(0, 9, "네 네 네 알겠어요")]

@@ -7,6 +7,7 @@
 import argparse
 import os
 import sys
+from itertools import groupby
 from pathlib import Path
 
 import numpy as np
@@ -71,6 +72,25 @@ def voice_channel(left, right):
     return side if np.square(side).mean() > np.square(mid).mean() else mid
 
 
+def tidy_repeats(segments):
+    """Whisper가 말 없는 구간(판서 중 등)에서 같은 말을 되풀이해 지어낸 것을 정리합니다.
+
+    한 줄 안에서 같은 단어가 4번 이상 이어지면 하나만 남기고, 연달아 같은 줄은 한 줄로 합칩니다.
+    """
+    tidy = []
+    for s in segments:
+        words = []
+        for _, run in groupby(s["text"].split(), key=lambda w: w.rstrip(",.?!")):
+            run = list(run)
+            words += run[:1] if len(run) >= 4 else run
+        text = " ".join(words)
+        if tidy and tidy[-1]["text"] == text:
+            tidy[-1]["end"] = s["end"]
+        else:
+            tidy.append({**s, "text": text})
+    return tidy
+
+
 def part_arg(text):
     i, n = map(int, text.split("/"))
     if not 1 <= i <= n:
@@ -92,8 +112,8 @@ def whisper_transcriber():
         audio = voice_channel(*decode_audio(str(path), split_stereo=True))
         segments, info = model.transcribe(
             audio, language=os.environ.get("WHISPER_LANGUAGE", "ko") or None, vad_filter=True)
-        return ([{"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
-                 for s in segments], info.duration)
+        return tidy_repeats([{"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
+                             for s in segments]), info.duration
 
     return transcribe
 
