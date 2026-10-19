@@ -78,3 +78,13 @@ def test_skips_nas_trash_thumbnails_and_hidden_files(tmp_path):
     touch(tmp_path / ".숨김" / "2강.mp4")
 
     assert [v["title"] for v in find_videos(tmp_path)] == ["수학/1강"]
+
+
+def test_skips_broken_shortcuts_but_keeps_working_ones(tmp_path):
+    touch(tmp_path / "원본" / "1강.mp4")
+    (tmp_path / "강의").mkdir()
+    (tmp_path / "강의" / "1강.mp4").symlink_to(tmp_path / "원본" / "1강.mp4")  # 바로가기
+    (tmp_path / "강의" / "2강.mp4").symlink_to(tmp_path / "지운영상.mp4")  # 원본이 지워진 바로가기
+    (tmp_path / "강의" / "폴더이름.mp4").mkdir()  # 이름만 영상인 폴더
+
+    assert [v["title"] for v in find_videos(tmp_path)] == ["강의/1강", "원본/1강"]

@@ -23,7 +23,8 @@ def find_videos(video_dir: Path) -> list[dict]:
         # 폴더는 아예 들어가지 않습니다(영상마다 썸네일 폴더가 있어 다 훑으면 느림).
         dirs[:] = [d for d in dirs if d[0] not in ".@#"]
         found += [Path(folder) / name for name in files
-                  if name[0] not in ".@#" and Path(name).suffix.lower() in VIDEO_EXTS]
+                  if name[0] not in ".@#" and Path(name).suffix.lower() in VIDEO_EXTS
+                  and (Path(folder) / name).is_file()]  # 원본이 지워진 바로가기는 빼기
     videos = []
     for path in sorted(found, key=_lecture_order):
         rel = path.relative_to(video_dir).as_posix()
