@@ -9,6 +9,8 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from academy.library import VIDEO_EXTS, find_videos, load_analysis, save_analysis
 
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
@@ -60,6 +62,15 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
     return failures
 
 
+def voice_channel(left, right):
+    """두 채널을 더한 소리와 뺀 소리 중 큰 쪽을 돌려줍니다.
+
+    일부 녹화는 왼쪽·오른쪽 채널의 위상이 반대라서, 평균을 내면 목소리가 지워져 받아쓸 말이 사라집니다.
+    """
+    mid, side = (left + right) / 2, (left - right) / 2
+    return side if np.square(side).mean() > np.square(mid).mean() else mid
+
+
 def part_arg(text):
     i, n = map(int, text.split("/"))
     if not 1 <= i <= n:
@@ -69,6 +80,7 @@ def part_arg(text):
 
 def whisper_transcriber():
     from faster_whisper import WhisperModel
+    from faster_whisper.audio import decode_audio
 
     model = None
 
@@ -77,8 +89,9 @@ def whisper_transcriber():
         if model is None:  # 모델 로딩이 느리므로 받아쓸 영상이 있을 때 한 번만 불러옵니다.
             model = WhisperModel(os.environ.get("WHISPER_MODEL", "large-v3-turbo"),
                                  device="auto", compute_type="auto")
+        audio = voice_channel(*decode_audio(str(path), split_stereo=True))
         segments, info = model.transcribe(
-            str(path), language=os.environ.get("WHISPER_LANGUAGE", "ko") or None, vad_filter=True)
+            audio, language=os.environ.get("WHISPER_LANGUAGE", "ko") or None, vad_filter=True)
         return ([{"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
                  for s in segments], info.duration)
 

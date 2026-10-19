@@ -1,8 +1,9 @@
 import sys
 
+import numpy as np
 import pytest
 
-from academy.analyze import analyze_all, main, part_arg
+from academy.analyze import analyze_all, main, part_arg, voice_channel
 from academy.library import find_videos, load_analysis, save_analysis
 
 SEGMENTS = [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]
@@ -172,3 +173,15 @@ def test_without_guide_skips_claude_and_the_guide_can_be_added_later(tmp_path):
     assert first.transcribed == ["1강.mp4"]
     assert (later.transcribed, later.page_dirs, later.guided) == ([], [], ["1강"])
     assert load_analysis(tmp_path / "data", ids["1강"])["guide"] == GUIDE
+
+
+VOICE = np.sin(np.linspace(0, 300, 16000)).astype(np.float32)
+
+
+def test_voice_channel_keeps_normal_stereo_as_is():
+    assert np.allclose(voice_channel(VOICE, VOICE), VOICE)
+
+
+def test_voice_channel_recovers_voice_from_phase_inverted_stereo():
+    # 두 채널을 그냥 평균 내면 0이 되어 받아쓸 말소리가 사라집니다.
+    assert np.allclose(voice_channel(VOICE, -VOICE), VOICE)
