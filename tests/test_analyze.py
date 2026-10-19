@@ -11,12 +11,16 @@ from academy.library import find_videos, load_analysis, save_analysis
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 SEGMENTS = [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]
-GUIDE = {"summary": "요약", "chapters": [], "quiz": []}
+FRAMES = [(0, b"A"), (60, b"B")]
+GUIDE = {"summary": "요약", "quiz": [], "chapters": [
+    {"start": 0, "title": "도입", "points": [], "board": 60},
+    {"start": 30, "title": "예제", "points": [], "board": 60},
+]}
 
 
 class Recorder:
     def __init__(self, fail_on=None, segments=SEGMENTS):
-        self.transcribed, self.guided = [], []
+        self.transcribed, self.guided, self.captured, self.frames_seen = [], [], [], []
         self.fail_on = fail_on
         self.segments = segments
 
@@ -26,8 +30,13 @@ class Recorder:
             raise RuntimeError("받아쓰기 실패")
         return self.segments, 120.0
 
-    def make_guide(self, title, segments):
+    def extract_frames(self, path):
+        self.captured.append(path.name)
+        return FRAMES
+
+    def make_guide(self, title, segments, frames):
         self.guided.append(title)
+        self.frames_seen.append(frames)
         return GUIDE
 
 
@@ -42,7 +51,7 @@ def test_analyzes_new_videos_and_saves_results(tmp_path):
     ids = make_videos(tmp_path / "videos", "1강.mp4")
     rec = Recorder()
 
-    failures = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
+    failures = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames)
 
     assert failures == 0
     data = load_analysis(tmp_path / "data", ids["1강"])
@@ -59,7 +68,7 @@ def test_skips_finished_videos_and_resumes_half_done_ones(tmp_path):
     save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": None})
     rec = Recorder()
 
-    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide, rec.extract_frames)
 
     assert rec.transcribed == []
     assert rec.guided == ["2강"]
@@ -70,7 +79,7 @@ def test_force_redoes_everything(tmp_path):
     save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "segments": SEGMENTS, "guide": GUIDE})
     rec = Recorder()
 
-    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, force=True)
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames, force=True)
 
     assert rec.transcribed == ["1강.mp4"]
 
@@ -79,7 +88,7 @@ def test_one_failure_does_not_stop_the_rest(tmp_path):
     ids = make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4")
     rec = Recorder(fail_on="1강.mp4")
 
-    failures = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
+    failures = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames)
 
     assert failures == 1
     assert load_analysis(tmp_path / "data", ids["1강"]) is None
@@ -90,10 +99,25 @@ def test_silent_video_skips_claude(tmp_path):
     ids = make_videos(tmp_path / "videos", "무음.mp4")
     rec = Recorder(segments=[])
 
-    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames)
 
     assert rec.guided == []
+    assert rec.captured == []
     assert load_analysis(tmp_path / "data", ids["무음"])["guide"]["chapters"] == []
+
+
+def test_saves_only_chosen_frames_once(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames)
+
+    assert rec.captured == ["1강.mp4"]
+    assert rec.frames_seen == [FRAMES]
+    frame_dir = tmp_path / "data" / "frames" / ids["1강"]
+    assert list(frame_dir.iterdir()) == [frame_dir / "60.jpg"]
+    assert (frame_dir / "60.jpg").read_bytes() == b"B"
+    assert [c["board"] for c in load_analysis(tmp_path / "data", ids["1강"])["guide"]["chapters"]] == [60, 60]
 
 
 @pytest.mark.parametrize("make_dir", [True, False], ids=["empty-folder", "missing-folder"])
@@ -117,7 +141,7 @@ def test_broken_analysis_file_fails_only_that_video(tmp_path):
     (data_dir / f"{ids['1강']}.json").write_text('{"title": "1강",}', encoding="utf-8")  # 손으로 고치다 생긴 오타
     rec = Recorder()
 
-    failures = analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)
+    failures = analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide, rec.extract_frames)
 
     assert failures == 1
     assert load_analysis(data_dir, ids["2강"])["guide"] == GUIDE

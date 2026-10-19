@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from academy.library import find_videos, load_analysis, save_analysis
+from academy.library import find_videos, load_analysis, save_analysis, save_frame
 
 
 def touch(path):
@@ -61,6 +61,13 @@ def test_interrupted_save_keeps_previous_analysis(tmp_path, monkeypatch):
     monkeypatch.undo()
 
     assert load_analysis(tmp_path, "abc") == {"title": "원래 내용"}
+
+
+def test_save_frame_writes_jpeg_under_frames_dir(tmp_path):
+    save_frame(tmp_path, "abc", 60, b"\xff\xd8x")
+
+    assert (tmp_path / "frames" / "abc" / "60.jpg").read_bytes() == b"\xff\xd8x"
+    assert list((tmp_path / "frames" / "abc").iterdir()) == [tmp_path / "frames" / "abc" / "60.jpg"]
 
 
 def test_skips_nas_trash_thumbnails_and_hidden_files(tmp_path):
