@@ -339,7 +339,11 @@ function setRate(rate) {
 }
 
 function showRate() {
-  for (const b of $("speed").children) b.classList.toggle("active", Number(b.dataset.rate) === video.playbackRate);
+  for (const b of $("speed").children) {
+    const on = Number(b.dataset.rate) === video.playbackRate;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on);  // 화면 낭독기에도 지금 속도를 알립니다
+  }
 }
 
 // 영상 자체 메뉴에서 속도를 바꿔도 버튼 표시와 저장이 따라갑니다. 다음 강의도 같은 속도로 봅니다.
@@ -349,7 +353,9 @@ const savedRate = store.get("rate");
 setRate(typeof savedRate === "number" && savedRate >= 0.25 && savedRate <= 4 ? savedRate : 1);
 
 // 질문·메모·검색 칸에 글을 쓰는 중에는 단축키를 쓰지 않습니다.
-const typing = (e) => e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.closest("input, textarea, select");
+// Shift+스페이스(페이지 위로) 같은 조합키도 단축키로 보지 않습니다.
+const typing = (e) => e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing
+  || e.target.closest("input, textarea, select");
 // 키보드(Tab)로 버튼에 간 학생은 스페이스로 그 버튼을 누릅니다 (퀴즈 보기 고르기 등).
 const onControl = (e) => e.key === " " && e.target.closest("button, a");
 
