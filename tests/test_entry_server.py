@@ -44,6 +44,16 @@ def test_valid_link_sets_pass_and_redirects_home(make_client):
     assert client.get("/api/videos").status_code == 200  # TestClient가 받은 쿠키를 다시 보냄
 
 
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_pass_cookie_is_httponly_lax_and_secure_over_https(make_client, scheme):
+    client = TestClient(make_client()[0].app, base_url=f"{scheme}://testserver", follow_redirects=False)
+
+    cookie = client.get(f"/enter?{entry_query(int(time.time()) + 300)}").headers["set-cookie"].lower()
+
+    assert "httponly" in cookie and "samesite=lax" in cookie and "max-age=43200" in cookie
+    assert ("secure" in cookie) == (scheme == "https")
+
+
 def test_bad_link_shows_login_notice(make_client):
     client, _ = make_client(site_url="https://example.com")
 
