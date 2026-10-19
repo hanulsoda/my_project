@@ -1,7 +1,10 @@
 import io
+import os
 import shutil
 import subprocess
+import sys
 import wave
+from pathlib import Path
 
 import av
 import numpy as np
@@ -158,6 +161,21 @@ def test_unexpected_error_does_not_stop_analysis(three_scenes, monkeypatch):
     monkeypatch.setattr("academy.frames._jpeg", broken_jpeg)
 
     assert extract_frames(three_scenes) == []
+
+
+def test_preview_command_saves_photos_named_by_time(three_scenes, tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent.parent)}
+
+    result = subprocess.run([sys.executable, "-m", "academy.frames", str(three_scenes)], cwd=work,
+                            env=env, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    folder = work / "판서-미리보기" / "lecture"
+    assert sorted(p.name for p in folder.iterdir()) == ["00-30.jpg", "01-30.jpg", "02-30.jpg"]
+    assert (folder / "00-30.jpg").read_bytes().startswith(b"\xff\xd8")
+    assert "lecture.mp4: 사진 3장" in result.stdout
 
 
 def test_thin_spreads_evenly_and_keeps_ends():

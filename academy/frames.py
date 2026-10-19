@@ -1,7 +1,13 @@
-"""강의 화면을 일정 간격으로 캡처하고, 거의 같은 장면은 버립니다 (판서 분석용)."""
+"""강의 화면을 일정 간격으로 캡처하고, 거의 같은 장면은 버립니다 (판서 분석용).
 
+미리보기: python -m academy.frames 1강.mp4 [2강.mp4 ...]
+분석 때 Claude에 보낼 사진을 판서-미리보기/<영상 이름>/ 폴더에 저장합니다 (API 비용·받아쓰기 없음).
+"""
+
+import argparse
 import io
 import math
+import shutil
 import sys
 from pathlib import Path
 
@@ -74,3 +80,23 @@ def extract_frames(path: Path) -> list[tuple[int, bytes]]:
         note = f"앞부분 {len(kept)}장만 씁니다" if kept else "건너뜁니다"
         print(f"  화면 캡처 중 오류, {note}: {e}", file=sys.stderr)
     return thin(kept, limit)
+
+
+def main():
+    from academy.ai import fmt_time
+
+    parser = argparse.ArgumentParser(description="판서 사진 미리보기 (API 비용 없음)")
+    parser.add_argument("videos", nargs="+", type=Path, help="강의 영상 파일")
+    for video in parser.parse_args().videos:
+        folder = Path("판서-미리보기") / video.stem
+        shutil.rmtree(folder, ignore_errors=True)  # 다시 실행하면 지난번 미리보기와 섞이지 않게
+        folder.mkdir(parents=True)
+        frames = extract_frames(video)
+        for seconds, jpeg in frames:
+            # 윈도우 파일 이름에는 ":"를 쓸 수 없어서 01-30.jpg 처럼 저장합니다.
+            (folder / f"{fmt_time(seconds).replace(':', '-')}.jpg").write_bytes(jpeg)
+        print(f"{video.name}: 사진 {len(frames)}장 → {folder}/")
+
+
+if __name__ == "__main__":
+    main()
