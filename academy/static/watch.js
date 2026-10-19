@@ -70,6 +70,7 @@ function render({ title, analysis }) {
 function renderGuide(guide, duration) {
   const box = $("tab-guide");
   box.replaceChildren(
+    el("h2", { class: "sr-only" }, "요점 정리"),  // 화면 낭독기용 제목 (챕터 제목 h3의 윗단계)
     el("div", { class: "guide-actions" },
       el("button", { class: "print", onclick: (e) => printGuide(e.currentTarget) }, "인쇄")),
     el("p", { class: "summary" }, guide.summary));
@@ -186,7 +187,7 @@ function renderQuiz(quiz, only = null) {
       updateRetryWrong();
     },
     hasTime(q) ? el("button", { class: "link", onclick: () => seek(q.time) }, `▶ ${fmt(q.time)} 설명 다시 보기`) : ""));
-  box.replaceChildren(score, ...cards,
+  box.replaceChildren(el("h2", { class: "sr-only" }, "복습 퀴즈"), score, ...cards,
     el("div", { class: "quiz-actions" },
       el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, only ? "전체 문제 풀기" : "다시 풀기"),
       retryWrong));

@@ -2,10 +2,10 @@
   --bg: #f6f7f9;
   --surface: #ffffff;
   --text: #1d2330;
-  --muted: #667085;
+  --muted: #5e677b;  /* 회색 배경(--hover) 위 작은 글씨도 대비 4.5:1 이상 */
   --border: #e3e6eb;
   --hover: #f0f2f5;
-  --accent: #2f6fde;
+  --accent: #2a64cc;  /* 연한 파란 배경(--accent-soft) 위 작은 글씨도 대비 4.5:1 이상 */
   --on-accent: #ffffff;
   --accent-soft: #e8f0fd;
   --highlight: #fff6d6;
@@ -37,6 +37,11 @@
 }
 
 [hidden] { display: none !important; }
+/* 화면에는 안 보이고 화면 낭독기만 읽는 글 */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 body {
   margin: 0;
