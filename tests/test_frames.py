@@ -1,4 +1,6 @@
 import io
+import shutil
+import subprocess
 import wave
 
 import av
@@ -40,8 +42,72 @@ def three_scenes(tmp_path):
                       [(60, white()), (60, black_with_box(40)), (60, black_with_box(200))])
 
 
-def test_keeps_one_frame_per_distinct_scene(three_scenes):
-    assert [t for t, _ in extract_frames(three_scenes)] == [0, 60, 120]
+def test_keeps_last_frame_of_each_scene(three_scenes):
+    assert [t for t, _ in extract_frames(three_scenes)] == [30, 90, 150]
+
+
+def board(lines):
+    img = np.zeros((H, W, 3), np.uint8)
+    for i in range(lines):
+        img[20 + i * 40:40 + i * 40, 40:100] = 255  # 한 줄이 같은 장면 기준보다 작은 변화
+    return img
+
+
+def test_keeps_fullest_board_while_teacher_writes(tmp_path):
+    # 30초마다 한 줄씩 쓰고(1→2→3줄) 지웁니다. 3줄 다 쓴 칠판(90초)이 남아야 합니다.
+    video = make_video(tmp_path / "writing.mp4", [(30, board(0)), (30, board(1)), (30, board(2)),
+                                                  (30, board(3)), (60, board(0))])
+
+    assert [t for t, _ in extract_frames(video)] == [30, 90, 150]
+
+
+def test_times_are_relative_to_video_start(tmp_path):
+    # 잘라 낸 영상처럼 첫 화면의 시각이 0이 아닌 파일 (플레이어와 대본은 0초부터 셉니다)
+    path = tmp_path / "offset.mp4"
+    with av.open(str(path), "w") as out:
+        stream = out.add_stream("mpeg4", rate=1)
+        stream.width, stream.height, stream.pix_fmt = W, H, "yuv420p"
+        for i, img in enumerate([white()] * 60 + [black_with_box(40)] * 60):
+            frame = av.VideoFrame.from_ndarray(img, format="rgb24")
+            frame.pts = 600 + i
+            for packet in stream.encode(frame):
+                out.mux(packet)
+        for packet in stream.encode():
+            out.mux(packet)
+
+    assert [t for t, _ in extract_frames(path)] == [30, 90]
+
+
+def test_long_side_is_capped_for_portrait_video(tmp_path):
+    from PIL import Image
+
+    tall = np.zeros((1440, 360, 3), np.uint8)
+    with av.open(str(tmp_path / "portrait.mp4"), "w") as out:
+        stream = out.add_stream("mpeg4", rate=1)
+        stream.width, stream.height, stream.pix_fmt = 360, 1440, "yuv420p"
+        for packet in [*stream.encode(av.VideoFrame.from_ndarray(tall, format="rgb24")), *stream.encode()]:
+            out.mux(packet)
+
+    jpeg = extract_frames(tmp_path / "portrait.mp4")[0][1]
+
+    assert Image.open(io.BytesIO(jpeg)).size == (320, 1280)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg 명령이 없음")
+def test_rotated_phone_video_comes_out_upright(tmp_path):
+    from PIL import Image
+
+    img = np.zeros((H, W, 3), np.uint8)
+    img[0:40, 0:60] = 255  # 왼쪽 위 표시
+    make_video(tmp_path / "land.mp4", [(3, img)])
+    # 휴대폰처럼 화면은 그대로 두고 "90도 돌려서 보여 줘"라는 정보만 붙입니다.
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-display_rotation", "90", "-i", str(tmp_path / "land.mp4"),
+                    "-c", "copy", str(tmp_path / "rotated.mp4")], check=True)
+
+    photo = np.asarray(Image.open(io.BytesIO(extract_frames(tmp_path / "rotated.mp4")[0][1])).convert("L"))
+
+    assert photo.shape == (W, H)  # 세로로 섬
+    assert photo[-40:, :40].mean() > 200 and photo[:40, :40].mean() < 50  # 반시계 90도: 왼쪽 위 → 왼쪽 아래
 
 
 def test_frames_are_jpeg_and_not_upscaled(three_scenes):

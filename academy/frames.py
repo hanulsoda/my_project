@@ -9,7 +9,7 @@ import av
 import numpy as np
 
 INTERVAL = 30       # 캡처 간격(초)
-WIDTH = 1280        # 판서 글씨가 읽히는 폭. 더 작은 영상은 키우지 않음
+LONG_SIDE = 1280    # 판서 글씨가 읽히는 크기(긴 쪽 기준). 더 작은 영상은 키우지 않음
 JPEG_QUALITY = 75
 SAME_SCENE = 8      # 32×18 흑백 화소 차이 평균이 이보다 작으면 같은 장면 (0~255)
 MAX_FRAMES = 100    # Claude API 한 요청의 이미지 한도 안
@@ -34,10 +34,13 @@ def _frame_at(container, stream, t: int):
 
 
 def _jpeg(frame) -> bytes:
-    width = min(WIDTH, frame.width)
-    height = round(frame.height * width / frame.width)
+    # 세로 영상도 긴 쪽을 줄입니다. 사진이 20장을 넘으면 API가 한 변 2000px 넘는 사진을 거절합니다.
+    scale = min(1, LONG_SIDE / max(frame.width, frame.height))
+    img = frame.reformat(width=round(frame.width * scale), height=round(frame.height * scale)).to_image()
+    if frame.rotation:  # 휴대폰 영상은 "돌려서 보여 줘"라는 정보만 붙어 있으므로 직접 세웁니다.
+        img = img.rotate(frame.rotation, expand=True)
     buf = io.BytesIO()
-    frame.reformat(width=width, height=height).to_image().save(buf, "JPEG", quality=JPEG_QUALITY)
+    img.save(buf, "JPEG", quality=JPEG_QUALITY)
     return buf.getvalue()
 
 
@@ -49,15 +52,20 @@ def extract_frames(path: Path) -> list[tuple[int, bytes]]:
             if not container.duration:
                 raise ValueError("영상 길이를 알 수 없음")
             duration = container.duration / av.time_base
-            kept, last = [], None
+            # 잘라 낸 영상은 첫 화면 시각이 0이 아닐 수 있습니다. 플레이어·대본처럼 영상 시작을 0초로 셉니다.
+            start = float(stream.start_time * stream.time_base) if stream.start_time else 0.0
+            kept, scene_start = [], None
             for t in range(0, int(duration) + 1, INTERVAL):
-                frame = _frame_at(container, stream, t)
+                frame = _frame_at(container, stream, start + t)
                 if frame is None:
                     break
                 small = frame.reformat(width=32, height=18, format="gray").to_ndarray().astype(np.int16)
-                if last is not None and np.abs(small - last).mean() < SAME_SCENE:
+                # 장면이 바뀌었는지는 그 장면의 첫 화면과 비교하고, 같은 장면이면 더 나중 화면으로 바꿉니다.
+                # 그래서 판서가 가장 많이 채워진, 지우기 직전 칠판이 남습니다.
+                if scene_start is not None and np.abs(small - scene_start).mean() < SAME_SCENE:
+                    kept[-1] = (t, _jpeg(frame))
                     continue
-                last = small
+                scene_start = small
                 kept.append((t, _jpeg(frame)))
     except (av.error.FFmpegError, IndexError, ValueError) as e:
         print(f"  화면 캡처를 건너뜁니다: {e}", file=sys.stderr)
