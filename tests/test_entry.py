@@ -27,7 +27,11 @@ def test_sign_is_hmac_sha256_hex():
     ("1e9", hmac_hex("enter:1e9"), False),
     ("", hmac_hex("enter:"), False),
     (str(NOW + 300), "한글", False),  # 주소창에서 바뀐 서명
-], ids=["valid", "expired", "wrong-key", "no-sig", "no-exp", "not-number", "float-like", "empty", "non-ascii-sig"])
+    (str(NOW + 600), hmac_hex(f"enter:{NOW + 600}"), True),  # 학원 사이트 시계가 5분 빨라도 됨
+    (str(NOW + 601), hmac_hex(f"enter:{NOW + 601}"), False),  # 너무 먼 미래 (새어 나간 비밀 키로 만든 오래가는 링크)
+    ("4102444800", hmac_hex("enter:4102444800"), False),  # 2100년까지 쓰는 링크
+], ids=["valid", "expired", "wrong-key", "no-sig", "no-exp", "not-number", "float-like", "empty", "non-ascii-sig",
+        "clock-5min-ahead", "too-far", "year-2100"])
 def test_entry_link_accepts_valid_and_rejects_bad(exp, sig, expected):
     assert entry_link_ok(SECRET, exp, sig, NOW) is expected
 

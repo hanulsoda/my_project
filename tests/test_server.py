@@ -227,7 +227,7 @@ def test_ask_rejects_bad_requests(setup):
     assert calls == []
 
 
-def test_ask_reports_ai_failure_clearly(tmp_path):
+def test_ask_reports_ai_failure_clearly(tmp_path, caplog):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
     (video_dir / "1강.mp4").write_bytes(b"x")
@@ -238,10 +238,32 @@ def test_ask_reports_ai_failure_clearly(tmp_path):
         raise TypeError("Could not resolve authentication method")  # API 키가 없을 때 SDK가 내는 오류
 
     client = TestClient(create_app(video_dir, data_dir, broken_answer))
-    res = client.post(f"/api/videos/{video_id}/ask", json={"question": "질문"})
+    with caplog.at_level("ERROR"):
+        res = client.post(f"/api/videos/{video_id}/ask", json={"question": "질문"})
 
     assert res.status_code == 502
-    assert "authentication" in res.json()["detail"]
+    assert res.json()["detail"] == "AI 답변을 받지 못했습니다. 잠시 뒤 다시 해 주세요."  # 학생에게는 내부 오류를 보이지 않음
+    assert "authentication" in caplog.text  # 선생님은 Container Manager 로그에서 원인을 봄
+
+
+def test_responses_carry_browser_protection_headers(setup):
+    client, ids, _ = setup
+
+    page, api, media = client.get("/"), client.get("/api/videos"), client.get(f"/media/{ids['1강']}")
+
+    for res in (page, api, media):
+        assert res.headers["x-content-type-options"] == "nosniff"
+        assert res.headers["x-frame-options"] == "DENY"  # 다른 사이트가 플레이어를 몰래 띄우지 못하게
+        assert res.headers["referrer-policy"] == "same-origin"
+    assert api.headers["cache-control"] == "no-store"
+    assert media.headers["cache-control"] == "private"
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_api_description_pages_are_off(setup, path):
+    client, _, _ = setup
+
+    assert client.get(path).status_code == 404
 
 
 def test_video_folder_is_not_rescanned_on_every_request(tmp_path, monkeypatch):

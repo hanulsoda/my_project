@@ -130,7 +130,8 @@ class _AskLimits:
 
 def create_app(video_dir: Path, data_dir: Path, answer,
                entry_secret: str = "", site_url: str = "") -> FastAPI:
-    app = FastAPI(title="학원 학습 플레이어")
+    # 자동 API 설명 페이지(/docs 등)는 끕니다. 학생에게 필요 없고, 밖에서 주소를 훑는 사람에게 지도만 줍니다.
+    app = FastAPI(title="학원 학습 플레이어", docs_url=None, redoc_url=None, openapi_url=None)
 
     if entry_secret:
         # 학원 사이트의 입장 링크로 받은 통과 쿠키가 있어야 화면·영상·질문을 쓸 수 있습니다.
@@ -143,7 +144,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
                 return JSONResponse({"detail": LOGIN_NOTICE}, status_code=401)
             return _denied_page(site_url)
 
-    # 가장 바깥에서(입장 확인보다 먼저) 요청 크기를 봅니다. 본문을 읽기 전에 거절해야 NAS 메모리를 지킵니다.
+    # 입장 확인보다 먼저 요청 크기를 봅니다. 본문을 읽기 전에 거절해야 NAS 메모리를 지킵니다.
     @app.middleware("http")
     async def limit_body(request: Request, call_next):
         if request.method in ("POST", "PUT", "PATCH"):
@@ -153,6 +154,20 @@ def create_app(video_dir: Path, data_dir: Path, answer,
             if int(length) > MAX_BODY:
                 return JSONResponse({"detail": "요청이 너무 큽니다"}, status_code=413)
         return await call_next(request)
+
+    # 가장 바깥에서 모든 응답(입장 거절 화면 포함)에 브라우저 보호 설정을 붙입니다.
+    @app.middleware("http")
+    async def protect(request: Request, call_next):
+        res = await call_next(request)
+        res.headers["X-Content-Type-Options"] = "nosniff"
+        res.headers["X-Frame-Options"] = "DENY"  # 다른 사이트가 플레이어를 자기 화면 안에 몰래 띄우지 못하게
+        res.headers["Referrer-Policy"] = "same-origin"  # 강의 주소를 바깥 사이트로 흘리지 않게
+        path = request.url.path
+        if path.startswith("/api/"):
+            res.headers["Cache-Control"] = "no-store"  # 학교·PC방 공용 컴퓨터에 대본·질문이 남지 않게
+        elif path.startswith(("/media/", "/frames/")):
+            res.headers["Cache-Control"] = "private"  # 학생 브라우저만 보관, 중간 프록시는 보관 금지
+        return res
 
     @app.get("/enter")
     def enter(request: Request, exp: str | None = None, sig: str | None = None):
@@ -256,9 +271,10 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         try:
             text = answer(data["title"], data["segments"], req.question,
                           [t.model_dump() for t in req.history], req.current_time)
-        except Exception as e:  # API 키 누락, 네트워크 오류, 응답 거절 등
+        except Exception:  # API 키 누락, 네트워크 오류, 응답 거절 등
+            # 원인은 Container Manager 로그에만 남깁니다. 학생 화면에 내부 오류 문구를 보이지 않습니다.
             logging.exception("AI 답변 실패")
-            raise HTTPException(502, f"AI 답변을 받지 못했습니다: {e}")
+            raise HTTPException(502, "AI 답변을 받지 못했습니다. 잠시 뒤 다시 해 주세요.")
         finally:
             limits.at_once.release()
         return {"answer": text}
@@ -288,7 +304,11 @@ def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
     if env.get("REQUIRE_ENTRY", "").strip() not in ("", "0") and len(secret) < MIN_SECRET_LEN:
         raise SystemExit(f"ENTRY_SECRET(입장 링크 비밀 키)가 없거나 {MIN_SECRET_LEN}자보다 짧아서 서버를 시작하지 않습니다. "
                          "docker-compose.yml에 학원 사이트와 같은 비밀 키를 넣어 주세요.")
-    return secret, env.get("SITE_URL", "").strip()
+    site_url = env.get("SITE_URL", "").strip()
+    # 입장이 막힌 화면의 "학원 사이트로 가기" 링크가 되므로 웹 주소만 받습니다.
+    if site_url and not re.match(r"https?://", site_url, re.I):
+        raise SystemExit(f"SITE_URL은 https:// 로 시작하는 학원 사이트 주소여야 합니다 (지금 값: {site_url})")
+    return secret, site_url
 
 
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),

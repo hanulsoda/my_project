@@ -8,6 +8,7 @@ import hashlib
 import hmac
 
 ENTER_TTL = 300        # 입장 링크 유효 시간 (5분)
+CLOCK_SKEW = 300       # 학원 사이트 서버 시계가 이만큼 빨라도 받아 줍니다
 PASS_TTL = 43200       # 통과 쿠키 유효 시간 (12시간)
 MIN_SECRET_LEN = 32
 
@@ -29,7 +30,8 @@ def _valid(secret: str, prefix: str, expiry: str | None, sig: str | None, now: f
 
 
 def entry_link_ok(secret: str, exp: str | None, sig: str | None, now: float) -> bool:
-    return _valid(secret, "enter", exp, sig, now)
+    # 만료가 너무 먼 링크는 거절합니다. 비밀 키가 새어 나가도 몇 년씩 쓰는 링크를 만들어 돌릴 수 없게.
+    return _valid(secret, "enter", exp, sig, now) and int(exp) - now <= ENTER_TTL + CLOCK_SKEW
 
 
 def make_pass(secret: str, now: float) -> str:

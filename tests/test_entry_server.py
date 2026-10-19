@@ -113,6 +113,13 @@ def test_entry_settings_reads_and_trims():
     assert entry_settings({"REQUIRE_ENTRY": "0"}) == ("", "")
 
 
+@pytest.mark.parametrize("site_url", ["javascript:alert(1)", "study.example.com", "ftp://example.com"])
+def test_site_url_must_be_a_web_address(site_url):
+    # 입장이 막힌 화면의 "학원 사이트로 가기" 링크가 됩니다.
+    with pytest.raises(SystemExit):
+        entry_settings({"ENTRY_SECRET": SECRET, "SITE_URL": site_url})
+
+
 @pytest.mark.parametrize("flag", ["1", "true", "yes"])
 @pytest.mark.parametrize("secret", ["", "s" * 31])
 def test_required_entry_refuses_missing_or_short_secret(flag, secret):
