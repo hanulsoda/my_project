@@ -48,8 +48,12 @@ function render({ title, analysis }) {
   }
   renderTranscript(analysis.segments);
   if (analysis.segments.length) {  // 받아쓴 대본으로 자막. 영상의 CC 버튼으로 켜고 끕니다.
-    video.append(el("track", { kind: "subtitles", srclang: "ko", label: "한국어 자막",
-                               src: `/api/videos/${id}/subtitles.vtt` }));
+    const track = el("track", { kind: "subtitles", srclang: "ko", label: "한국어 자막",
+                                src: `/api/videos/${id}/subtitles.vtt` });
+    video.append(track);
+    // 한 번 켜면 다음 강의에서도 켜져 있게 기억합니다.
+    if (store.get("cc")) track.track.mode = "showing";
+    video.textTracks.addEventListener("change", () => store.set("cc", track.track.mode === "showing"));
   }
   setupAsk();
   if (analysis.guide) {
@@ -340,7 +344,9 @@ function showRate() {
 
 // 영상 자체 메뉴에서 속도를 바꿔도 버튼 표시와 저장이 따라갑니다. 다음 강의도 같은 속도로 봅니다.
 video.addEventListener("ratechange", () => { store.set("rate", video.playbackRate); showRate(); });
-setRate(RATES.includes(store.get("rate")) ? store.get("rate") : 1);
+// 영상 자체 메뉴에서 고른 속도(1.75배 등)도 이어서 씁니다.
+const savedRate = store.get("rate");
+setRate(typeof savedRate === "number" && savedRate >= 0.25 && savedRate <= 4 ? savedRate : 1);
 
 // 질문·메모·검색 칸에 글을 쓰는 중에는 단축키를 쓰지 않습니다.
 const typing = (e) => e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.closest("input, textarea, select");
