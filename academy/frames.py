@@ -46,16 +46,18 @@ def _jpeg(frame) -> bytes:
 
 
 def extract_frames(path: Path) -> list[tuple[int, bytes]]:
-    """[(초, JPEG 바이트), ...]. 영상이 없거나 읽을 수 없으면 빈 목록 (분석은 계속)."""
+    """[(초, JPEG 바이트), ...]. 영상이 없으면 빈 목록, 읽다가 깨지면 그때까지 찍은 사진 (분석은 계속)."""
+    kept, limit = [], MAX_FRAMES
     try:
         with av.open(str(path)) as container:
             stream = container.streams.video[0]
             if not container.duration:
                 raise ValueError("영상 길이를 알 수 없음")
             duration = container.duration / av.time_base
+            limit = min(MAX_FRAMES, max(1, math.ceil(duration / 60)))
             # 잘라 낸 영상은 첫 화면 시각이 0이 아닐 수 있습니다. 플레이어·대본처럼 영상 시작을 0초로 셉니다.
             start = float(stream.start_time * stream.time_base) if stream.start_time else 0.0
-            kept, scene_start = [], None
+            scene_start = None
             for t in range(0, int(duration) + 1, INTERVAL):
                 frame = _frame_at(container, stream, start + t)
                 if frame is None:
@@ -68,7 +70,7 @@ def extract_frames(path: Path) -> list[tuple[int, bytes]]:
                     continue
                 scene_start = small
                 kept.append((t, _jpeg(frame)))
-    except (av.error.FFmpegError, IndexError, ValueError) as e:
-        print(f"  화면 캡처를 건너뜁니다: {e}", file=sys.stderr)
-        return []
-    return thin(kept, min(MAX_FRAMES, max(1, math.ceil(duration / 60))))
+    except Exception as e:  # 사진은 덤이라 어떤 오류여도 영상 분석은 계속합니다.
+        note = f"앞부분 {len(kept)}장만 씁니다" if kept else "건너뜁니다"
+        print(f"  화면 캡처 중 오류, {note}: {e}", file=sys.stderr)
+    return thin(kept, limit)

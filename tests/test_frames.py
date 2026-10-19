@@ -142,6 +142,24 @@ def test_file_without_video_gives_empty_list(tmp_path, make_file):
     assert extract_frames(make_file(tmp_path)) == []
 
 
+def test_broken_middle_keeps_photos_taken_before(three_scenes):
+    data = bytearray(three_scenes.read_bytes())
+    start = len(data) // 2
+    data[start:start + len(data) // 10] = bytes(len(data) // 10)  # 복사하다 깨진 파일
+    three_scenes.write_bytes(data)
+
+    assert extract_frames(three_scenes) != []
+
+
+def test_unexpected_error_does_not_stop_analysis(three_scenes, monkeypatch):
+    def broken_jpeg(frame):
+        raise TypeError("예상 못 한 오류")
+
+    monkeypatch.setattr("academy.frames._jpeg", broken_jpeg)
+
+    assert extract_frames(three_scenes) == []
+
+
 def test_thin_spreads_evenly_and_keeps_ends():
     thinned = thin(list(range(300)), 100)
 
