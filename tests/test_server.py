@@ -1,6 +1,10 @@
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
+from academy import server
 from academy.library import find_videos, save_analysis, save_frame
 from academy.server import create_app
 
@@ -27,15 +31,111 @@ def setup(tmp_path):
     return client, ids, calls
 
 
-def test_lists_videos_with_analysis_status(setup):
+def count_scans(monkeypatch):
+    scans, real = [], server.find_videos
+    monkeypatch.setattr(server, "find_videos", lambda d: scans.append(d) or real(d))
+    return scans
+
+
+def fake_clock(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(server, "monotonic", lambda: clock[0])
+    return clock
+
+
+def test_scans_video_folder_once_for_many_requests(setup, monkeypatch):
     client, ids, _ = setup
+    scans = count_scans(monkeypatch)
+
+    client.get("/api/videos")
+    client.get(f"/api/videos/{ids['1강']}")
+    client.get(f"/media/{ids['1강']}", headers={"Range": "bytes=0-9"})
+    client.get(f"/media/{ids['1강']}", headers={"Range": "bytes=10-19"})
+    client.get(f"/api/videos/{ids['1강']}/pages/0.jpg")
+    client.post(f"/api/videos/{ids['1강']}/ask", json={"question": "질문"})
+
+    assert len(scans) == 1
+
+
+def test_finds_new_video_on_cache_miss_but_not_rescanning_every_miss(setup, monkeypatch, tmp_path):
+    client, _, _ = setup
+    scans, clock = count_scans(monkeypatch), fake_clock(monkeypatch)
+    client.get("/api/videos")
+    (tmp_path / "videos" / "3강.mp4").write_bytes(b"x")
+    new_id = next(v["id"] for v in find_videos(tmp_path / "videos") if v["title"] == "3강")
+
+    clock[0] += server.MISS_SECONDS + 1
+    assert client.get(f"/api/videos/{new_id}").status_code == 200
+    assert client.get("/api/videos/nope").status_code == 404
+    assert client.get("/media/nope").status_code == 404
+
+    assert len(scans) == 2
+    assert [v["title"] for v in client.get("/api/videos").json()] == ["1강", "2강", "3강"]
+
+
+def test_serves_old_list_while_rescanning_in_background(setup, monkeypatch, tmp_path):
+    client, _, _ = setup
+    clock = fake_clock(monkeypatch)
+    client.get("/api/videos")
+    (tmp_path / "videos" / "3강.mp4").write_bytes(b"x")
+    rescan_may_finish, real = threading.Event(), server.find_videos
+    monkeypatch.setattr(server, "find_videos", lambda d: rescan_may_finish.wait(5) and real(d))
+
+    clock[0] += server.REFRESH_SECONDS + 1
+    assert len(client.get("/api/videos").json()) == 2  # 느린 재스캔을 기다리지 않습니다
+
+    rescan_may_finish.set()
+    deadline = time.monotonic() + 5
+    while len(client.get("/api/videos").json()) < 3 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(client.get("/api/videos").json()) == 3
+
+
+def test_lists_videos_with_analysis_and_guide_status(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강.mp4", "2강.mp4", "3강.mp4"]:
+        (video_dir / name).write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": SEGMENTS, "guide": GUIDE})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": None})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    assert client.get("/api/videos").json() == [
+        {"id": ids["1강"], "title": "1강", "analyzed": True, "guide": True},
+        {"id": ids["2강"], "title": "2강", "analyzed": True, "guide": False},
+        {"id": ids["3강"], "title": "3강", "analyzed": False, "guide": False},
+    ]
+
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": GUIDE})
+    assert client.get("/api/videos").json()[1]["guide"] is True
+
+
+@pytest.mark.parametrize("text", ['{"title": "1강",}', "[1, 2]"], ids=["typo", "not-object"])
+def test_one_broken_analysis_file_does_not_break_the_list(setup, tmp_path, text):
+    client, ids, _ = setup
+    (tmp_path / "data" / f"{ids['1강']}.json").write_text(text, encoding="utf-8")  # 손으로 고치다 깨진 파일
 
     res = client.get("/api/videos")
 
-    assert res.json() == [
-        {"id": ids["1강"], "title": "1강", "analyzed": True},
-        {"id": ids["2강"], "title": "2강", "analyzed": False},
-    ]
+    assert res.status_code == 200
+    assert [(v["title"], v["guide"]) for v in res.json()] == [("1강", False), ("2강", False)]
+
+
+def test_serves_page_thumbnails(setup, tmp_path):
+    client, ids, _ = setup
+    thumbs = tmp_path / "data" / ids["1강"]
+    thumbs.mkdir()
+    (thumbs / "0.jpg").write_bytes(b"\xff\xd8jpeg")
+
+    res = client.get(f"/api/videos/{ids['1강']}/pages/0.jpg")
+
+    assert res.content == b"\xff\xd8jpeg"
+    assert res.headers["content-type"] == "image/jpeg"
+    assert res.headers["cache-control"] == "private"  # 그림은 대본과 달리 브라우저에 보관해도 됨
+    assert client.get(f"/api/videos/{ids['1강']}/pages/1.jpg").status_code == 404
+    assert client.get(f"/api/videos/{ids['1강']}/pages/..%2Fx.jpg").status_code in (404, 422)
+    assert client.get("/api/videos/nope/pages/0.jpg").status_code == 404
 
 
 def test_video_detail(setup):
@@ -266,44 +366,12 @@ def test_api_description_pages_are_off(setup, path):
     assert client.get(path).status_code == 404
 
 
-def test_video_folder_is_not_rescanned_on_every_request(tmp_path, monkeypatch):
-    import academy.server as server
-
-    (tmp_path / "videos").mkdir()
-    (tmp_path / "videos" / "1강.mp4").write_bytes(b"x" * 100)
-    scans = []
-    real = server.find_videos
-    monkeypatch.setattr(server, "find_videos", lambda d: scans.append(d) or real(d))
-    client = TestClient(create_app(tmp_path / "videos", tmp_path / "data", lambda *a: ""))
-    video_id = client.get("/api/videos").json()[0]["id"]
-
-    for start in range(0, 100, 10):  # 영상을 보며 여기저기 넘길 때마다 오는 요청들
-        client.get(f"/media/{video_id}", headers={"Range": f"bytes={start}-{start + 9}"})
-    client.get(f"/api/videos/{video_id}")
-
-    assert len(scans) == 1
-
-
 def test_video_deleted_moments_ago_is_not_found_instead_of_crashing(setup, tmp_path):
     client, ids, _ = setup
     client.get("/api/videos")  # 목록을 기억해 둔 상태에서
     (tmp_path / "videos" / "1강.mp4").unlink()  # 선생님이 영상을 지움
 
     assert client.get(f"/media/{ids['1강']}").status_code == 404
-
-
-def test_new_video_shows_up_once_the_list_is_old(tmp_path, monkeypatch):
-    import academy.server as server
-
-    (tmp_path / "videos").mkdir()
-    (tmp_path / "videos" / "1강.mp4").write_bytes(b"x")
-    monkeypatch.setattr(server, "VIDEO_LIST_TTL", 0)  # 기억해 둔 목록이 바로 낡은 것으로
-    client = TestClient(create_app(tmp_path / "videos", tmp_path / "data", lambda *a: ""))
-    assert len(client.get("/api/videos").json()) == 1
-
-    (tmp_path / "videos" / "2강.mp4").write_bytes(b"x")  # 선생님이 새 강의를 올림
-
-    assert [v["title"] for v in client.get("/api/videos").json()] == ["1강", "2강"]
 
 
 def test_serves_student_pages(setup):

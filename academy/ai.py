@@ -23,7 +23,10 @@ GUIDE_PROMPT = """당신은 학원 강의를 학생용 학습 자료로 정리�
 - 대본 뒤에 "[분:초] 화면" 표시와 함께 강의 화면 사진이 붙어 있을 수 있습니다. 사진에 보이는 판서(칠판·태블릿에 쓴
   수식, 도표, 정리)를 읽어 요점에 반영하고, 수식은 x² + 2x + 1 처럼 텍스트로 옮겨 적으세요.
 - quiz: 강의 내용만으로 풀 수 있는 4지선다 문제 5개. answer는 정답 보기의 번호(0부터 시작).
-  explanation에는 왜 그 답인지 한두 문장으로, time에는 관련 설명이 나오는 시점("분:초")을 적습니다."""
+  explanation에는 왜 그 답인지 한두 문장으로, time에는 관련 설명이 나오는 시점("분:초")을 적습니다.
+- corrections: 대본에서 잘못 들린 용어를 바로잡는 목록. wrong에는 대본에 나온 표기 그대로, right에는 올바른 표기를 적습니다.
+  강의 주제상 확실히 틀린 용어만 적고(예: '격률'을 '경률'로 받아쓴 경우), 두 글자 이상이어야 합니다.
+  대본 전체에서 그대로 바꾸므로, 맞게 쓰인 다른 말까지 바뀔 수 있는 표기는 넣지 마세요. 없으면 빈 목록입니다."""
 
 GUIDE_SCHEMA = {
     "type": "object",
@@ -52,8 +55,14 @@ GUIDE_SCHEMA = {
             "required": ["question", "choices", "answer", "explanation", "time"],
             "additionalProperties": False,
         }},
+        "corrections": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"wrong": {"type": "string"}, "right": {"type": "string"}},
+            "required": ["wrong", "right"],
+            "additionalProperties": False,
+        }},
     },
-    "required": ["summary", "chapters", "quiz"],
+    "required": ["summary", "chapters", "quiz", "corrections"],
     "additionalProperties": False,
 }
 
@@ -132,6 +141,8 @@ def make_study_guide(client, title: str, segments: list[dict],
     guide["quiz"] = [q for q in guide["quiz"] if 0 <= q["answer"] < len(q["choices"])]
     for q in guide["quiz"]:
         q["time"] = parse_time(q["time"])
+    guide["corrections"] = [c for c in guide["corrections"]
+                            if len(c["wrong"]) >= 2 and c["wrong"] != c["right"]]
     return guide
 
 

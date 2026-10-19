@@ -235,6 +235,34 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 }
 .chapter .board img { display: block; width: 100%; height: auto; }
 
+/* 페이지 */
+.pages { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.page {
+  display: block;
+  width: 100%;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+.page:hover { background: var(--hover); }
+.page img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;  /* 그림이 오기 전에도 자리를 잡아 격자가 출렁이지 않게 */
+  object-fit: contain;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--hover);
+}
+.pages li.active .page { border-color: var(--accent); background: var(--highlight); }
+
 /* 대본 */
 .search-box {
   position: sticky;

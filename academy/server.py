@@ -16,6 +16,8 @@ import unicodedata
 from collections import deque
 from collections.abc import Mapping
 from pathlib import Path
+from threading import Lock, Thread
+from time import monotonic
 from typing import Literal
 
 import anthropic
@@ -30,7 +32,6 @@ from academy.library import find_videos, load_analysis
 STATIC_DIR = Path(__file__).parent / "static"
 PASS_COOKIE = "study_pass"
 LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
-VIDEO_LIST_TTL = 10  # 영상 목록을 기억해 두는 시간(초)
 # 질문하기 제한: 질문마다 Claude API 비용이 들어서, 한 사람이나 프로그램이 마구 보내지 못하게 합니다.
 ASK_PER_PERSON = 10   # 한 사람(입장 통과 하나)이 ASK_WINDOW 동안 할 수 있는 질문 수
 ASK_WINDOW = 600      # 초 (10분)
@@ -38,6 +39,9 @@ ASK_PER_HOUR = 200    # 학원 전체가 1시간에 할 수 있는 질문 수
 ASK_AT_ONCE = 4       # 동시에 답을 만드는 질문 수 (나머지 요청이 영상·목록을 막지 않게)
 HISTORY_CHARS = 20000 # 함께 보내는 대화 기록 글자 수 합
 MAX_BODY = 256 * 1024 # 요청 본문 최대 크기(바이트). 큰 요청으로 NAS 메모리를 채우지 못하게
+# NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
+REFRESH_SECONDS = 300  # 이보다 오래된 목록은 뒤에서 다시 훑습니다
+MISS_SECONDS = 30  # 모르는 id가 와도 이 안에 훑었으면 다시 훑지 않습니다
 
 
 def _denied_page(site_url: str) -> HTMLResponse:
@@ -163,10 +167,10 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         res.headers["X-Frame-Options"] = "DENY"  # 다른 사이트가 플레이어를 자기 화면 안에 몰래 띄우지 못하게
         res.headers["Referrer-Policy"] = "same-origin"  # 강의 주소를 바깥 사이트로 흘리지 않게
         path = request.url.path
-        if path.startswith("/api/"):
-            res.headers["Cache-Control"] = "no-store"  # 학교·PC방 공용 컴퓨터에 대본·질문이 남지 않게
-        elif path.startswith(("/media/", "/frames/")):
+        if path.startswith(("/media/", "/frames/")) or path.endswith(".jpg"):
             res.headers["Cache-Control"] = "private"  # 학생 브라우저만 보관, 중간 프록시는 보관 금지
+        elif path.startswith("/api/"):
+            res.headers["Cache-Control"] = "no-store"  # 학교·PC방 공용 컴퓨터에 대본·질문이 남지 않게
         return res
 
     @app.get("/enter")
@@ -180,27 +184,53 @@ def create_app(video_dir: Path, data_dir: Path, answer,
                        httponly=True, samesite="lax", secure=request.url.scheme == "https")
         return res
 
-    listed = {"at": None, "videos": []}
+    library = {"at": None, "videos": [], "by_id": {}}
+    scan_lock = Lock()
 
-    def videos():
-        # 영상 폴더 전체를 훑는 일은 NAS에서 느립니다(영상 1,000개면 수백 ms). 영상을 넘길 때마다 오는 요청마다
-        # 훑지 않도록 잠깐 기억해 둡니다. 새로 올린 강의는 VIDEO_LIST_TTL초 안에 목록에 나타납니다.
-        now = time.monotonic()
-        if listed["at"] is None or now - listed["at"] >= VIDEO_LIST_TTL:
-            listed["videos"], listed["at"] = find_videos(video_dir), now
-        return listed["videos"]
+    def scan(max_age):
+        with scan_lock:  # 한 번에 하나만 훑고, 기다리는 사이 다른 요청이 훑었으면 그 결과를 씁니다.
+            if library["at"] is None or monotonic() - library["at"] > max_age:
+                videos = find_videos(video_dir)
+                library.update(at=monotonic(), videos=videos, by_id={v["id"]: v for v in videos})
+
+    def current_library():
+        if library["at"] is None:
+            scan(REFRESH_SECONDS)
+        elif monotonic() - library["at"] > REFRESH_SECONDS and not scan_lock.locked():
+            Thread(target=scan, args=(REFRESH_SECONDS,), daemon=True).start()  # 그동안은 이전 목록으로 답합니다
+        return library
 
     def get_video(video_id):
-        for video in videos():
-            if video["id"] == video_id and video["path"].is_file():  # 그사이 지운 영상은 없는 것으로
-                return video
-        raise HTTPException(404, "영상을 찾을 수 없습니다")
+        video = current_library()["by_id"].get(video_id)
+        if video is None:  # 새로 올라온 영상일 수 있습니다
+            scan(MISS_SECONDS)
+            video = library["by_id"].get(video_id)
+        if video is None or not video["path"].is_file():  # 그사이 지운 영상은 없는 것으로
+            raise HTTPException(404, "영상을 찾을 수 없습니다")
+        return video
+
+    status_cache = {}  # 영상 id → (파일 수정 시각·크기, 요점 정리 유무). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
+
+    def analysis_status(video_id):
+        path = Path(data_dir) / f"{video_id}.json"
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return {"analyzed": False, "guide": False}
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        if status_cache.get(video_id, (None,))[0] != stamp:
+            try:
+                guide = bool(load_analysis(data_dir, video_id).get("guide"))
+            except (ValueError, AttributeError):  # 손으로 고치다 깨진 파일 하나 때문에 목록 전체가 멈추지 않게
+                logging.warning("형식이 맞지 않는 분석 파일: %s", path)
+                guide = False
+            status_cache[video_id] = (stamp, guide)
+        return {"analyzed": True, "guide": status_cache[video_id][1]}
 
     @app.get("/api/videos")
     def list_videos():
-        return [{"id": v["id"], "title": v["title"],
-                 "analyzed": (Path(data_dir) / f"{v['id']}.json").exists()}
-                for v in videos()]
+        return [{"id": v["id"], "title": v["title"], **analysis_status(v["id"])}
+                for v in current_library()["videos"]]
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
@@ -215,7 +245,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         if len(needle) < 2:
             raise HTTPException(422, "두 글자 이상 입력해 주세요")
         results = []
-        for video in videos():
+        for video in current_library()["videos"]:
             path = Path(data_dir) / f"{video['id']}.json"
             try:
                 stat = path.stat()
@@ -239,6 +269,14 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         if not data:
             raise HTTPException(404, "아직 분석되지 않은 영상입니다")
         return Response(subtitles_vtt(data["segments"]), media_type="text/vtt")
+
+    @app.get("/api/videos/{video_id}/pages/{n}.jpg")
+    def page_thumbnail(video_id: str, n: int):
+        get_video(video_id)
+        path = Path(data_dir) / video_id / f"{n}.jpg"
+        if not path.exists():
+            raise HTTPException(404, "페이지 그림이 없습니다")
+        return FileResponse(path, media_type="image/jpeg")
 
     @app.get("/media/{video_id}")
     def media(video_id: str):

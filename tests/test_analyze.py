@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from academy.analyze import analyze_all
+from academy.analyze import analyze_all, part_arg
 from academy.library import find_videos, load_analysis, save_analysis, save_frame
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -19,10 +19,12 @@ GUIDE = {"summary": "요약", "quiz": [], "chapters": [
 
 
 class Recorder:
-    def __init__(self, fail_on=None, segments=SEGMENTS):
+    def __init__(self, fail_on=None, segments=SEGMENTS, guide=GUIDE):
         self.transcribed, self.guided, self.captured, self.frames_seen = [], [], [], []
+        self.page_dirs = []
         self.fail_on = fail_on
         self.segments = segments
+        self.guide = guide
 
     def transcribe(self, path):
         self.transcribed.append(path.name)
@@ -37,7 +39,11 @@ class Recorder:
     def make_guide(self, title, segments, frames):
         self.guided.append(title)
         self.frames_seen.append(frames)
-        return GUIDE
+        return self.guide
+
+    def detect_pages(self, path, out_dir):
+        self.page_dirs.append(out_dir)
+        return [{"start": 0.0}]
 
 
 def make_videos(root, *names):
@@ -175,3 +181,66 @@ def test_broken_analysis_file_fails_only_that_video(tmp_path):
 
     assert failures == 1
     assert load_analysis(data_dir, ids["2강"])["guide"] == GUIDE
+
+
+def test_parts_split_videos_without_overlap(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4", "3강.mp4")
+    first, second = Recorder(), Recorder()
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", first.transcribe, first.make_guide, first.extract_frames,
+                part=(1, 2))
+    analyze_all(tmp_path / "videos", tmp_path / "data", second.transcribe, second.make_guide, second.extract_frames,
+                part=(2, 2))
+
+    assert first.transcribed == ["1강.mp4", "3강.mp4"]
+    assert second.transcribed == ["2강.mp4"]
+
+
+def test_part_arg():
+    assert part_arg("2/2") == (2, 2)
+    for bad in ["3/2", "0/2", "1"]:
+        with pytest.raises(ValueError):
+            part_arg(bad)
+
+
+def test_guide_corrections_fix_the_saved_transcript(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder(segments=[{"start": 0.0, "end": 2.0, "text": "요령의 경률과 관용의 경률"}],
+                   guide={**GUIDE, "corrections": [{"wrong": "경률", "right": "격률"}]})
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames)
+
+    segments = load_analysis(tmp_path / "data", ids["1강"])["segments"]
+    assert segments[0]["text"] == "요령의 격률과 관용의 격률"
+
+
+def test_finds_pages_and_adds_them_to_already_analyzed_videos(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4")
+    data_dir = tmp_path / "data"
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": SEGMENTS, "guide": GUIDE})
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide, rec.extract_frames,
+                detect_pages=rec.detect_pages)
+
+    assert rec.page_dirs == [data_dir / ids["1강"], data_dir / ids["2강"]]
+    assert rec.transcribed == ["2강.mp4"]
+    assert rec.guided == ["2강"]
+    assert rec.captured == ["2강.mp4"]  # 요점 정리가 이미 있으면 판서 사진도 다시 찍지 않음
+    assert load_analysis(data_dir, ids["1강"])["pages"] == [{"start": 0.0}]
+
+
+def test_without_guide_skips_claude_and_the_guide_can_be_added_later(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    first, later = Recorder(), Recorder()
+
+    failures = analyze_all(tmp_path / "videos", tmp_path / "data", first.transcribe, None, first.extract_frames,
+                           detect_pages=first.detect_pages)
+    analyze_all(tmp_path / "videos", tmp_path / "data", later.transcribe, later.make_guide, later.extract_frames,
+                detect_pages=later.detect_pages)
+
+    assert failures == 0
+    assert first.transcribed == ["1강.mp4"]
+    assert first.captured == []  # 판서 사진은 요점 정리를 만들 때만 찍음
+    assert (later.transcribed, later.page_dirs, later.guided) == ([], [], ["1강"])
+    assert load_analysis(tmp_path / "data", ids["1강"])["guide"] == GUIDE
