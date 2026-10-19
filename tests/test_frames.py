@@ -163,19 +163,45 @@ def test_unexpected_error_does_not_stop_analysis(three_scenes, monkeypatch):
     assert extract_frames(three_scenes) == []
 
 
-def test_preview_command_saves_photos_named_by_time(three_scenes, tmp_path):
-    work = tmp_path / "work"
-    work.mkdir()
+def run_preview(cwd, *videos):
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent.parent)}
+    return subprocess.run([sys.executable, "-m", "academy.frames", *map(str, videos)], cwd=cwd,
+                          env=env, capture_output=True, text=True)
 
-    result = subprocess.run([sys.executable, "-m", "academy.frames", str(three_scenes)], cwd=work,
-                            env=env, capture_output=True, text=True)
+
+def test_preview_command_saves_photos_named_by_time(three_scenes, tmp_path):
+    result = run_preview(tmp_path, "lecture.mp4")
 
     assert result.returncode == 0, result.stderr
-    folder = work / "판서-미리보기" / "lecture"
+    folder = tmp_path / "판서-미리보기" / "lecture"
     assert sorted(p.name for p in folder.iterdir()) == ["00-30.jpg", "01-30.jpg", "02-30.jpg"]
     assert (folder / "00-30.jpg").read_bytes().startswith(b"\xff\xd8")
     assert "lecture.mp4: 사진 3장" in result.stdout
+
+
+def test_preview_keeps_same_named_lectures_apart(tmp_path):
+    # README가 권하는 videos/수학/1강.mp4, videos/영어/1강.mp4 구성
+    for subject in ("수학", "영어"):
+        (tmp_path / "videos" / subject).mkdir(parents=True)
+        make_video(tmp_path / "videos" / subject / "1강.mp4", [(10, white())])
+
+    result = run_preview(tmp_path, tmp_path / "videos/수학/1강.mp4", tmp_path / "videos/영어/1강.mp4")
+
+    assert result.returncode == 0, result.stderr
+    for name in ("수학-1강", "영어-1강"):
+        assert [p.name for p in (tmp_path / "판서-미리보기" / name).iterdir()] == ["00-00.jpg"]
+
+
+@pytest.mark.parametrize("name", ["..mp4", ".."])
+def test_preview_refuses_names_that_would_clear_other_previews(tmp_path, name):
+    keep = tmp_path / "판서-미리보기" / "2강" / "00-30.jpg"
+    keep.parent.mkdir(parents=True)
+    keep.write_bytes(b"\xff\xd8")
+
+    result = run_preview(tmp_path, name)
+
+    assert result.returncode != 0
+    assert keep.exists()
 
 
 def test_thin_spreads_evenly_and_keeps_ends():

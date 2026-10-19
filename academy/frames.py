@@ -82,15 +82,27 @@ def extract_frames(path: Path) -> list[tuple[int, bytes]]:
     return thin(kept, limit)
 
 
+def _preview_name(video: Path) -> str:
+    """수학/1강.mp4 → 수학-1강. 과목 폴더마다 같은 이름의 강의가 있어도 섞이지 않게 폴더 이름을 붙입니다."""
+    if video.stem in ("", ".", ".."):  # 그대로 쓰면 다른 미리보기까지 지울 수 있는 이름
+        sys.exit(f"영상 파일 이름이 아닙니다: {video}")
+    parent = video.parent.name
+    return f"{parent}-{video.stem}" if parent not in ("", ".", "..") else video.stem
+
+
 def main():
     from academy.ai import fmt_time
 
     parser = argparse.ArgumentParser(description="판서 사진 미리보기 (API 비용 없음)")
     parser.add_argument("videos", nargs="+", type=Path, help="강의 영상 파일")
-    for video in parser.parse_args().videos:
-        folder = Path("판서-미리보기") / video.stem
+    videos = parser.parse_args().videos
+    names = [_preview_name(video) for video in videos]
+    if len(set(names)) < len(names):
+        sys.exit("미리보기 폴더 이름이 같은 영상이 있습니다. 한 번에 하나씩 실행해 주세요.")
+    for video, name in zip(videos, names):
+        folder = Path("판서-미리보기") / name
         shutil.rmtree(folder, ignore_errors=True)  # 다시 실행하면 지난번 미리보기와 섞이지 않게
-        folder.mkdir(parents=True)
+        folder.mkdir(parents=True, exist_ok=True)  # 사진을 열어 둬서 다 못 지웠어도 이어서 저장
         frames = extract_frames(video)
         for seconds, jpeg in frames:
             # 윈도우 파일 이름에는 ":"를 쓸 수 없어서 01-30.jpg 처럼 저장합니다.
