@@ -101,6 +101,7 @@ def test_subtitles_survive_hand_edited_transcript(setup, tmp_path):
     save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": GUIDE, "segments": [
         {"start": 0.0, "text": "끝 시각을 지운 줄"},
         {"start": 10.0, "end": 12.0, "text": "첫 줄\n\n둘째 줄"},  # 빈 줄이 있으면 자막이 거기서 끊김
+        {"start": 20.0, "end": None, "text": "끝 시각을 비운 줄"},
     ]})
 
     res = client.get(f"/api/videos/{ids['1강']}/subtitles.vtt")
@@ -108,7 +109,8 @@ def test_subtitles_survive_hand_edited_transcript(setup, tmp_path):
     assert res.status_code == 200
     assert res.text == ("WEBVTT\n\n"
                         "00:00:00.000 --> 00:00:05.000\n끝 시각을 지운 줄\n\n"
-                        "00:00:10.000 --> 00:00:12.000\n첫 줄 둘째 줄\n")
+                        "00:00:10.000 --> 00:00:12.000\n첫 줄 둘째 줄\n\n"
+                        "00:00:20.000 --> 00:00:25.000\n끝 시각을 비운 줄\n")
 
 
 def test_no_subtitles_before_analysis(setup):
@@ -151,11 +153,59 @@ def test_search_finds_scenes_across_lectures(tmp_path):
     assert [r["title"] for r in client.get("/api/search", params={"q": "근의 공식"}).json()] == ["1강", "2강"]
 
 
-@pytest.mark.parametrize("q", ["", " ", "a" * 101])
-def test_search_rejects_empty_or_huge_queries(setup, q):
+@pytest.mark.parametrize("q", ["", " ", "의", "a" * 101])
+def test_search_rejects_empty_one_letter_or_huge_queries(setup, q):
     client, _, _ = setup
 
     assert client.get("/api/search", params={"q": q}).status_code == 422
+
+
+@pytest.mark.parametrize("bad", [
+    {"segments": [{"start": "0:10", "end": 1.0, "text": "근의 공식"}, {"start": 3.0, "text": "근의 공식"}]},
+    {"segments": [{"start": 1.0, "end": 2.0}]},  # text 없음
+    {"segments": [], "guide": {"chapters": [{"start": 0, "title": "근의 공식"}]}},  # points 없음
+], ids=["start-is-text", "no-text", "no-points"])
+def test_one_hand_edited_file_does_not_break_search(tmp_path, bad):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ("1강", "2강"):
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "guide": None, **bad})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "guide": None,
+                                         "segments": [{"start": 1.0, "end": 2.0, "text": "근의 공식"}]})
+    client = TestClient(create_app(video_dir, data_dir, lambda *a: ""))
+
+    res = client.get("/api/search", params={"q": "근의 공식"})
+
+    assert res.status_code == 200
+    assert [r["title"] for r in res.json()] == ["2강"]
+
+
+def test_search_ignores_line_breaks_and_unicode_form(setup, tmp_path):
+    import unicodedata
+
+    client, ids, _ = setup
+    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": None, "segments": [
+        {"start": 1.0, "end": 2.0, "text": "근의\n공식"},
+        {"start": 3.0, "end": 4.0, "text": unicodedata.normalize("NFD", "판별식")},  # 맥에서 고친 파일
+    ]})
+
+    hits = lambda q: [h["start"] for r in client.get("/api/search", params={"q": q}).json() for h in r["hits"]]
+
+    assert hits("근의 공식") == [1.0]
+    assert hits("판별식") == [3.0]
+
+
+def test_search_sees_reanalysed_lecture(setup, tmp_path):
+    client, ids, _ = setup  # 분석 결과를 기억해 두더라도, 다시 분석하면 새 내용으로 찾아야 합니다.
+    assert client.get("/api/search", params={"q": "안녕하세요"}).json()[0]["total"] == 1
+
+    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": None, "segments": [
+        {"start": 1.0, "end": 2.0, "text": "다시 분석한 내용"}]})
+
+    assert client.get("/api/search", params={"q": "안녕하세요"}).json() == []
+    assert client.get("/api/search", params={"q": "다시 분석"}).json()[0]["total"] == 1
 
 
 def test_ask_passes_question_to_tutor(setup):

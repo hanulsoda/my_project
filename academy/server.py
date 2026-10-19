@@ -3,11 +3,14 @@
 실행: uvicorn academy.server:app --host 0.0.0.0 --port 8000
 """
 
+import functools
 import html
+import json
 import logging
 import os
 import re
 import time
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
@@ -47,10 +50,26 @@ def _vtt_time(seconds: float) -> str:
 def subtitles_vtt(segments: list[dict]) -> str:
     # <, &, > 를 그대로 두면 자막 문법으로 읽혀 글자가 사라지거나 자막이 깨집니다. 줄바꿈도 한 줄로 이어
     # 붙입니다(빈 줄에서 자막이 끊김). 선생님이 대본을 고치다 끝 시각을 지웠으면 5초 동안 보여 줍니다.
-    cues = [f"{_vtt_time(s['start'])} --> {_vtt_time(s.get('end', s['start'] + 5))}\n"
+    cues = [f"{_vtt_time(s['start'])} --> {_vtt_time(s['start'] + 5 if s.get('end') is None else s['end'])}\n"
             f"{html.escape(' '.join(s['text'].split()), quote=False)}\n"
             for s in segments]
     return "\n".join(["WEBVTT\n", *cues])
+
+
+def _search_text(text: str) -> str:
+    # 맥에서 고친 파일의 한글(NFD)과 줄바꿈이 섞여도 같은 말로 찾습니다.
+    return " ".join(unicodedata.normalize("NFC", text).split()).lower()
+
+
+@functools.lru_cache(maxsize=2048)
+def _search_lines(path: str, mtime_ns: int, size: int) -> list[tuple[float, str, str]]:
+    """분석 파일 하나의 [(시점, 찾기용 글, 원래 글)]. 검색할 때마다 NAS에서 모든 파일을 다시 읽지 않도록
+    기억해 두고, 파일이 바뀌면(시각·크기) 새로 읽습니다."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    lines = [(s["start"], s["text"]) for s in data["segments"]]
+    for c in (data.get("guide") or {}).get("chapters", []):
+        lines += [(c["start"], text) for text in [c["title"], *c["points"]]]
+    return [(float(start), _search_text(text), text) for start, text in lines]
 
 
 class Turn(BaseModel):
@@ -109,24 +128,24 @@ def create_app(video_dir: Path, data_dir: Path, answer,
                 "analysis": load_analysis(data_dir, video_id)}
 
     @app.get("/api/search")
-    def search(q: str = Query(min_length=1, max_length=100)):
+    def search(q: str = Query(min_length=2, max_length=100)):
         """모든 강의의 대본과 요점에서 검색어가 나오는 장면. 강의마다 앞에서부터 5곳과 전체 개수."""
-        needle = q.strip().lower()
-        if not needle:
-            raise HTTPException(422, "검색어를 입력해 주세요")
+        needle = _search_text(q)
+        if len(needle) < 2:
+            raise HTTPException(422, "두 글자 이상 입력해 주세요")
         results = []
         for video in find_videos(video_dir):
+            path = Path(data_dir) / f"{video['id']}.json"
             try:
-                data = load_analysis(data_dir, video["id"])
-            except ValueError:  # 손으로 고치다 깨진 분석 파일 하나 때문에 검색 전체가 멈추지 않게
+                stat = path.stat()
+                lines = _search_lines(str(path), stat.st_mtime_ns, stat.st_size)
+            except FileNotFoundError:  # 아직 분석 전
                 continue
-            if not data:
+            except (ValueError, KeyError, TypeError, AttributeError):
+                # 손으로 고치다 형식이 틀린 분석 파일 하나 때문에 모든 학생의 검색이 멈추지 않게
+                logging.warning("검색에서 건너뛴 분석 파일 (형식이 맞지 않음): %s", path)
                 continue
-            hits = [{"start": s["start"], "text": s["text"]}
-                    for s in data["segments"] if needle in s["text"].lower()]
-            for c in (data.get("guide") or {}).get("chapters", []):
-                hits += [{"start": c["start"], "text": text}
-                         for text in [c["title"], *c["points"]] if needle in text.lower()]
+            hits = [{"start": start, "text": text} for start, found, text in lines if needle in found]
             if hits:
                 hits.sort(key=lambda h: h["start"])
                 results.append({"id": video["id"], "title": video["title"], "total": len(hits), "hits": hits[:5]})
