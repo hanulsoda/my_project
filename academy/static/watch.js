@@ -69,7 +69,10 @@ function render({ title, analysis }) {
 // ---- 요점 정리 + 챕터 점프 ----
 function renderGuide(guide, duration) {
   const box = $("tab-guide");
-  box.replaceChildren(el("p", { class: "summary" }, guide.summary));
+  box.replaceChildren(
+    el("div", { class: "guide-actions" },
+      el("button", { class: "print", onclick: () => printGuide(guide) }, "인쇄")),
+    el("p", { class: "summary" }, guide.summary));
   const bar = $("chapter-bar");
   bar.hidden = guide.chapters.length === 0;
   chapters = guide.chapters.map((c, i) => {
@@ -92,6 +95,34 @@ function renderGuide(guide, duration) {
     bar.append(segment);
     return { start: c.start, title: c.title, card, bar: segment };
   });
+}
+
+// ---- 요점 정리 인쇄 (종이 또는 "PDF로 저장") ----
+async function printGuide(guide) {
+  const mark = (n) => "①②③④⑤⑥⑦⑧⑨⑩"[n] || `${n + 1})`;
+  const quiz = guide.quiz;
+  $("print").replaceChildren(
+    el("h1", {}, $("title").textContent),
+    el("p", { class: "summary" }, guide.summary),
+    ...guide.chapters.map((c) => el("section", { class: "chapter" },
+      el("h2", {}, `${fmt(c.start)} ${c.title}`),
+      el("ul", {}, ...c.points.map((p) => el("li", {}, p))),
+      Number.isInteger(c.board)
+        ? el("img", { src: `/frames/${id}/${c.board}.jpg`, alt: `판서 ${fmt(c.board)}`, onerror: (e) => e.target.remove() })
+        : "")),
+    ...(quiz.length ? [
+      el("h2", { class: "quiz-title" }, "복습 퀴즈"),
+      ...quiz.map((q, n) => el("section", { class: "question" },
+        el("h3", {}, `${n + 1}. ${q.question}`),
+        el("ul", {}, ...q.choices.map((choice, k) => el("li", {}, `${mark(k)} ${choice}`))))),
+      // 정답은 마지막 장에 따로: 먼저 풀어 보고 맞춰 볼 수 있게
+      el("section", { class: "answers" }, el("h2", {}, "정답"),
+        ...quiz.map((q, n) => el("p", {}, `${n + 1}. ${mark(q.answer)} ${q.explanation}`))),
+    ] : []));
+  // 판서 사진을 다 불러온 뒤 인쇄합니다 (덜 불러온 사진은 빈칸으로 찍힘).
+  await Promise.all([...$("print").querySelectorAll("img")].map((img) => img.complete ? null
+    : new Promise((done) => { img.addEventListener("load", done); img.addEventListener("error", done); })));
+  window.print();
 }
 
 // ---- 대본 + 검색 ----

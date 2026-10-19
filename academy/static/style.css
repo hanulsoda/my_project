@@ -293,3 +293,30 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
   .player video { border-radius: 8px; }
   .panel { height: 65vh; margin: 8px 16px 16px; }
 }
+
+/* ---- 요점 정리 인쇄 ---- */
+.guide-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.guide-actions .print {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+.print-area { display: none; }
+
+@media print {
+  body > :not(.print-area) { display: none !important; }
+  .watch-page { display: block; height: auto; background: #fff; }
+  .print-area { display: block; color: #000; font-size: 11pt; line-height: 1.6; }
+  .print-area h1 { margin: 0 0 8pt; font-size: 16pt; }
+  .print-area h2 { margin: 12pt 0 4pt; font-size: 12.5pt; }
+  .print-area h3 { margin: 8pt 0 2pt; font-size: 11pt; }
+  .print-area .summary { padding: 8pt 10pt; border: 1px solid #999; border-radius: 4pt; background: none; }
+  .print-area ul { margin: 0; padding-left: 16pt; }
+  .print-area .question ul { list-style: none; padding-left: 8pt; }
+  .print-area section { break-inside: avoid; }
+  .print-area img { display: block; max-width: 100%; max-height: 8cm; margin-top: 6pt; border: 1px solid #ccc; }
+  .print-area .quiz-title, .print-area .answers { break-before: page; }
+}
