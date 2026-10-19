@@ -68,7 +68,8 @@ function renderGuide(guide, duration) {
       el("ul", {}, ...c.points.map((p) => el("li", {}, p))));
     if (Number.isInteger(c.board)) {  // 분석이 고른 판서 사진. 누르면 그 장면으로
       card.append(el("button", { class: "board", title: `${fmt(c.board)} 장면으로 이동`, onclick: () => seek(c.board) },
-        el("img", { src: `/frames/${id}/${c.board}.jpg`, loading: "lazy", alt: `판서 ${fmt(c.board)}` })));
+        el("img", { src: `/frames/${id}/${c.board}.jpg`, loading: "lazy", alt: `판서 ${fmt(c.board)}`,
+                    onerror: (e) => e.target.parentElement.remove() })));  // 사진 파일이 없으면 깨진 칸 대신 숨김
     }
     box.append(card);
     const end = i + 1 < guide.chapters.length ? guide.chapters[i + 1].start : duration;
