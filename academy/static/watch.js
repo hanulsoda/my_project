@@ -45,6 +45,10 @@ function render({ title, analysis }) {
     return;
   }
   renderTranscript(analysis.segments);
+  if (analysis.segments.length) {  // 받아쓴 대본으로 자막. 영상의 CC 버튼으로 켜고 끕니다.
+    video.append(el("track", { kind: "subtitles", srclang: "ko", label: "한국어 자막",
+                               src: `/api/videos/${id}/subtitles.vtt` }));
+  }
   setupAsk();
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);

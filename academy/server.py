@@ -14,7 +14,7 @@ from typing import Literal
 
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -37,6 +37,18 @@ def _denied_page(site_url: str) -> HTMLResponse:
         '들어온 지 12시간이 지났다면 다시 들어와 주세요.</p>'
         f"{link}</body></html>",
         status_code=401)
+
+
+def _vtt_time(seconds: float) -> str:
+    ms = round(seconds * 1000)
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d}.{ms % 1000:03d}"
+
+
+def subtitles_vtt(segments: list[dict]) -> str:
+    # <, &, > 를 그대로 두면 자막 문법으로 읽혀 글자가 사라지거나 자막이 깨집니다.
+    cues = [f"{_vtt_time(s['start'])} --> {_vtt_time(s['end'])}\n{html.escape(s['text'], quote=False)}\n"
+            for s in segments]
+    return "\n".join(["WEBVTT\n", *cues])
 
 
 class Turn(BaseModel):
@@ -93,6 +105,14 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         video = get_video(video_id)
         return {"id": video_id, "title": video["title"],
                 "analysis": load_analysis(data_dir, video_id)}
+
+    @app.get("/api/videos/{video_id}/subtitles.vtt")
+    def subtitles(video_id: str):
+        get_video(video_id)
+        data = load_analysis(data_dir, video_id)
+        if not data:
+            raise HTTPException(404, "아직 분석되지 않은 영상입니다")
+        return Response(subtitles_vtt(data["segments"]), media_type="text/vtt")
 
     @app.get("/media/{video_id}")
     def media(video_id: str):

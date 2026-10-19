@@ -80,6 +80,29 @@ def test_board_photo_rejects_bad_requests(setup, tmp_path, name):
     assert client.get("/frames/nope/60.jpg").status_code == 404
 
 
+def test_subtitles_are_webvtt_made_from_transcript(setup, tmp_path):
+    client, ids, _ = setup
+    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": GUIDE, "segments": [
+        {"start": 0.0, "end": 2.0, "text": "안녕하세요"},
+        {"start": 3661.5, "end": 3663.25, "text": "a < b & c --> d"},  # 자막 문법 기호가 섞인 대본
+    ]})
+
+    res = client.get(f"/api/videos/{ids['1강']}/subtitles.vtt")
+
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/vtt")
+    assert res.text == ("WEBVTT\n\n"
+                        "00:00:00.000 --> 00:00:02.000\n안녕하세요\n\n"
+                        "01:01:01.500 --> 01:01:03.250\na &lt; b &amp; c --&gt; d\n")
+
+
+def test_no_subtitles_before_analysis(setup):
+    client, ids, _ = setup
+
+    assert client.get(f"/api/videos/{ids['2강']}/subtitles.vtt").status_code == 404
+    assert client.get("/api/videos/nope/subtitles.vtt").status_code == 404
+
+
 def test_ask_passes_question_to_tutor(setup):
     client, ids, calls = setup
     history = [{"role": "user", "content": "앞 질문"}, {"role": "assistant", "content": "앞 답"}]
