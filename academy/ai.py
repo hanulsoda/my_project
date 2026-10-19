@@ -141,7 +141,7 @@ def answer_question(client, title: str, segments: list[dict], question: str,
         question = f"(지금 [{fmt_time(current_time)}] 장면을 보면서 질문합니다)\n{question}"
     return _ask_claude(
         client,
-        max_tokens=8000,
+        max_tokens=4000,  # 질문 한 번 비용의 상한. 쉽고 짧게 답하라고 했으니 충분합니다.
         output_config={"effort": "medium"},
         # 같은 영상에 대한 질문이 이어지면 대본 부분은 캐시에서 싸게 읽힙니다.
         system=[{"type": "text",

@@ -100,6 +100,14 @@ def test_answer_question_without_current_time():
     assert client.requests[0]["messages"] == [{"role": "user", "content": "질문"}]
 
 
+def test_answer_length_is_capped_to_keep_cost_down():
+    client = FakeClient("답")
+
+    answer_question(client, "1강", SEGMENTS, "아주 길게 설명해 주세요", [], current_time=None)
+
+    assert client.requests[0]["max_tokens"] <= 4000  # 한 번에 드는 비용의 상한 (짧은 답에는 충분)
+
+
 FRAMES = [(0, b"\xff\xd8A"), (60, b"\xff\xd8B"), (120, b"\xff\xd8C")]
 BOARD_GUIDE = {
     "summary": "요약",

@@ -4,13 +4,16 @@
 """
 
 import functools
+import hashlib
 import html
 import json
 import logging
 import os
 import re
+import threading
 import time
 import unicodedata
+from collections import deque
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
@@ -19,7 +22,7 @@ import anthropic
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from academy.entry import MIN_SECRET_LEN, PASS_TTL, entry_link_ok, make_pass, pass_ok
 from academy.library import find_videos, load_analysis
@@ -28,6 +31,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 PASS_COOKIE = "study_pass"
 LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
 VIDEO_LIST_TTL = 10  # 영상 목록을 기억해 두는 시간(초)
+# 질문하기 제한: 질문마다 Claude API 비용이 들어서, 한 사람이나 프로그램이 마구 보내지 못하게 합니다.
+ASK_PER_PERSON = 10   # 한 사람(입장 통과 하나)이 ASK_WINDOW 동안 할 수 있는 질문 수
+ASK_WINDOW = 600      # 초 (10분)
+ASK_PER_HOUR = 200    # 학원 전체가 1시간에 할 수 있는 질문 수
+ASK_AT_ONCE = 4       # 동시에 답을 만드는 질문 수 (나머지 요청이 영상·목록을 막지 않게)
+HISTORY_CHARS = 20000 # 함께 보내는 대화 기록 글자 수 합
+MAX_BODY = 256 * 1024 # 요청 본문 최대 크기(바이트). 큰 요청으로 NAS 메모리를 채우지 못하게
 
 
 def _denied_page(site_url: str) -> HTMLResponse:
@@ -83,6 +93,40 @@ class AskRequest(BaseModel):
     history: list[Turn] = Field(default=[], max_length=20)
     current_time: float | None = None
 
+    @model_validator(mode="after")
+    def _history_not_too_long(self):
+        # 대화 기록은 질문할 때마다 Claude에 다시 보내져 비용이 듭니다. 실제 대화는 이보다 훨씬 짧습니다.
+        if sum(len(t.content) for t in self.history) > HISTORY_CHARS:
+            raise ValueError(f"대화 기록이 {HISTORY_CHARS}자를 넘습니다")
+        return self
+
+
+class _AskLimits:
+    """질문하기(유료 API)를 한 사람이 마구 쓰거나, 동시에 몰려 서버가 멈추지 않게 하는 제한."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.by_person: dict[str, deque] = {}
+        self.everyone: deque = deque()
+        self.at_once = threading.BoundedSemaphore(ASK_AT_ONCE)
+
+    def refuse_reason(self, person: str, now: float) -> str | None:
+        with self.lock:
+            mine = self.by_person.setdefault(person, deque())
+            while mine and now - mine[0] >= ASK_WINDOW:
+                mine.popleft()
+            while self.everyone and now - self.everyone[0] >= 3600:
+                self.everyone.popleft()
+            if len(mine) >= ASK_PER_PERSON:
+                return "질문을 너무 자주 했습니다. 몇 분 뒤 다시 해 주세요."
+            if len(self.everyone) >= ASK_PER_HOUR:
+                return "지금은 질문이 너무 많습니다. 잠시 뒤 다시 해 주세요."
+            mine.append(now)
+            self.everyone.append(now)
+            if len(self.by_person) > 10000:  # 오래된 사람 기록 정리
+                self.by_person = {k: q for k, q in self.by_person.items() if q and now - q[-1] < ASK_WINDOW}
+            return None
+
 
 def create_app(video_dir: Path, data_dir: Path, answer,
                entry_secret: str = "", site_url: str = "") -> FastAPI:
@@ -98,6 +142,17 @@ def create_app(video_dir: Path, data_dir: Path, answer,
             if path.startswith(("/api/", "/media/")):
                 return JSONResponse({"detail": LOGIN_NOTICE}, status_code=401)
             return _denied_page(site_url)
+
+    # 가장 바깥에서(입장 확인보다 먼저) 요청 크기를 봅니다. 본문을 읽기 전에 거절해야 NAS 메모리를 지킵니다.
+    @app.middleware("http")
+    async def limit_body(request: Request, call_next):
+        if request.method in ("POST", "PUT", "PATCH"):
+            length = request.headers.get("content-length", "")
+            if not length.isdigit():
+                return JSONResponse({"detail": "요청 크기를 알 수 없습니다"}, status_code=411)
+            if int(length) > MAX_BODY:
+                return JSONResponse({"detail": "요청이 너무 큽니다"}, status_code=413)
+        return await call_next(request)
 
     @app.get("/enter")
     def enter(request: Request, exp: str | None = None, sig: str | None = None):
@@ -182,18 +237,30 @@ def create_app(video_dir: Path, data_dir: Path, answer,
             raise HTTPException(404, "사진을 찾을 수 없습니다")
         return FileResponse(path, media_type="image/jpeg")
 
+    limits = _AskLimits()
+
     @app.post("/api/videos/{video_id}/ask")
-    def ask(video_id: str, req: AskRequest):
+    def ask(video_id: str, req: AskRequest, request: Request):
         get_video(video_id)
         data = load_analysis(data_dir, video_id)
         if not data or not data["segments"]:
             raise HTTPException(409, "아직 분석되지 않은 영상이라 질문할 수 없습니다")
+        # 입장 통과(쿠키)마다 셉니다. 입장 확인을 끈 학원 내부망에서는 컴퓨터마다 셉니다.
+        cookie = request.cookies.get(PASS_COOKIE)
+        person = hashlib.sha256(cookie.encode()).hexdigest() if cookie else f"ip:{request.client.host}"
+        reason = limits.refuse_reason(person, time.monotonic())
+        if reason:
+            raise HTTPException(429, reason)
+        if not limits.at_once.acquire(blocking=False):
+            raise HTTPException(503, "다른 학생들의 질문에 답하는 중입니다. 잠시 뒤 다시 해 주세요.")
         try:
             text = answer(data["title"], data["segments"], req.question,
                           [t.model_dump() for t in req.history], req.current_time)
         except Exception as e:  # API 키 누락, 네트워크 오류, 응답 거절 등
             logging.exception("AI 답변 실패")
             raise HTTPException(502, f"AI 답변을 받지 못했습니다: {e}")
+        finally:
+            limits.at_once.release()
         return {"answer": text}
 
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True))

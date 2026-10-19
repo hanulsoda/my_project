@@ -206,6 +206,19 @@ function linkify(text) {
   return parts;
 }
 
+// 서버는 대화 기록을 20개, 합쳐서 2만 자까지만 받습니다. 최근 질문·답 묶음부터 그 안에 들어가는 만큼만 보냅니다.
+function recentHistory(history) {
+  const picked = [];
+  let chars = 0;
+  for (let i = history.length - 2; i >= 0 && picked.length < 20; i -= 2) {
+    const pair = history.slice(i, i + 2);  // 질문 + 답
+    chars += pair.reduce((n, t) => n + t.content.length, 0);
+    if (chars > 20000) break;
+    picked.unshift(...pair);
+  }
+  return picked;
+}
+
 function setupAsk() {
   const history = [];
   const form = $("ask-form"), question = $("question"), chat = $("chat");
@@ -235,7 +248,7 @@ function setupAsk() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: text,
-          history: history.slice(-20),
+          history: recentHistory(history),
           current_time: $("use-time").checked ? video.currentTime : null,
         }),
       }));
