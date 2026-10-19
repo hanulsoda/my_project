@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 
-from academy.library import find_videos, load_analysis, save_analysis, save_frame
+from academy.library import clear_frames, find_videos, load_analysis, save_analysis, save_frame
 
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
 
@@ -36,13 +36,15 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, extract_frames, for
                 frames = extract_frames(video["path"])
                 print("  요점 정리·퀴즈 만드는 중...", flush=True)
                 data["guide"] = make_guide(data["title"], data["segments"], frames)
-                # 챕터가 고른 판서 사진만 남깁니다. 분석 파일보다 먼저 저장해 없는 사진을 가리키지 않게 합니다.
-                chosen = {c["board"] for c in data["guide"]["chapters"] if c.get("board") is not None}
-                for seconds, jpeg in frames:
-                    if seconds in chosen:
-                        save_frame(data_dir, video["id"], seconds, jpeg)
             else:
-                data["guide"] = SILENT_GUIDE
+                frames, data["guide"] = [], SILENT_GUIDE
+            # 지난번 분석의 사진은 지우고, 챕터가 고른 판서 사진만 남깁니다.
+            # 분석 파일보다 먼저 저장해 없는 사진을 가리키지 않게 합니다.
+            clear_frames(data_dir, video["id"])
+            chosen = {c["board"] for c in data["guide"]["chapters"] if c.get("board") is not None}
+            for seconds, jpeg in frames:
+                if seconds in chosen:
+                    save_frame(data_dir, video["id"], seconds, jpeg)
             save_analysis(data_dir, video["id"], data)
             print("  완료")
         except Exception as e:

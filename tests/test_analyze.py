@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from academy.analyze import analyze_all
-from academy.library import find_videos, load_analysis, save_analysis
+from academy.library import find_videos, load_analysis, save_analysis, save_frame
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -118,6 +118,19 @@ def test_saves_only_chosen_frames_once(tmp_path):
     assert list(frame_dir.iterdir()) == [frame_dir / "60.jpg"]
     assert (frame_dir / "60.jpg").read_bytes() == b"B"
     assert [c["board"] for c in load_analysis(tmp_path / "data", ids["1강"])["guide"]["chapters"]] == [60, 60]
+
+
+@pytest.mark.parametrize("segments", [SEGMENTS, []], ids=["with-speech", "silent"])
+def test_reanalysis_removes_old_photos(tmp_path, segments):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    frame_dir = tmp_path / "data" / "frames" / ids["1강"]
+    save_frame(tmp_path / "data", ids["1강"], 999, b"old")  # 지난번 분석이 고른 사진
+    rec = Recorder(segments=segments)
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, rec.extract_frames,
+                force=True)
+
+    assert sorted(p.name for p in frame_dir.glob("*")) == (["60.jpg"] if segments else [])
 
 
 @pytest.mark.parametrize("make_dir", [True, False], ids=["empty-folder", "missing-folder"])

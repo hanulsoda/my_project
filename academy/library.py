@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 
 # 브라우저에서 바로 재생되는 형식만 다룹니다.
@@ -46,6 +47,10 @@ def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:
     # 임시 파일에 다 쓴 뒤 바꿔치기해서, 저장 중에 끊겨도 기존 파일은 멀쩡하게 남깁니다.
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def clear_frames(data_dir: Path, video_id: str) -> None:
+    shutil.rmtree(Path(data_dir) / "frames" / video_id, ignore_errors=True)
 
 
 def save_frame(data_dir: Path, video_id: str, seconds: int, jpeg: bytes) -> None:
