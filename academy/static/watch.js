@@ -2,6 +2,8 @@ const id = new URLSearchParams(location.search).get("id");
 const $ = (elementId) => document.getElementById(elementId);
 const video = $("video");
 video.src = `/media/${id}`;
+// 우클릭 메뉴의 "동영상을 다른 이름으로 저장"을 막습니다 (마음먹고 받는 것까지 막지는 못함).
+video.addEventListener("contextmenu", (e) => e.preventDefault());
 // 영상을 열어 둔 채 12시간이 지나면 재생이 401로 막히므로, 그때도 로그인 안내로 바꿉니다.
 video.addEventListener("error", () => fetch(`/api/videos/${id}`).then(reloadIfLoggedOut));
 
