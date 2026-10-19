@@ -17,19 +17,21 @@ def _lecture_order(path: Path):
 
 
 def find_videos(video_dir: Path) -> list[dict]:
+    found = []
+    for folder, dirs, files in os.walk(video_dir):
+        # 시놀로지 휴지통(#recycle)·썸네일(@eaDir)과 숨김 폴더·파일(.으로 시작)은 강의가 아닙니다.
+        # 폴더는 아예 들어가지 않습니다(영상마다 썸네일 폴더가 있어 다 훑으면 느림).
+        dirs[:] = [d for d in dirs if d[0] not in ".@#"]
+        found += [Path(folder) / name for name in files
+                  if name[0] not in ".@#" and Path(name).suffix.lower() in VIDEO_EXTS]
     videos = []
-    for path in sorted(Path(video_dir).rglob("*"), key=_lecture_order):
-        rel_path = path.relative_to(video_dir)
-        # 시놀로지 휴지통(#recycle)·썸네일(@eaDir)과 숨김 파일(.으로 시작)은 강의가 아닙니다.
-        if any(part[0] in ".@#" for part in rel_path.parts):
-            continue
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTS:
-            rel = rel_path.as_posix()
-            videos.append({
-                "id": hashlib.sha1(rel.encode()).hexdigest()[:12],
-                "title": rel.rsplit(".", 1)[0],
-                "path": path,
-            })
+    for path in sorted(found, key=_lecture_order):
+        rel = path.relative_to(video_dir).as_posix()
+        videos.append({
+            "id": hashlib.sha1(rel.encode()).hexdigest()[:12],
+            "title": rel.rsplit(".", 1)[0],
+            "path": path,
+        })
     return videos
 
 
