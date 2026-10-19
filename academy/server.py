@@ -27,6 +27,7 @@ from academy.library import find_videos, load_analysis
 STATIC_DIR = Path(__file__).parent / "static"
 PASS_COOKIE = "study_pass"
 LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
+VIDEO_LIST_TTL = 10  # 영상 목록을 기억해 두는 시간(초)
 
 
 def _denied_page(site_url: str) -> HTMLResponse:
@@ -109,9 +110,19 @@ def create_app(video_dir: Path, data_dir: Path, answer,
                        httponly=True, samesite="lax", secure=request.url.scheme == "https")
         return res
 
+    listed = {"at": None, "videos": []}
+
+    def videos():
+        # 영상 폴더 전체를 훑는 일은 NAS에서 느립니다(영상 1,000개면 수백 ms). 영상을 넘길 때마다 오는 요청마다
+        # 훑지 않도록 잠깐 기억해 둡니다. 새로 올린 강의는 VIDEO_LIST_TTL초 안에 목록에 나타납니다.
+        now = time.monotonic()
+        if listed["at"] is None or now - listed["at"] >= VIDEO_LIST_TTL:
+            listed["videos"], listed["at"] = find_videos(video_dir), now
+        return listed["videos"]
+
     def get_video(video_id):
-        for video in find_videos(video_dir):
-            if video["id"] == video_id:
+        for video in videos():
+            if video["id"] == video_id and video["path"].is_file():  # 그사이 지운 영상은 없는 것으로
                 return video
         raise HTTPException(404, "영상을 찾을 수 없습니다")
 
@@ -119,7 +130,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
     def list_videos():
         return [{"id": v["id"], "title": v["title"],
                  "analyzed": (Path(data_dir) / f"{v['id']}.json").exists()}
-                for v in find_videos(video_dir)]
+                for v in videos()]
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
@@ -134,7 +145,7 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         if len(needle) < 2:
             raise HTTPException(422, "두 글자 이상 입력해 주세요")
         results = []
-        for video in find_videos(video_dir):
+        for video in videos():
             path = Path(data_dir) / f"{video['id']}.json"
             try:
                 stat = path.stat()

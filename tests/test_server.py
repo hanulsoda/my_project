@@ -244,6 +244,46 @@ def test_ask_reports_ai_failure_clearly(tmp_path):
     assert "authentication" in res.json()["detail"]
 
 
+def test_video_folder_is_not_rescanned_on_every_request(tmp_path, monkeypatch):
+    import academy.server as server
+
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"x" * 100)
+    scans = []
+    real = server.find_videos
+    monkeypatch.setattr(server, "find_videos", lambda d: scans.append(d) or real(d))
+    client = TestClient(create_app(tmp_path / "videos", tmp_path / "data", lambda *a: ""))
+    video_id = client.get("/api/videos").json()[0]["id"]
+
+    for start in range(0, 100, 10):  # 영상을 보며 여기저기 넘길 때마다 오는 요청들
+        client.get(f"/media/{video_id}", headers={"Range": f"bytes={start}-{start + 9}"})
+    client.get(f"/api/videos/{video_id}")
+
+    assert len(scans) == 1
+
+
+def test_video_deleted_moments_ago_is_not_found_instead_of_crashing(setup, tmp_path):
+    client, ids, _ = setup
+    client.get("/api/videos")  # 목록을 기억해 둔 상태에서
+    (tmp_path / "videos" / "1강.mp4").unlink()  # 선생님이 영상을 지움
+
+    assert client.get(f"/media/{ids['1강']}").status_code == 404
+
+
+def test_new_video_shows_up_once_the_list_is_old(tmp_path, monkeypatch):
+    import academy.server as server
+
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"x")
+    monkeypatch.setattr(server, "VIDEO_LIST_TTL", 0)  # 기억해 둔 목록이 바로 낡은 것으로
+    client = TestClient(create_app(tmp_path / "videos", tmp_path / "data", lambda *a: ""))
+    assert len(client.get("/api/videos").json()) == 1
+
+    (tmp_path / "videos" / "2강.mp4").write_bytes(b"x")  # 선생님이 새 강의를 올림
+
+    assert [v["title"] for v in client.get("/api/videos").json()] == ["1강", "2강"]
+
+
 def test_serves_student_pages(setup):
     client, _, _ = setup
 
