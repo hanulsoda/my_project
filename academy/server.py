@@ -45,8 +45,10 @@ def _vtt_time(seconds: float) -> str:
 
 
 def subtitles_vtt(segments: list[dict]) -> str:
-    # <, &, > 를 그대로 두면 자막 문법으로 읽혀 글자가 사라지거나 자막이 깨집니다.
-    cues = [f"{_vtt_time(s['start'])} --> {_vtt_time(s['end'])}\n{html.escape(s['text'], quote=False)}\n"
+    # <, &, > 를 그대로 두면 자막 문법으로 읽혀 글자가 사라지거나 자막이 깨집니다. 줄바꿈도 한 줄로 이어
+    # 붙입니다(빈 줄에서 자막이 끊김). 선생님이 대본을 고치다 끝 시각을 지웠으면 5초 동안 보여 줍니다.
+    cues = [f"{_vtt_time(s['start'])} --> {_vtt_time(s.get('end', s['start'] + 5))}\n"
+            f"{html.escape(' '.join(s['text'].split()), quote=False)}\n"
             for s in segments]
     return "\n".join(["WEBVTT\n", *cues])
 

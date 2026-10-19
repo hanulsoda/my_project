@@ -192,6 +192,24 @@ def test_preview_keeps_same_named_lectures_apart(tmp_path):
         assert [p.name for p in (tmp_path / "판서-미리보기" / name).iterdir()] == ["00-00.jpg"]
 
 
+def test_preview_fails_for_missing_video(tmp_path):
+    result = run_preview(tmp_path, "없는강의.mp4")
+
+    assert result.returncode != 0
+    assert "없는강의.mp4" in result.stderr
+    assert not (tmp_path / "판서-미리보기" / "없는강의").exists()
+
+
+def test_unexpected_error_shows_where_it_happened(three_scenes, monkeypatch, capsys):
+    def broken_jpeg(frame):
+        raise TypeError("예상 못 한 오류")
+
+    monkeypatch.setattr("academy.frames._jpeg", broken_jpeg)
+    extract_frames(three_scenes)
+
+    assert "Traceback" in capsys.readouterr().err  # 선생님이 오류를 그대로 붙여 보낼 수 있게
+
+
 @pytest.mark.parametrize("name", ["..mp4", ".."])
 def test_preview_refuses_names_that_would_clear_other_previews(tmp_path, name):
     keep = tmp_path / "판서-미리보기" / "2강" / "00-30.jpg"

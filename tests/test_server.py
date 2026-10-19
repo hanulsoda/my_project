@@ -96,6 +96,21 @@ def test_subtitles_are_webvtt_made_from_transcript(setup, tmp_path):
                         "01:01:01.500 --> 01:01:03.250\na &lt; b &amp; c --&gt; d\n")
 
 
+def test_subtitles_survive_hand_edited_transcript(setup, tmp_path):
+    client, ids, _ = setup
+    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": GUIDE, "segments": [
+        {"start": 0.0, "text": "끝 시각을 지운 줄"},
+        {"start": 10.0, "end": 12.0, "text": "첫 줄\n\n둘째 줄"},  # 빈 줄이 있으면 자막이 거기서 끊김
+    ]})
+
+    res = client.get(f"/api/videos/{ids['1강']}/subtitles.vtt")
+
+    assert res.status_code == 200
+    assert res.text == ("WEBVTT\n\n"
+                        "00:00:00.000 --> 00:00:05.000\n끝 시각을 지운 줄\n\n"
+                        "00:00:10.000 --> 00:00:12.000\n첫 줄 둘째 줄\n")
+
+
 def test_no_subtitles_before_analysis(setup):
     client, ids, _ = setup
 

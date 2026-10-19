@@ -9,6 +9,7 @@ import io
 import math
 import shutil
 import sys
+import traceback
 from pathlib import Path
 
 import av
@@ -79,6 +80,8 @@ def extract_frames(path: Path) -> list[tuple[int, bytes]]:
     except Exception as e:  # 사진은 덤이라 어떤 오류여도 영상 분석은 계속합니다.
         note = f"앞부분 {len(kept)}장만 씁니다" if kept else "건너뜁니다"
         print(f"  화면 캡처 중 오류, {note}: {e}", file=sys.stderr)
+        if not isinstance(e, (av.error.FFmpegError, IndexError, ValueError)):
+            traceback.print_exc()  # 영상 문제가 아닌 예상 밖 오류는 자세히 남겨서 그대로 알려 줄 수 있게
     return thin(kept, limit)
 
 
@@ -99,15 +102,27 @@ def main():
     names = [_preview_name(video) for video in videos]
     if len(set(names)) < len(names):
         sys.exit("미리보기 폴더 이름이 같은 영상이 있습니다. 한 번에 하나씩 실행해 주세요.")
+    failed = 0
     for video, name in zip(videos, names):
+        if not video.is_file():
+            print(f"영상 파일을 찾지 못했습니다: {video}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{video.name}: 화면 캡처 중...", flush=True)  # 1시간 강의는 1~2분 걸립니다
+        frames = extract_frames(video)
+        if not frames:
+            print(f"{video.name}: 사진을 만들지 못했습니다", file=sys.stderr)
+            failed += 1
+            continue
         folder = Path("판서-미리보기") / name
         shutil.rmtree(folder, ignore_errors=True)  # 다시 실행하면 지난번 미리보기와 섞이지 않게
         folder.mkdir(parents=True, exist_ok=True)  # 사진을 열어 둬서 다 못 지웠어도 이어서 저장
-        frames = extract_frames(video)
         for seconds, jpeg in frames:
             # 윈도우 파일 이름에는 ":"를 쓸 수 없어서 01-30.jpg 처럼 저장합니다.
             (folder / f"{fmt_time(seconds).replace(':', '-')}.jpg").write_bytes(jpeg)
         print(f"{video.name}: 사진 {len(frames)}장 → {folder}/")
+    if failed:
+        sys.exit(f"{failed}개 영상의 미리보기를 만들지 못했습니다.")
 
 
 if __name__ == "__main__":
