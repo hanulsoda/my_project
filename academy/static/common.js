@@ -50,6 +50,11 @@ function quizCard(q, number, onAnswer, replay) {
   return el("article", { class: "question" }, el("h3", {}, `Q${number}. ${q.question}`), ...choices, feedback);
 }
 
+// "설명 다시 보기"로 갈 시각이 있는 문제인지. 손으로 고치다 "1:40"처럼 글자가 되거나 빠질 수 있습니다.
+function hasTime(q) {
+  return typeof q.time === "number" && Number.isFinite(q.time) && q.time >= 0;
+}
+
 // 틀린 문제는 강의마다 문제 글로 기억합니다(wrong:<강의 id>). 다시 분석해 순서가 바뀌어도 섞이지 않습니다.
 function markWrong(videoId, question, wrong) {
   const set = new Set(store.get(`wrong:${videoId}`) || []);

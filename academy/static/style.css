@@ -104,21 +104,6 @@ button[type="submit"]:disabled { opacity: 0.6; }
 
 /* 전체 강의 검색 */
 .list-search { display: flex; margin-bottom: 12px; }
-
-/* 틀린 문제 복습 */
-#review { margin: 0 0 12px; }
-.review-link {
-  display: inline-block;
-  padding: 8px 14px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-  text-decoration: none;
-}
-.review-page { max-width: 760px; margin: 0 auto; padding: 16px; }
-.review-page h2 { margin: 16px 0 8px; font-size: 17px; }
-a.link { color: var(--accent); }
 .list-search input { flex: 1; min-width: 0; }
 .search-results .result {
   margin-bottom: 12px;
@@ -140,6 +125,21 @@ a.link { color: var(--accent); }
 .search-results .hit:hover { background: var(--hover); }
 .search-results .time { margin-right: 6px; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
 .search-results .more { margin: 4px 8px 0; color: var(--muted); font-size: 13px; }
+
+/* 틀린 문제 복습 */
+#review { margin: 0 0 12px; }
+.review-link {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.review-page { max-width: 760px; margin: 0 auto; padding: 16px; }
+.review-page h2 { margin: 16px 0 8px; font-size: 17px; }
+a.link { color: var(--accent); }
 
 /* ---- 학습 플레이어 ---- */
 .watch-page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }

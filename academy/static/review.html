@@ -21,24 +21,28 @@
       const lists = wrongLists();
       if (!lists.length) return say("복습할 틀린 문제가 없습니다. 강의 퀴즈에서 틀린 문제가 여기에 모입니다.");
       const videos = await (await reloadIfLoggedOut(await fetch("/api/videos"))).json();
-      for (const w of lists) {  // 지워진 강의의 기록은 정리합니다.
-        if (!videos.some((v) => v.id === w.id)) store.set(`wrong:${w.id}`, []);
+      // 지워진 강의의 기록은 정리합니다. 단, 목록이 통째로 비었으면(NAS 영상 폴더가 잠시 안 보일 때) 건드리지 않습니다.
+      if (videos.length) {
+        for (const w of lists) if (!videos.some((v) => v.id === w.id)) store.set(`wrong:${w.id}`, []);
       }
+      let failed = !videos.length;
       const sections = await Promise.all(videos.filter((v) => lists.some((w) => w.id === v.id)).map(async (v) => {
         const res = await reloadIfLoggedOut(await fetch(`/api/videos/${v.id}`));
-        const quiz = res.ok ? (await res.json()).analysis?.guide?.quiz || [] : [];
+        if (!res.ok) { failed = true; return null; }  // 분석 파일이 깨졌거나 서버 오류: 기록은 두고 이번엔 건너뜁니다.
+        const quiz = (await res.json()).analysis?.guide?.quiz || [];
         const wrong = lists.find((w) => w.id === v.id).questions;
         const shown = quiz.filter((q) => wrong.includes(q.question));
         store.set(`wrong:${v.id}`, shown.map((q) => q.question));  // 다시 분석해서 없어진 문제는 정리
         if (!shown.length) return null;
         return el("section", { class: "review-lecture" }, el("h2", {}, v.title),
           ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => markWrong(v.id, q.question, !right),
-            el("a", { class: "link", href: `watch.html?id=${v.id}&t=${Math.floor(q.time)}` },
-              `▶ ${fmt(q.time)} 설명 다시 보기`))));
+            hasTime(q) ? el("a", { class: "link", href: `watch.html?id=${v.id}&t=${Math.floor(q.time)}` },
+              `▶ ${fmt(q.time)} 설명 다시 보기`) : "")));
       }));
       const found = sections.filter(Boolean);
-      if (!found.length) return say("복습할 틀린 문제가 없습니다. 강의 퀴즈에서 틀린 문제가 여기에 모입니다.");
-      box.replaceChildren(...found);
+      const trouble = "일부 강의를 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요.";
+      if (!found.length) return say(failed ? trouble : "복습할 틀린 문제가 없습니다. 강의 퀴즈에서 틀린 문제가 여기에 모입니다.");
+      box.replaceChildren(...(failed ? [el("p", { class: "notice" }, trouble)] : []), ...found);
     })().catch(() => say("틀린 문제를 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요."));
   </script>
 </body>

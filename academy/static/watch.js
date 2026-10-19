@@ -164,6 +164,7 @@ function renderQuiz(quiz, only = null) {
   const box = $("tab-quiz");
   if (!quiz.length) { box.replaceChildren(notice("이 강의에는 퀴즈가 없습니다.")); return; }
   const savedWrong = () => (store.get(`wrong:${id}`) || []).filter((text) => quiz.some((q) => q.question === text));
+  store.set(`wrong:${id}`, savedWrong());  // 다시 분석해서 없어진 문제는 강의를 열 때 기록에서 정리합니다.
   const shown = only ? quiz.filter((q) => only.includes(q.question)) : quiz;
   let answered = 0, correct = 0;
   const score = el("p", { class: "score" });
@@ -184,7 +185,7 @@ function renderQuiz(quiz, only = null) {
       markWrong(id, q.question, !right);
       updateRetryWrong();
     },
-    el("button", { class: "link", onclick: () => seek(q.time) }, `▶ ${fmt(q.time)} 설명 다시 보기`)));
+    hasTime(q) ? el("button", { class: "link", onclick: () => seek(q.time) }, `▶ ${fmt(q.time)} 설명 다시 보기`) : ""));
   box.replaceChildren(score, ...cards,
     el("div", { class: "quiz-actions" },
       el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, only ? "전체 문제 풀기" : "다시 풀기"),
