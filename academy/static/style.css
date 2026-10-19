@@ -169,6 +169,7 @@ a.link { color: var(--accent); }
 }
 .chapter-bar button:hover { background: var(--accent-soft); }
 .chapter-bar button.active { background: var(--accent); }
+@media (pointer: coarse) { .chapter-bar { height: 24px; } }  /* 손가락으로 누르기 쉽게 */
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; }
 .speed { display: flex; flex-wrap: wrap; gap: 4px; }
 .speed button {
