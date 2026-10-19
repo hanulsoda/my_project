@@ -10,7 +10,8 @@
   <header class="top"><h1>강의 목록</h1></header>
   <main class="list-page">
     <form id="search-form" class="list-search" role="search">
-      <input id="search" type="search" maxlength="100" placeholder="모든 강의에서 찾기 (예: 근의 공식)">
+      <!-- autocomplete=off: 뒤로 왔을 때 검색어만 남고 결과는 없는 어긋난 화면이 되지 않게 -->
+      <input id="search" type="search" maxlength="100" autocomplete="off" placeholder="모든 강의에서 찾기 (예: 근의 공식)">
     </form>
     <div id="results" class="search-results" hidden></div>
     <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
@@ -24,18 +25,24 @@
     const form = document.getElementById("search-form");
     // 검색칸을 비우면(× 버튼 포함) 바로 강의 목록으로 돌아갑니다.
     document.getElementById("search").oninput = (e) => { if (!e.target.value.trim()) form.requestSubmit(); };
+    let searchSeq = 0, pending = null;
     form.onsubmit = async (e) => {
       e.preventDefault();
       const q = document.getElementById("search").value.trim();
+      if (q && q === pending) return;  // 같은 말을 찾는 중에 Enter를 또 눌러도 다시 보내지 않습니다.
+      const seq = ++searchSeq;
+      pending = null;
       results.hidden = !q;
       list.hidden = !!q;
       if (!q) return results.replaceChildren();
       if (q.length < 2) return say("두 글자 이상 입력해 주세요.");
       say("찾는 중…");
+      pending = q;
       try {
         const res = await reloadIfLoggedOut(await fetch(`/api/search?q=${encodeURIComponent(q)}`));
         if (!res.ok) throw new Error();
         const found = await res.json();
+        if (seq !== searchSeq) return;  // 그사이 다른 말로 찾았으면 늦게 온 옛 결과는 버립니다.
         if (!found.length) return say(`"${q}"을(를) 강의에서 찾지 못했습니다.`);
         results.replaceChildren(...found.map((r) => el("section", { class: "result" },
           el("h2", {}, r.title),
@@ -44,7 +51,9 @@
               el("span", { class: "time" }, fmt(h.start)), " ", ...highlight(h.text, q.toLowerCase()))))),
           r.total > r.hits.length ? el("p", { class: "more" }, `외 ${r.total - r.hits.length}곳`) : "")));
       } catch {
-        say("검색하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+        if (seq === searchSeq) say("검색하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      } finally {
+        if (seq === searchSeq) pending = null;
       }
     };
 

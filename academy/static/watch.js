@@ -71,8 +71,9 @@ function renderGuide(guide, duration) {
   const box = $("tab-guide");
   box.replaceChildren(
     el("div", { class: "guide-actions" },
-      el("button", { class: "print", onclick: () => printGuide(guide) }, "인쇄")),
+      el("button", { class: "print", onclick: (e) => printGuide(e.currentTarget) }, "인쇄")),
     el("p", { class: "summary" }, guide.summary));
+  fillPrint(guide);
   const bar = $("chapter-bar");
   bar.hidden = guide.chapters.length === 0;
   chapters = guide.chapters.map((c, i) => {
@@ -98,13 +99,17 @@ function renderGuide(guide, duration) {
 }
 
 // ---- 요점 정리 인쇄 (종이 또는 "PDF로 저장") ----
-async function printGuide(guide) {
+// 요점 정리를 그릴 때 인쇄용 내용도 미리 만들어 둡니다. 그래야 브라우저 메뉴(Ctrl+P)로 인쇄해도 찍힙니다.
+function fillPrint(guide) {
   const mark = (n) => "①②③④⑤⑥⑦⑧⑨⑩"[n] || `${n + 1})`;
+  // 손으로 고치다 정답 번호가 보기 수를 넘으면 엉뚱한 번호 대신 해설만
+  const answer = (q) => (Number.isInteger(q.answer) && q.answer >= 0 && q.answer < q.choices.length ? `${mark(q.answer)} ` : "");
   const quiz = guide.quiz;
+  document.body.classList.add("has-notes");
   $("print").replaceChildren(
     el("h1", {}, $("title").textContent),
-    el("p", { class: "summary" }, guide.summary),
-    ...guide.chapters.map((c) => el("section", { class: "chapter" },
+    el("p", { class: "print-summary" }, guide.summary),
+    ...guide.chapters.map((c) => el("section", { class: "print-chapter" },
       el("h2", {}, `${fmt(c.start)} ${c.title}`),
       el("ul", {}, ...c.points.map((p) => el("li", {}, p))),
       Number.isInteger(c.board)
@@ -112,17 +117,24 @@ async function printGuide(guide) {
         : "")),
     ...(quiz.length ? [
       el("h2", { class: "quiz-title" }, "복습 퀴즈"),
-      ...quiz.map((q, n) => el("section", { class: "question" },
+      ...quiz.map((q, n) => el("section", { class: "print-question" },
         el("h3", {}, `${n + 1}. ${q.question}`),
         el("ul", {}, ...q.choices.map((choice, k) => el("li", {}, `${mark(k)} ${choice}`))))),
       // 정답은 마지막 장에 따로: 먼저 풀어 보고 맞춰 볼 수 있게
       el("section", { class: "answers" }, el("h2", {}, "정답"),
-        ...quiz.map((q, n) => el("p", {}, `${n + 1}. ${mark(q.answer)} ${q.explanation}`))),
+        ...quiz.map((q, n) => el("p", {}, `${n + 1}. ${answer(q)}${q.explanation}`))),
     ] : []));
-  // 판서 사진을 다 불러온 뒤 인쇄합니다 (덜 불러온 사진은 빈칸으로 찍힘).
-  await Promise.all([...$("print").querySelectorAll("img")].map((img) => img.complete ? null
-    : new Promise((done) => { img.addEventListener("load", done); img.addEventListener("error", done); })));
+}
+
+async function printGuide(button) {
+  if (button.disabled) return;  // 두 번 눌러도 인쇄 창은 한 번
+  button.disabled = true;
+  // 판서 사진을 다 불러온 뒤 인쇄합니다 (덜 불러온 사진은 빈칸으로 찍힘). 사진이 안 오면 5초만 기다립니다.
+  const loading = [...$("print").querySelectorAll("img")].filter((img) => !img.complete).map((img) =>
+    new Promise((done) => { img.addEventListener("load", done); img.addEventListener("error", done); }));
+  await Promise.race([Promise.all(loading), new Promise((done) => setTimeout(done, 5000))]);
   window.print();
+  button.disabled = false;
 }
 
 // ---- 대본 + 검색 ----
@@ -295,9 +307,15 @@ const savePosition = () => {
   store.set(posKey, { t: video.currentTime, d: video.duration });
 };
 
-const startAt = Number(new URLSearchParams(location.search).get("t"));  // 검색 결과에서 고른 장면
+// 검색 결과에서 고른 장면(t=초). 00:00 장면도 있으므로 0도 그대로 씁니다.
+const params = new URLSearchParams(location.search);
+const startAt = params.has("t") ? Number(params.get("t")) : NaN;
 video.addEventListener("loadedmetadata", () => {
-  if (startAt > 0) { video.currentTime = startAt; return; }
+  if (Number.isFinite(startAt) && startAt >= 0) {
+    video.currentTime = startAt;
+    lastSaved = startAt;  // 보기만 하고 나가면 지난번 이어보기 위치를 덮어쓰지 않게
+    return;
+  }
   const saved = store.get(posKey);
   if (saved && saved.t > 5 && saved.t < video.duration - 5) {
     video.currentTime = saved.t;
@@ -378,10 +396,16 @@ setRate(typeof savedRate === "number" && savedRate >= 0.25 && savedRate <= 4 ? s
 const typing = (e) => e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing
   || e.target.closest("input, textarea, select");
 // 키보드(Tab)로 버튼에 간 학생은 스페이스로 그 버튼을 누릅니다 (퀴즈 보기 고르기 등).
-const onControl = (e) => e.key === " " && e.target.closest("button, a");
+// 링크는 스페이스로 눌리지 않으므로 영상 재생·멈춤에 씁니다.
+const onControl = (e) => e.key === " " && e.target.closest("button");
 
 // 마우스로 누른 버튼에는 초점이 남지 않게 해서, 누른 뒤의 스페이스는 영상 재생·멈춤이 되게 합니다.
-document.addEventListener("mousedown", (e) => { if (e.target.closest("button, a")) e.preventDefault(); });
+// 메모·검색 칸에 쓰다가 버튼을 눌렀으면 그 칸에서도 초점을 빼야 스페이스가 칸에 써지지 않습니다.
+document.addEventListener("mousedown", (e) => {
+  if (!e.target.closest("button, a")) return;
+  e.preventDefault();
+  if (document.activeElement?.matches("input, textarea")) document.activeElement.blur();
+});
 
 // 영상에 초점이 있으면 브라우저도 같은 키로 재생·멈춤·이동을 한 번 더 하므로,
 // 영상보다 먼저 받는 단계(capture)에서 처리하고 브라우저 동작은 막습니다.
