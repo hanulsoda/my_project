@@ -68,6 +68,55 @@ def test_without_entry_check_limit_is_per_computer(lecture):
     assert [ask(client, video_id).status_code for _ in range(11)][-2:] == [200, 429]
 
 
+def test_without_entry_check_made_up_cookies_do_not_dodge_the_limit(lecture):
+    tmp_path, video_id = lecture
+    client = TestClient(create_app(tmp_path / "videos", tmp_path / "data", lambda *a: "답"))
+
+    codes = []
+    for n in range(11):
+        client.cookies.set(PASS_COOKIE, f"made-up-{n}")  # 입장 확인이 꺼져 있으면 아무도 쿠키를 확인하지 않음
+        codes.append(ask(client, video_id).status_code)
+
+    assert codes[-2:] == [200, 429]
+
+
+def test_questions_turned_away_while_busy_do_not_use_up_the_limit(lecture, monkeypatch):
+    tmp_path, video_id = lecture
+    monkeypatch.setattr(server, "ASK_AT_ONCE", 1)
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_answer(*args):
+        entered.set()
+        release.wait(5)
+        return "답"
+
+    app = create_app(tmp_path / "videos", tmp_path / "data", slow_answer, SECRET)
+    with TestClient(app):
+        first, second = student(app), student(app)
+        worker = threading.Thread(target=lambda: ask(first, video_id))
+        worker.start()
+        assert entered.wait(5)
+
+        busy = [ask(second, video_id).status_code for _ in range(server.ASK_PER_PERSON)]  # 바쁜 저녁에 다시 눌러 봄
+
+        release.set()
+        worker.join(5)
+        later = ask(second, video_id).status_code
+    assert busy == [503] * server.ASK_PER_PERSON
+    assert later == 200  # 답을 한 번도 못 받았으니 막히지 않음
+
+
+def test_request_without_size_is_refused(lecture):
+    tmp_path, video_id = lecture
+    client = TestClient(create_app(tmp_path / "videos", tmp_path / "data", lambda *a: "답", SECRET))
+
+    # 크기를 미리 알리지 않고 조금씩 보내는 요청 (Transfer-Encoding: chunked)
+    res = client.post(f"/api/videos/{video_id}/ask", content=iter([b'{"question": ', '"질문"}'.encode()]),
+                      headers={"content-type": "application/json"})
+
+    assert res.status_code == 411
+
+
 def test_too_many_questions_at_once_are_turned_away_quickly(lecture, monkeypatch):
     tmp_path, video_id = lecture
     monkeypatch.setattr(server, "ASK_AT_ONCE", 1)

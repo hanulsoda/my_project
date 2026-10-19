@@ -73,6 +73,8 @@ def test_without_pass_everything_is_blocked(make_client):
     media = client.get(f"/media/{video_id}")
 
     assert page.status_code == 401 and "학원 사이트에 로그인" in page.text
+    assert page.headers["x-frame-options"] == "DENY"  # 막힘 화면에도 보호 설정
+    assert page.headers["x-content-type-options"] == "nosniff"
     assert api.status_code == 401 and api.headers["content-type"].startswith("application/json")
     assert media.status_code == 401
     assert client.get(f"/api/videos/{video_id}/subtitles.vtt").status_code == 401

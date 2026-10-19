@@ -298,17 +298,21 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         data = load_analysis(data_dir, video_id)
         if not data or not data["segments"]:
             raise HTTPException(409, "아직 분석되지 않은 영상이라 질문할 수 없습니다")
-        # 입장 통과(쿠키)마다 셉니다. 입장 확인을 끈 학원 내부망에서는 컴퓨터마다 셉니다.
+        # 입장 통과(쿠키)마다 셉니다. 입장 확인을 끈 학원 내부망에서는 아무도 쿠키를 확인하지 않아 마음대로
+        # 바꿔 보낼 수 있으므로 컴퓨터마다 셉니다.
         cookie = request.cookies.get(PASS_COOKIE)
-        person = hashlib.sha256(cookie.encode()).hexdigest() if cookie else f"ip:{request.client.host}"
-        reason = limits.refuse_reason(person, time.monotonic())
-        if reason:
-            raise HTTPException(429, reason)
+        person = hashlib.sha256(cookie.encode()).hexdigest() if entry_secret and cookie else f"ip:{request.client.host}"
         if not limits.at_once.acquire(blocking=False):
             raise HTTPException(503, "다른 학생들의 질문에 답하는 중입니다. 잠시 뒤 다시 해 주세요.")
         try:
+            # 차례가 온 질문만 셉니다. 바빠서 돌려보낸 질문까지 세면 답을 한 번도 못 받고 막힙니다.
+            reason = limits.refuse_reason(person, time.monotonic())
+            if reason:
+                raise HTTPException(429, reason)
             text = answer(data["title"], data["segments"], req.question,
                           [t.model_dump() for t in req.history], req.current_time)
+        except HTTPException:
+            raise
         except Exception:  # API 키 누락, 네트워크 오류, 응답 거절 등
             # 원인은 Container Manager 로그에만 남깁니다. 학생 화면에 내부 오류 문구를 보이지 않습니다.
             logging.exception("AI 답변 실패")
