@@ -344,13 +344,18 @@ setRate(RATES.includes(store.get("rate")) ? store.get("rate") : 1);
 
 // 질문·메모·검색 칸에 글을 쓰는 중에는 단축키를 쓰지 않습니다.
 const typing = (e) => e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.closest("input, textarea, select");
+// 키보드(Tab)로 버튼에 간 학생은 스페이스로 그 버튼을 누릅니다 (퀴즈 보기 고르기 등).
+const onControl = (e) => e.key === " " && e.target.closest("button, a");
 
-// 영상이나 버튼에 초점이 있으면 브라우저도 같은 키로 재생·멈춤·이동(누름)을 한 번 더 하므로,
+// 마우스로 누른 버튼에는 초점이 남지 않게 해서, 누른 뒤의 스페이스는 영상 재생·멈춤이 되게 합니다.
+document.addEventListener("mousedown", (e) => { if (e.target.closest("button, a")) e.preventDefault(); });
+
+// 영상에 초점이 있으면 브라우저도 같은 키로 재생·멈춤·이동을 한 번 더 하므로,
 // 영상보다 먼저 받는 단계(capture)에서 처리하고 브라우저 동작은 막습니다.
-document.addEventListener("keyup", (e) => { if (e.key === " " && !typing(e)) e.preventDefault(); }, true);
+document.addEventListener("keyup", (e) => { if (e.key === " " && !typing(e) && !onControl(e)) e.preventDefault(); }, true);
 
 document.addEventListener("keydown", (e) => {
-  if (typing(e)) return;
+  if (typing(e) || onControl(e)) return;
   if (e.key === " ") {
     if (e.repeat) { /* 꾹 누르고 있을 때 재생·멈춤이 반복되지 않게 */ }
     else if (video.paused) video.play().catch(() => {});
