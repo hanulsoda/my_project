@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from academy.library import find_videos, save_analysis
+from academy.library import find_videos, save_analysis, save_frame
 from academy.server import create_app
 
 SEGMENTS = [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]
@@ -58,6 +58,26 @@ def test_media_supports_range_requests_for_seeking(setup):
     assert res.status_code == 206
     assert res.content == (bytes(range(256)) * 4)[100:200]
     assert client.get("/media/../1강.mp4").status_code == 404
+
+
+def test_serves_board_photo(setup, tmp_path):
+    client, ids, _ = setup
+    save_frame(tmp_path / "data", ids["1강"], 60, b"\xff\xd8x")
+
+    res = client.get(f"/frames/{ids['1강']}/60.jpg")
+
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/jpeg"
+    assert res.content == b"\xff\xd8x"
+
+
+@pytest.mark.parametrize("name", ["61.jpg", "abc.jpg", "60.png", "..%2F..%2F1강.json"])
+def test_board_photo_rejects_bad_requests(setup, tmp_path, name):
+    client, ids, _ = setup
+    save_frame(tmp_path / "data", ids["1강"], 60, b"\xff\xd8x")
+
+    assert client.get(f"/frames/{ids['1강']}/{name}").status_code == 404
+    assert client.get("/frames/nope/60.jpg").status_code == 404
 
 
 def test_ask_passes_question_to_tutor(setup):

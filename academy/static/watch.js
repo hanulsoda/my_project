@@ -66,6 +66,10 @@ function renderGuide(guide, duration) {
     const card = el("article", { class: "chapter" },
       el("h3", {}, timeButton(c.start), " ", c.title),
       el("ul", {}, ...c.points.map((p) => el("li", {}, p))));
+    if (Number.isInteger(c.board)) {  // 분석이 고른 판서 사진. 누르면 그 장면으로
+      card.append(el("button", { class: "board", title: `${fmt(c.board)} 장면으로 이동`, onclick: () => seek(c.board) },
+        el("img", { src: `/frames/${id}/${c.board}.jpg`, loading: "lazy", alt: `판서 ${fmt(c.board)}` })));
+    }
     box.append(card);
     const end = i + 1 < guide.chapters.length ? guide.chapters[i + 1].start : duration;
     const segment = el("button", {

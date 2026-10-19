@@ -6,6 +6,7 @@
 import html
 import logging
 import os
+import re
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -96,6 +97,14 @@ def create_app(video_dir: Path, data_dir: Path, answer,
     @app.get("/media/{video_id}")
     def media(video_id: str):
         return FileResponse(get_video(video_id)["path"])
+
+    @app.get("/frames/{video_id}/{name}")
+    def board_photo(video_id: str, name: str):
+        get_video(video_id)
+        path = Path(data_dir) / "frames" / video_id / name
+        if not re.fullmatch(r"\d+\.jpg", name) or not path.is_file():
+            raise HTTPException(404, "사진을 찾을 수 없습니다")
+        return FileResponse(path, media_type="image/jpeg")
 
     @app.post("/api/videos/{video_id}/ask")
     def ask(video_id: str, req: AskRequest):

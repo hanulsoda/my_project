@@ -5,7 +5,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from academy.library import find_videos
+from academy.library import find_videos, save_frame
 from academy.server import create_app, entry_settings
 
 SECRET = "s" * 32
@@ -65,6 +65,13 @@ def test_without_pass_everything_is_blocked(make_client):
     assert page.status_code == 401 and "학원 사이트에 로그인" in page.text
     assert api.status_code == 401 and api.headers["content-type"].startswith("application/json")
     assert media.status_code == 401
+
+
+def test_board_photo_needs_pass(make_client, tmp_path):
+    client, video_id = make_client()
+    save_frame(tmp_path / "data", video_id, 60, b"\xff\xd8x")
+
+    assert client.get(f"/frames/{video_id}/60.jpg").status_code == 401
 
 
 def test_forged_or_expired_pass_is_blocked(make_client):
