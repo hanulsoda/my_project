@@ -7,6 +7,7 @@ from pathlib import Path
 
 import av
 import numpy as np
+import PIL.Image  # noqa: F401  사진 저장(to_image)에 필요. 없으면 받아쓰기 전에 알 수 있게 미리 불러옵니다.
 
 INTERVAL = 30       # 캡처 간격(초)
 LONG_SIDE = 1280    # 판서 글씨가 읽히는 크기(긴 쪽 기준). 더 작은 영상은 키우지 않음

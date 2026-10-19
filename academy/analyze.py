@@ -82,7 +82,11 @@ def main():
     import anthropic
 
     from academy.ai import make_study_guide
-    from academy.frames import extract_frames
+
+    try:
+        from academy.frames import extract_frames
+    except ImportError as e:
+        sys.exit(f"분석에 필요한 라이브러리({e.name})가 없습니다. pip install -r requirements.txt 를 다시 실행해 주세요.")
 
     client = anthropic.Anthropic()
     failures = analyze_all(
