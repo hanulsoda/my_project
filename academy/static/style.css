@@ -125,6 +125,19 @@ button[type="submit"]:disabled { opacity: 0.6; }
 }
 .chapter-bar button:hover { background: var(--accent-soft); }
 .chapter-bar button.active { background: var(--accent); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; }
+.speed { display: flex; flex-wrap: wrap; gap: 4px; }
+.speed button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+.speed button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.keys { color: var(--muted); font-size: 13px; }
+@media (hover: none) { .keys { display: none; } }  /* 키보드 없는 휴대폰에서는 숨김 */
 .now { margin: 8px 0 0; font-weight: 600; }
 .status { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 .now:empty, .status:empty { display: none; }

@@ -321,3 +321,40 @@ function showCurrent(t) {
     }
   }
 }
+
+// ---- 재생 속도 + 단축키 ----
+const RATES = [0.75, 1, 1.25, 1.5, 2];
+$("speed").append(...RATES.map((rate) => el("button", { "data-rate": rate, onclick: () => setRate(rate) }, `${rate}배`)));
+
+function setRate(rate) {
+  video.defaultPlaybackRate = rate;  // 영상을 다시 불러와도 유지됩니다.
+  video.playbackRate = rate;
+  showRate();  // ratechange는 조금 늦게 오므로 바로 표시합니다.
+}
+
+function showRate() {
+  for (const b of $("speed").children) b.classList.toggle("active", Number(b.dataset.rate) === video.playbackRate);
+}
+
+// 영상 자체 메뉴에서 속도를 바꿔도 버튼 표시와 저장이 따라갑니다. 다음 강의도 같은 속도로 봅니다.
+video.addEventListener("ratechange", () => { store.set("rate", video.playbackRate); showRate(); });
+setRate(RATES.includes(store.get("rate")) ? store.get("rate") : 1);
+
+// 질문·메모·검색 칸에 글을 쓰는 중에는 단축키를 쓰지 않습니다.
+const typing = (e) => e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.closest("input, textarea, select");
+
+// 영상이나 버튼에 초점이 있으면 브라우저도 같은 키로 재생·멈춤·이동(누름)을 한 번 더 하므로,
+// 영상보다 먼저 받는 단계(capture)에서 처리하고 브라우저 동작은 막습니다.
+document.addEventListener("keyup", (e) => { if (e.key === " " && !typing(e)) e.preventDefault(); }, true);
+
+document.addEventListener("keydown", (e) => {
+  if (typing(e)) return;
+  if (e.key === " ") {
+    if (e.repeat) { /* 꾹 누르고 있을 때 재생·멈춤이 반복되지 않게 */ }
+    else if (video.paused) video.play().catch(() => {});
+    else video.pause();
+  } else if (e.key === "ArrowLeft") video.currentTime -= 10;
+  else if (e.key === "ArrowRight") video.currentTime += 10;
+  else return;
+  e.preventDefault();  // 페이지 스크롤과 영상 자체 단축키가 한 번 더 움직이지 않게
+}, true);
