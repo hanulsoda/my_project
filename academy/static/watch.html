@@ -13,7 +13,8 @@
   </header>
   <main class="watch">
     <section class="player">
-      <video id="video" controls preload="metadata"></video>
+      <!-- 영상 메뉴의 다운로드 버튼을 숨깁니다 (마음먹고 받는 것까지 막지는 못함) -->
+      <video id="video" controls controlslist="nodownload" preload="metadata"></video>
       <div id="chapter-bar" class="chapter-bar" hidden></div>
       <div class="controls">
         <div id="speed" class="speed" role="group" aria-label="재생 속도"></div>
