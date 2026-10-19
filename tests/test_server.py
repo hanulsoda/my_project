@@ -249,3 +249,4 @@ def test_serves_student_pages(setup):
 
     assert "<html" in client.get("/").text
     assert client.get("/watch.html").status_code == 200
+    assert "틀린 문제 복습" in client.get("/review.html").text

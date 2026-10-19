@@ -14,11 +14,20 @@
       <input id="search" type="search" maxlength="100" autocomplete="off" placeholder="모든 강의에서 찾기 (예: 근의 공식)">
     </form>
     <div id="results" class="search-results" hidden></div>
+    <p id="review" hidden></p>
     <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
     <ul id="videos" class="video-list"></ul>
   </main>
   <script src="common.js"></script>
   <script>
+    // 퀴즈에서 틀린 문제가 남아 있으면 모아 풀기로 가는 버튼
+    const wrongCount = wrongLists().reduce((n, w) => n + w.questions.length, 0);
+    if (wrongCount) {
+      const review = document.getElementById("review");
+      review.append(el("a", { class: "review-link", href: "review.html" }, `틀린 문제 복습 (${wrongCount}문제)`));
+      review.hidden = false;
+    }
+
     // 모든 강의의 대본·요점에서 찾고, 누르면 그 장면부터 봅니다.
     const results = document.getElementById("results"), list = document.getElementById("videos");
     const say = (text) => results.replaceChildren(el("p", { class: "notice" }, text));

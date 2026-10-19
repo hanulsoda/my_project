@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>틀린 문제 복습</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="back" href="./">← 강의 목록</a>
+    <h1>틀린 문제 복습</h1>
+  </header>
+  <main id="review" class="review-page"><p class="notice">불러오는 중…</p></main>
+  <script src="common.js"></script>
+  <script>
+    // 모든 강의의 퀴즈에서 틀린 문제를 강의 순서대로 모아 다시 풉니다. 맞히면 목록에서 빠집니다.
+    const box = document.getElementById("review");
+    const say = (text) => box.replaceChildren(el("p", { class: "notice" }, text));
+    (async () => {
+      const lists = wrongLists();
+      if (!lists.length) return say("복습할 틀린 문제가 없습니다. 강의 퀴즈에서 틀린 문제가 여기에 모입니다.");
+      const videos = await (await reloadIfLoggedOut(await fetch("/api/videos"))).json();
+      for (const w of lists) {  // 지워진 강의의 기록은 정리합니다.
+        if (!videos.some((v) => v.id === w.id)) store.set(`wrong:${w.id}`, []);
+      }
+      const sections = await Promise.all(videos.filter((v) => lists.some((w) => w.id === v.id)).map(async (v) => {
+        const res = await reloadIfLoggedOut(await fetch(`/api/videos/${v.id}`));
+        const quiz = res.ok ? (await res.json()).analysis?.guide?.quiz || [] : [];
+        const wrong = lists.find((w) => w.id === v.id).questions;
+        const shown = quiz.filter((q) => wrong.includes(q.question));
+        store.set(`wrong:${v.id}`, shown.map((q) => q.question));  // 다시 분석해서 없어진 문제는 정리
+        if (!shown.length) return null;
+        return el("section", { class: "review-lecture" }, el("h2", {}, v.title),
+          ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => markWrong(v.id, q.question, !right),
+            el("a", { class: "link", href: `watch.html?id=${v.id}&t=${Math.floor(q.time)}` },
+              `▶ ${fmt(q.time)} 설명 다시 보기`))));
+      }));
+      const found = sections.filter(Boolean);
+      if (!found.length) return say("복습할 틀린 문제가 없습니다. 강의 퀴즈에서 틀린 문제가 여기에 모입니다.");
+      box.replaceChildren(...found);
+    })().catch(() => say("틀린 문제를 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요."));
+  </script>
+</body>
+</html>
