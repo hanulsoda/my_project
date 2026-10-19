@@ -76,6 +76,7 @@ def test_without_pass_everything_is_blocked(make_client):
     assert api.status_code == 401 and api.headers["content-type"].startswith("application/json")
     assert media.status_code == 401
     assert client.get(f"/api/videos/{video_id}/subtitles.vtt").status_code == 401
+    assert client.get("/api/search?q=공식").status_code == 401
 
 
 def test_board_photo_needs_pass(make_client, tmp_path):

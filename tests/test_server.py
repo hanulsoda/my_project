@@ -118,6 +118,46 @@ def test_no_subtitles_before_analysis(setup):
     assert client.get("/api/videos/nope/subtitles.vtt").status_code == 404
 
 
+def test_search_finds_scenes_across_lectures(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ("1강", "2강", "3강"):
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": [
+        {"start": 10.0, "end": 12.0, "text": "근의 공식을 유도합니다"},
+        {"start": 20.0, "end": 22.0, "text": "다른 이야기"},
+    ], "guide": {"summary": "", "quiz": [], "chapters": [
+        {"start": 5, "title": "근의 공식", "points": ["판별식 b²-4ac"], "board": None}]}})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "guide": None, "segments": [
+        {"start": float(i), "end": i + 1.0, "text": f"근의 공식 {i}번째"} for i in range(7)]})
+    # 3강은 분석 전 (JSON 없음)
+    client = TestClient(create_app(video_dir, data_dir, lambda *a: ""))
+
+    res = client.get("/api/search", params={"q": "근의 공식"}).json()
+
+    assert res == [
+        {"id": ids["1강"], "title": "1강", "total": 2, "hits": [
+            {"start": 5, "text": "근의 공식"},
+            {"start": 10.0, "text": "근의 공식을 유도합니다"}]},
+        {"id": ids["2강"], "title": "2강", "total": 7, "hits": [
+            {"start": float(i), "text": f"근의 공식 {i}번째"} for i in range(5)]},
+    ]
+    assert client.get("/api/search", params={"q": "B²-4AC"}).json()[0]["hits"] == [
+        {"start": 5, "text": "판별식 b²-4ac"}]  # 대소문자 구분 없이, 요점에서도
+    assert client.get("/api/search", params={"q": "없는말"}).json() == []
+
+    (data_dir / f"{ids['3강']}.json").write_text('{"title": "3강",}', encoding="utf-8")  # 손으로 고치다 깨진 파일
+    assert [r["title"] for r in client.get("/api/search", params={"q": "근의 공식"}).json()] == ["1강", "2강"]
+
+
+@pytest.mark.parametrize("q", ["", " ", "a" * 101])
+def test_search_rejects_empty_or_huge_queries(setup, q):
+    client, _, _ = setup
+
+    assert client.get("/api/search", params={"q": q}).status_code == 422
+
+
 def test_ask_passes_question_to_tutor(setup):
     client, ids, calls = setup
     history = [{"role": "user", "content": "앞 질문"}, {"role": "assistant", "content": "앞 답"}]

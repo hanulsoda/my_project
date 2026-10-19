@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import anthropic
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -107,6 +107,30 @@ def create_app(video_dir: Path, data_dir: Path, answer,
         video = get_video(video_id)
         return {"id": video_id, "title": video["title"],
                 "analysis": load_analysis(data_dir, video_id)}
+
+    @app.get("/api/search")
+    def search(q: str = Query(min_length=1, max_length=100)):
+        """모든 강의의 대본과 요점에서 검색어가 나오는 장면. 강의마다 앞에서부터 5곳과 전체 개수."""
+        needle = q.strip().lower()
+        if not needle:
+            raise HTTPException(422, "검색어를 입력해 주세요")
+        results = []
+        for video in find_videos(video_dir):
+            try:
+                data = load_analysis(data_dir, video["id"])
+            except ValueError:  # 손으로 고치다 깨진 분석 파일 하나 때문에 검색 전체가 멈추지 않게
+                continue
+            if not data:
+                continue
+            hits = [{"start": s["start"], "text": s["text"]}
+                    for s in data["segments"] if needle in s["text"].lower()]
+            for c in (data.get("guide") or {}).get("chapters", []):
+                hits += [{"start": c["start"], "text": text}
+                         for text in [c["title"], *c["points"]] if needle in text.lower()]
+            if hits:
+                hits.sort(key=lambda h: h["start"])
+                results.append({"id": video["id"], "title": video["title"], "total": len(hits), "hits": hits[:5]})
+        return results
 
     @app.get("/api/videos/{video_id}/subtitles.vtt")
     def subtitles(video_id: str):

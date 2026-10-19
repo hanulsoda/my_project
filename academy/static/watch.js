@@ -116,18 +116,6 @@ function renderTranscript(segments) {
   };
 }
 
-function highlight(text, q) {
-  if (!q) return [text];
-  const parts = [], lower = text.toLowerCase();
-  let from = 0, at;
-  while ((at = lower.indexOf(q, from)) !== -1) {
-    parts.push(text.slice(from, at), el("mark", {}, text.slice(at, at + q.length)));
-    from = at + q.length;
-  }
-  parts.push(text.slice(from));
-  return parts;
-}
-
 // ---- 복습 퀴즈 ----
 // 틀린 문제는 문제 글로 기억합니다. 다시 분석해 문제 순서가 바뀌어도 섞이지 않습니다.
 const wrongKey = `wrong:${id}`;
@@ -276,7 +264,9 @@ const savePosition = () => {
   store.set(posKey, { t: video.currentTime, d: video.duration });
 };
 
+const startAt = Number(new URLSearchParams(location.search).get("t"));  // 검색 결과에서 고른 장면
 video.addEventListener("loadedmetadata", () => {
+  if (startAt > 0) { video.currentTime = startAt; return; }
   const saved = store.get(posKey);
   if (saved && saved.t > 5 && saved.t < video.duration - 5) {
     video.currentTime = saved.t;

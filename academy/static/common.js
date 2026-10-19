@@ -17,6 +17,19 @@ function fmt(seconds) {
   return h ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
 }
 
+// 검색어(q, 소문자)가 나오는 곳을 형광펜(<mark>)으로 표시합니다.
+function highlight(text, q) {
+  if (!q) return [text];
+  const parts = [], lower = text.toLowerCase();
+  let from = 0, at;
+  while ((at = lower.indexOf(q, from)) !== -1) {
+    parts.push(text.slice(from, at), el("mark", {}, text.slice(at, at + q.length)));
+    from = at + q.length;
+  }
+  parts.push(text.slice(from));
+  return parts;
+}
+
 // 들어온 지 12시간이 지나 401을 받으면 새로 고쳐서 로그인 안내 화면을 보여 줍니다.
 function reloadIfLoggedOut(res) {
   if (res.status !== 401) return res;

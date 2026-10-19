@@ -9,11 +9,45 @@
 <body>
   <header class="top"><h1>강의 목록</h1></header>
   <main class="list-page">
+    <form id="search-form" class="list-search" role="search">
+      <input id="search" type="search" maxlength="100" placeholder="모든 강의에서 찾기 (예: 근의 공식)">
+    </form>
+    <div id="results" class="search-results" hidden></div>
     <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
     <ul id="videos" class="video-list"></ul>
   </main>
   <script src="common.js"></script>
   <script>
+    // 모든 강의의 대본·요점에서 찾고, 누르면 그 장면부터 봅니다.
+    const results = document.getElementById("results"), list = document.getElementById("videos");
+    const say = (text) => results.replaceChildren(el("p", { class: "notice" }, text));
+    const form = document.getElementById("search-form");
+    // 검색칸을 비우면(× 버튼 포함) 바로 강의 목록으로 돌아갑니다.
+    document.getElementById("search").oninput = (e) => { if (!e.target.value.trim()) form.requestSubmit(); };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const q = document.getElementById("search").value.trim();
+      results.hidden = !q;
+      list.hidden = !!q;
+      if (!q) return results.replaceChildren();
+      if (q.length < 2) return say("두 글자 이상 입력해 주세요.");
+      say("찾는 중…");
+      try {
+        const res = await reloadIfLoggedOut(await fetch(`/api/search?q=${encodeURIComponent(q)}`));
+        if (!res.ok) throw new Error();
+        const found = await res.json();
+        if (!found.length) return say(`"${q}"을(를) 강의에서 찾지 못했습니다.`);
+        results.replaceChildren(...found.map((r) => el("section", { class: "result" },
+          el("h2", {}, r.title),
+          el("ul", {}, ...r.hits.map((h) => el("li", {},
+            el("a", { class: "hit", href: `watch.html?id=${r.id}&t=${Math.floor(h.start)}` },
+              el("span", { class: "time" }, fmt(h.start)), " ", ...highlight(h.text, q.toLowerCase()))))),
+          r.total > r.hits.length ? el("p", { class: "more" }, `외 ${r.total - r.hits.length}곳`) : "")));
+      } catch {
+        say("검색하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      }
+    };
+
     fetch("/api/videos").then(reloadIfLoggedOut).then((r) => r.json()).then((videos) => {
       document.getElementById("empty").hidden = videos.length > 0;
       for (const v of videos) {
