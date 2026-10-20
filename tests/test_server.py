@@ -1,6 +1,10 @@
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
+from academy import server
 from academy.library import find_videos, save_analysis
 from academy.server import create_app
 
@@ -25,6 +29,66 @@ def setup(tmp_path):
 
     client = TestClient(create_app(video_dir, data_dir, answer))
     return client, ids, calls
+
+
+def count_scans(monkeypatch):
+    scans, real = [], server.find_videos
+    monkeypatch.setattr(server, "find_videos", lambda d: scans.append(d) or real(d))
+    return scans
+
+
+def fake_clock(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(server, "monotonic", lambda: clock[0])
+    return clock
+
+
+def test_scans_video_folder_once_for_many_requests(setup, monkeypatch):
+    client, ids, _ = setup
+    scans = count_scans(monkeypatch)
+
+    client.get("/api/videos")
+    client.get(f"/api/videos/{ids['1강']}")
+    client.get(f"/media/{ids['1강']}", headers={"Range": "bytes=0-9"})
+    client.get(f"/media/{ids['1강']}", headers={"Range": "bytes=10-19"})
+    client.get(f"/api/videos/{ids['1강']}/pages/0.jpg")
+    client.post(f"/api/videos/{ids['1강']}/ask", json={"question": "질문"})
+
+    assert len(scans) == 1
+
+
+def test_finds_new_video_on_cache_miss_but_not_rescanning_every_miss(setup, monkeypatch, tmp_path):
+    client, _, _ = setup
+    scans, clock = count_scans(monkeypatch), fake_clock(monkeypatch)
+    client.get("/api/videos")
+    (tmp_path / "videos" / "3강.mp4").write_bytes(b"x")
+    new_id = next(v["id"] for v in find_videos(tmp_path / "videos") if v["title"] == "3강")
+
+    clock[0] += server.MISS_SECONDS + 1
+    assert client.get(f"/api/videos/{new_id}").status_code == 200
+    assert client.get("/api/videos/nope").status_code == 404
+    assert client.get("/media/nope").status_code == 404
+
+    assert len(scans) == 2
+    assert [v["title"] for v in client.get("/api/videos").json()] == ["1강", "2강", "3강"]
+
+
+def test_serves_old_list_while_rescanning_in_background(setup, monkeypatch, tmp_path):
+    client, _, _ = setup
+    clock = fake_clock(monkeypatch)
+    client.get("/api/videos")
+    (tmp_path / "videos" / "3강.mp4").write_bytes(b"x")
+    rescan_may_finish, real = threading.Event(), server.find_videos
+    monkeypatch.setattr(server, "find_videos", lambda d: rescan_may_finish.wait(5) and real(d))
+
+    clock[0] += server.REFRESH_SECONDS + 1
+    assert len(client.get("/api/videos").json()) == 2  # 느린 재스캔을 기다리지 않습니다
+
+    rescan_may_finish.set()
+    deadline = time.monotonic() + 5
+    while len(client.get("/api/videos").json()) < 3 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(client.get("/api/videos").json()) == 3
 
 
 def test_lists_videos_with_analysis_and_guide_status(tmp_path):
