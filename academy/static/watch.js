@@ -4,7 +4,6 @@ const video = $("video");
 video.src = `/media/${id}`;
 
 let chapters = [];  // { start, title, card, bar }
-let lines = [];     // { start, text, li }
 let pages = [];     // { start, item }
 
 function seek(t) {
@@ -38,18 +37,17 @@ function render({ title, analysis }) {
   document.title = title;
   $("title").textContent = title;
   if (!analysis) {
-    const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·페이지·대본·퀴즈가 생깁니다.";
-    for (const tab of ["guide", "pages", "transcript", "quiz", "ask"]) $(`tab-${tab}`).replaceChildren(notice(msg));
+    const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·페이지·퀴즈가 생깁니다.";
+    for (const tab of ["guide", "pages", "quiz", "ask"]) $(`tab-${tab}`).replaceChildren(notice(msg));
     return;
   }
-  renderTranscript(analysis.segments);
   renderPages(analysis.pages || []);
   setupAsk();
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);
     renderQuiz(analysis.guide.quiz);
   } else {
-    const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지·대본·질문하기는 사용할 수 있습니다.";
+    const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지·질문하기는 사용할 수 있습니다.";
     $("tab-guide").replaceChildren(notice(msg));
     $("tab-quiz").replaceChildren(notice(msg));
   }
@@ -97,40 +95,6 @@ function renderPages(list) {
     return { start: p.start, item };
   });
   box.replaceChildren(notice("지금 보고 있는 교재 화면을 찾아 누르면 그 설명으로 이동합니다."), grid);
-}
-
-// ---- 대본 + 검색 ----
-function renderTranscript(segments) {
-  lines = segments.map((s) => {
-    const text = el("span", { class: "text" }, s.text);
-    const li = el("li", {}, el("button", { class: "line", onclick: () => seek(s.start) },
-      el("span", { class: "time" }, fmt(s.start)), text));
-    $("lines").append(li);
-    return { start: s.start, text: s.text, li };
-  });
-  $("search").oninput = () => {
-    const q = $("search").value.trim().toLowerCase();
-    let hits = 0;
-    for (const line of lines) {
-      const hit = !q || line.text.toLowerCase().includes(q);
-      line.li.hidden = !hit;
-      if (hit && q) hits++;
-      line.li.querySelector(".text").replaceChildren(...highlight(line.text, q));
-    }
-    $("search-count").textContent = q ? `${hits}곳` : "";
-  };
-}
-
-function highlight(text, q) {
-  if (!q) return [text];
-  const parts = [], lower = text.toLowerCase();
-  let from = 0, at;
-  while ((at = lower.indexOf(q, from)) !== -1) {
-    parts.push(text.slice(from, at), el("mark", {}, text.slice(at, at + q.length)));
-    from = at + q.length;
-  }
-  parts.push(text.slice(from));
-  return parts;
 }
 
 // ---- 복습 퀴즈 ----
@@ -270,12 +234,6 @@ video.addEventListener("timeupdate", () => {
   showCurrent(video.currentTime);
 });
 
-// 학생이 대본을 직접 스크롤하는 동안에는 자동 스크롤을 잠시 멈춥니다.
-let userScrolledAt = 0;
-for (const evt of ["wheel", "touchmove"]) {
-  $("tab-transcript").addEventListener(evt, () => { userScrolledAt = Date.now(); }, { passive: true });
-}
-
 function currentItem(items, t) {
   let found = null;
   for (const item of items) {
@@ -285,7 +243,7 @@ function currentItem(items, t) {
   return found;
 }
 
-let activeChapter = null, activeLine = null, activePage = null;
+let activeChapter = null, activePage = null;
 function showCurrent(t) {
   const page = currentItem(pages, t);
   if (page !== activePage) {
@@ -301,15 +259,5 @@ function showCurrent(t) {
     chapter?.bar.classList.add("active");
     $("now").textContent = chapter ? `지금: ${chapter.title}` : "";
     activeChapter = chapter;
-  }
-  const line = currentItem(lines, t);
-  if (line !== activeLine) {
-    activeLine?.li.classList.remove("active");
-    line?.li.classList.add("active");
-    activeLine = line;
-    const box = $("tab-transcript");
-    if (line && !box.hidden && !$("search").value && Date.now() - userScrolledAt > 4000) {
-      box.scrollTop = line.li.offsetTop - box.clientHeight / 3;
-    }
   }
 }

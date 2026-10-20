@@ -29,6 +29,15 @@ class Turn(BaseModel):
     content: str = Field(max_length=10000)
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """화면 파일을 고쳐 배포하면 학생 브라우저가 예전 파일을 쓰지 않도록, 받을 때마다 바뀌었는지 확인하게 합니다."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     history: list[Turn] = Field(default=[], max_length=20)
@@ -82,8 +91,11 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
         video = get_video(video_id)
-        return {"id": video_id, "title": video["title"],
-                "analysis": load_analysis(data_dir, video_id)}
+        analysis = load_analysis(data_dir, video_id)
+        if analysis:
+            # 받아쓰기 대본은 발음대로 틀린 곳이 많아 학생에게 보여 주지 않고, 질문하기·요점 정리에만 씁니다.
+            analysis.pop("segments", None)
+        return {"id": video_id, "title": video["title"], "analysis": analysis}
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")
     def page_thumbnail(video_id: str, n: int):
@@ -111,7 +123,7 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
             raise HTTPException(502, f"AI 답변을 받지 못했습니다: {e}")
         return {"answer": text}
 
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True))
+    app.mount("/", RevalidatedStaticFiles(directory=STATIC_DIR, html=True))
     return app
 
 

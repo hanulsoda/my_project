@@ -134,6 +134,7 @@ def test_video_detail(setup):
 
     assert analyzed["title"] == "1강"
     assert analyzed["analysis"]["guide"] == GUIDE
+    assert "segments" not in analyzed["analysis"]  # 받아쓰기 대본은 학생 브라우저로 보내지 않습니다
     assert not_yet == {"id": ids["2강"], "title": "2강", "analysis": None}
     assert client.get("/api/videos/nope").status_code == 404
 
@@ -189,3 +190,10 @@ def test_serves_student_pages(setup):
 
     assert "<html" in client.get("/").text
     assert client.get("/watch.html").status_code == 200
+
+
+def test_student_pages_are_revalidated_so_updates_reach_browsers(setup):
+    client, _, _ = setup
+
+    for path in ["/", "/watch.html", "/watch.js"]:
+        assert client.get(path).headers["cache-control"] == "no-cache"
