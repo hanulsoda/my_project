@@ -206,6 +206,14 @@ def test_ask_reports_ai_failure_clearly(tmp_path):
     assert "authentication" in res.json()["detail"]
 
 
+def test_student_server_does_not_take_questions():
+    # 질문하기는 Claude API 크레딧을 써서 막아 두었습니다. 학생 서버로 띄우는 server.app 그대로 확인합니다.
+    res = TestClient(server.app).post("/api/videos/any/ask", json={"question": "질문"})
+
+    assert res.status_code == 403
+    assert "질문하기" in res.json()["detail"]
+
+
 def test_serves_student_pages(setup):
     client, _, _ = setup
 

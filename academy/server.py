@@ -130,6 +130,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
 
     @app.post("/api/videos/{video_id}/ask")
     def ask(video_id: str, req: AskRequest):
+        if answer is None:
+            raise HTTPException(403, "질문하기는 지금 쓰지 않습니다")
         get_video(video_id)
         data = load_analysis(data_dir, video_id)
         if not data or not data["segments"]:
@@ -162,5 +164,5 @@ def _claude_answer():
 
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
-                 _claude_answer(),
+                 None,  # 질문하기는 Claude API 크레딧을 써서 막아 둡니다. 다시 열려면 _claude_answer()를 넘깁니다.
                  load_references(os.environ.get("REFERENCES_FILE")))
