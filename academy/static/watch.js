@@ -50,7 +50,7 @@ function render({ title, analysis, references = [] }) {
     renderReferences(references);
     renderQuiz([]);
   } else {
-    const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지·질문하기는 사용할 수 있습니다.";
+    const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지는 사용할 수 있습니다.";
     $("tab-guide").replaceChildren(notice(msg));
     $("tab-quiz").replaceChildren(notice(msg));
   }
