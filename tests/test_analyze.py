@@ -13,7 +13,7 @@ GUIDE = {"summary": "요약", "chapters": [], "quiz": []}
 class Recorder:
     def __init__(self, fail_on=None, segments=SEGMENTS, guide=GUIDE):
         self.transcribed, self.guided, self.page_dirs = [], [], []
-        self.screen_reads, self.screens = [], []
+        self.screen_reads, self.screens, self.references = [], [], []
         self.fail_on = fail_on
         self.segments = segments
         self.guide = guide
@@ -24,9 +24,10 @@ class Recorder:
             raise RuntimeError("받아쓰기 실패")
         return self.segments, 120.0
 
-    def make_guide(self, title, segments, screens=None):
+    def make_guide(self, title, segments, screens=None, references=None):
         self.guided.append(title)
         self.screens.append(screens)
+        self.references.append(references)
         return self.guide
 
     def read_screens(self, path, pages, duration):
@@ -245,3 +246,31 @@ def test_without_ocr_the_guide_uses_the_transcript_only(tmp_path):
                 detect_pages=rec.detect_pages)
 
     assert rec.screens == [None]
+
+
+def test_guide_builds_on_matched_academy_summaries_and_records_them(tmp_path):
+    ids = make_videos(tmp_path / "videos", "성난 풀잎.mp4")
+    rec = Recorder(guide=dict(GUIDE))
+    asked = []
+
+    def find_references(title, screen_lines):
+        asked.append((title, screen_lines))
+        return [{"source": "고2 「성난 풀잎」", "text": "학원 정리 글"}]
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide,
+                detect_pages=rec.detect_pages, read_screens=rec.read_screens, find_references=find_references)
+
+    assert asked == [("성난 풀잎", ["교재 글자"])]
+    assert rec.references == [["학원 정리 글"]]
+    assert load_analysis(tmp_path / "data", ids["성난 풀잎"])["guide"]["sources"] == ["고2 「성난 풀잎」"]
+
+
+def test_guide_without_a_matched_summary_gets_no_references(tmp_path):
+    ids = make_videos(tmp_path / "videos", "녹화.mp4")
+    rec = Recorder(guide=dict(GUIDE))
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide,
+                detect_pages=rec.detect_pages, find_references=lambda title, lines: [])
+
+    assert rec.references == [None]
+    assert "sources" not in load_analysis(tmp_path / "data", ids["녹화"])["guide"]

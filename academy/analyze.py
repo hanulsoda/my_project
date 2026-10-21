@@ -18,10 +18,11 @@ SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], 
 
 
 def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(1, 1),
-                detect_pages=None, read_screens=None) -> int:
+                detect_pages=None, read_screens=None, find_references=None) -> int:
     """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
 
     read_screens가 있으면 요점 정리를 만들 때 페이지마다 화면 글자를 읽어 근거로 함께 보냅니다.
+    find_references(제목, 화면 글자 줄)는 짝지어지는 학원 요점 정리를 {"source", "text"} 목록으로 돌려줍니다.
     """
     videos = find_videos(video_dir)
     if not videos:
@@ -61,9 +62,15 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
                             page["text"] = lines
                         save_analysis(data_dir, video["id"], data)
                     screens = [{"start": p["start"], "text": p["text"]} for p in data["pages"]]
-                print("  요점 정리·퀴즈 만드는 중...", flush=True)
-                data["guide"] = (make_guide(data["title"], data["segments"], screens)
+                refs = []
+                if data["segments"] and find_references:
+                    lines = [line for page in data.get("pages", []) for line in page.get("text", [])]
+                    refs = find_references(data["title"], lines)
+                print("  요점 정리·퀴즈 만드는 중..." + (f" (학원 정리 {len(refs)}개 활용)" if refs else ""), flush=True)
+                data["guide"] = (make_guide(data["title"], data["segments"], screens, [r["text"] for r in refs] or None)
                                  if data["segments"] else SILENT_GUIDE)
+                if refs:
+                    data["guide"]["sources"] = [r["source"] for r in refs]
                 for label in data["guide"].pop("page_labels", []):
                     for page in data.get("pages", []):
                         if abs(page["start"] - label["start"]) <= 1:  # 이름표 시점은 페이지 시작을 초 단위로 버린 값
@@ -138,6 +145,7 @@ def whisper_transcriber():
 def main():
     import anthropic
 
+    from academy import references as academy_refs
     from academy import screens as screen_text
     from academy.ai import make_study_guide
     from academy.pages import detect_pages
@@ -153,10 +161,14 @@ def main():
     if not video_dir.is_dir():
         sys.exit(f"영상 폴더가 없습니다: {video_dir.resolve()} (VIDEO_DIR 설정을 확인하세요)")
 
-    make_guide = read_screens = None
+    make_guide = read_screens = find_references = None
     if not args.no_guide:
         client = anthropic.Anthropic()
-        make_guide = lambda title, segments, screens: make_study_guide(client, title, segments, screens)
+        make_guide = lambda title, segments, screens, refs: make_study_guide(client, title, segments, screens, refs)
+        references = academy_refs.load_references(os.environ.get("REFERENCES_FILE"))
+        if references:
+            print(f"학원 요점 정리 {len(references)}개 중 짝지어지는 것을 근거로 씁니다.")
+            find_references = lambda title, lines: academy_refs.find_references(title, lines, references)
         ocr = screen_text.paddle_ocr()
         if ocr:
             read_screens = lambda path, pages, duration: screen_text.read_screens(path, pages, duration, ocr)
@@ -171,6 +183,7 @@ def main():
         part=args.part,
         detect_pages=detect_pages,
         read_screens=read_screens,
+        find_references=find_references,
     )
     if failures:
         print(f"{failures}개 영상 분석 실패. 다시 실행하면 실패한 영상만 이어서 분석합니다.", file=sys.stderr)

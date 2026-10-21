@@ -57,6 +57,7 @@ function render({ title, analysis }) {
 function renderGuide(guide, duration) {
   const box = $("tab-guide");
   box.replaceChildren(el("p", { class: "summary" }, guide.summary));
+  if (guide.overview?.length || guide.glossary?.length) box.append(overviewCard(guide));
   const bar = $("chapter-bar");
   bar.hidden = guide.chapters.length === 0;
   chapters = guide.chapters.map((c, i) => {
@@ -74,6 +75,16 @@ function renderGuide(guide, duration) {
     bar.append(segment);
     return { start: c.start, title: c.title, card, bar: segment };
   });
+}
+
+// 학원 요점 정리를 바탕으로 만든 강의의 작품 개요(갈래·주제 등)와 핵심 어휘
+function overviewCard({ overview = [], glossary = [], sources = [] }) {
+  const pairs = (items, key, value) => items.flatMap((item) => [el("dt", {}, item[key]), el("dd", {}, item[value])]);
+  const card = el("article", { class: "overview" });
+  if (sources.length) card.append(el("p", { class: "sources" }, `학원 요점 정리 바탕: ${sources.join(", ")}`));
+  if (overview.length) card.append(el("dl", {}, ...pairs(overview, "name", "value")));
+  if (glossary.length) card.append(el("h3", {}, "핵심 어휘"), el("dl", {}, ...pairs(glossary, "term", "meaning")));
+  return card;
 }
 
 // ---- 페이지: 교재의 어느 화면을 설명하는지 그림으로 찾아 이동 ----

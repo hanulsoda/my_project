@@ -20,7 +20,8 @@ GUIDE_PROMPT = """당신은 학원 강의를 학생용 학습 자료로 정리�
 - corrections: 대본에서 잘못 들린 용어를 바로잡는 목록. wrong에는 대본에 나온 표기 그대로, right에는 올바른 표기를 적습니다.
   강의 주제상 확실히 틀린 용어만 적고(예: '격률'을 '경률'로 받아쓴 경우), 두 글자 이상이어야 합니다.
   대본 전체에서 그대로 바꾸므로, 맞게 쓰인 다른 말까지 바뀔 수 있는 표기는 넣지 마세요. 없으면 빈 목록입니다.
-- page_labels: 화면 글자가 주어질 때만 채우고, 없으면 빈 목록입니다."""
+- page_labels: 화면 글자가 주어질 때만 채우고, 없으면 빈 목록입니다.
+- overview, glossary, edits: 학원 요점 정리가 주어질 때만 채우고, 없으면 빈 목록입니다."""
 
 SCREEN_NOTE = """
 
@@ -33,6 +34,18 @@ SCREEN_NOTE = """
   start는 그 묶음의 [분:초]를 그대로 적습니다. 화면에 인쇄된 교재 쪽 번호가 보이면 "170쪽 · 꺼삐딴 리 지문"처럼
   쪽수를 앞에 적고, 안 보이면 "(2) 운율 형성 방법"처럼 단원·소제목만 적습니다. PDF 프로그램 위쪽의 "11 / 200" 같은
   표시는 파일 안의 순서라 교재 쪽수와 다를 수 있으니 쪽수로 쓰지 마세요."""
+
+REFERENCE_NOTE = """
+
+학원이 이미 만든 요점 정리(학원 요점 정리)도 주어집니다. 교재 PDF에서 자동으로 뽑은 것이라 엉뚱한 내용, 잘린 문장,
+중복이 섞여 있을 수 있습니다.
+- points는 학원 요점 정리의 항목과 표현을 최대한 그대로 쓰고, 각 항목을 강의에서 그것을 설명하는 시점의 챕터에 넣으세요.
+  강의에서 다루지 않은 항목은 가장 관련 있는 챕터에 넣습니다.
+- 대본·화면 글자와 맞지 않거나 추출 오류로 보이는 항목은 고치거나 빼고, 그 내역을 edits에 적으세요.
+  before는 원래 항목, after는 고친 항목(뺐으면 빈 문자열), reason은 한 문장입니다.
+- overview: 학원 요점 정리의 개요(갈래·성격·주제·배경·제재 등)를 name/value로 적고, 오류는 고쳐서 적습니다.
+- glossary: 학원 요점 정리의 어휘 가운데 강의를 이해하는 데 필요한 것을 term/meaning으로 적습니다.
+- 퀴즈를 만들 때 학원 요점 정리의 빈칸 문제도 참고하세요."""
 
 GUIDE_SCHEMA = {
     "type": "object",
@@ -72,8 +85,27 @@ GUIDE_SCHEMA = {
             "required": ["start", "label"],
             "additionalProperties": False,
         }},
+        "overview": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
+            "required": ["name", "value"],
+            "additionalProperties": False,
+        }},
+        "glossary": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"term": {"type": "string"}, "meaning": {"type": "string"}},
+            "required": ["term", "meaning"],
+            "additionalProperties": False,
+        }},
+        "edits": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"before": {"type": "string"}, "after": {"type": "string"},
+                           "reason": {"type": "string"}},
+            "required": ["before", "after", "reason"],
+            "additionalProperties": False,
+        }},
     },
-    "required": ["summary", "chapters", "quiz", "corrections", "page_labels"],
+    "required": ["summary", "chapters", "quiz", "corrections", "page_labels", "overview", "glossary", "edits"],
     "additionalProperties": False,
 }
 
@@ -122,17 +154,24 @@ def _ask_claude(client, **request) -> str:
     return "".join(b.text for b in response.content if b.type == "text")
 
 
-def make_study_guide(client, title: str, segments: list[dict], screens: list[dict] | None = None) -> dict:
-    """screens는 페이지마다 {"start": 초, "text": [화면 글자 줄]}. 있으면 근거로 함께 보내고 페이지 이름표를 받습니다."""
+def make_study_guide(client, title: str, segments: list[dict], screens: list[dict] | None = None,
+                     references: list[str] | None = None) -> dict:
+    """screens는 페이지마다 {"start": 초, "text": [화면 글자 줄]}. 있으면 근거로 함께 보내고 페이지 이름표를 받습니다.
+
+    references는 학원이 이미 만든 작품별 요점 정리 글. 있으면 그 항목을 다듬어 쓰고 고친 내역(edits)을 받습니다.
+    """
     content = f"강의 제목: {title}\n\n<대본>\n{transcript_text(segments)}\n</대본>"
     if screens:
         content += "\n\n<화면 글자>\n" + "\n\n".join(
             f"[{fmt_time(s['start'])}]\n" + "\n".join(s["text"]) for s in screens) + "\n</화면 글자>"
+    if references:
+        content += "\n\n<학원 요점 정리>\n" + "\n\n".join(references) + "\n</학원 요점 정리>"
+    system = GUIDE_PROMPT + (SCREEN_NOTE if screens else "") + (REFERENCE_NOTE if references else "")
     text = _ask_claude(
         client,
         max_tokens=16000,
         output_config={"effort": "high", "format": {"type": "json_schema", "schema": GUIDE_SCHEMA}},
-        system=GUIDE_PROMPT + SCREEN_NOTE if screens else GUIDE_PROMPT,
+        system=system,
         messages=[{"role": "user", "content": content}],
     )
     guide = json.loads(text)

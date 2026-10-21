@@ -211,3 +211,19 @@ def test_video_detail_sends_page_labels_but_not_screen_text(tmp_path):
     pages = client.get(f"/api/videos/{video_id}").json()["analysis"]["pages"]
 
     assert pages == [{"start": 0.0, "label": "12쪽 · 도입"}]
+
+
+def test_video_detail_keeps_teacher_only_edits_on_the_server(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    (video_dir / "1강.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    guide = {**GUIDE, "overview": [{"name": "갈래", "value": "수필"}],
+             "edits": [{"before": "엉뚱한 항목", "after": "", "reason": "다른 단원"}]}
+    save_analysis(data_dir, video_id, {"title": "1강", "duration": 9.0, "segments": SEGMENTS, "guide": guide})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    sent = client.get(f"/api/videos/{video_id}").json()["analysis"]["guide"]
+
+    assert "edits" not in sent
+    assert sent["overview"] == [{"name": "갈래", "value": "수필"}]

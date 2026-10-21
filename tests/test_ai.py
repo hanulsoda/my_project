@@ -26,6 +26,9 @@ GUIDE = {
         {"wrong": "같음", "right": "같음"},
     ],
     "page_labels": [],
+    "overview": [],
+    "glossary": [],
+    "edits": [],
 }
 
 
@@ -82,6 +85,22 @@ def test_study_guide_without_screens_sends_transcript_only():
     req = client.requests[0]
     assert "<화면 글자>" not in req["messages"][0]["content"]
     assert req["system"] == GUIDE_PROMPT
+
+
+def test_study_guide_builds_on_the_academy_summary_and_keeps_overview_and_edits():
+    reply = {**GUIDE, "overview": [{"name": "갈래", "value": "현대 수필"}],
+             "glossary": [{"term": "울안", "meaning": "울타리를 둘러친 안"}],
+             "edits": [{"before": "인물의 개념과 분류", "after": "", "reason": "다른 단원 내용이 섞임"}]}
+    client = FakeClient(reply)
+
+    guide = make_study_guide(client, "1강", SEGMENTS, references=["「성난 풀잎」(고2)\n개요: 갈래: 현대 수필"])
+
+    req = client.requests[0]
+    assert "<학원 요점 정리>\n「성난 풀잎」(고2)\n개요: 갈래: 현대 수필\n</학원 요점 정리>" in req["messages"][0]["content"]
+    assert "학원 요점 정리" in req["system"]
+    assert guide["overview"] == [{"name": "갈래", "value": "현대 수필"}]
+    assert guide["glossary"] == [{"term": "울안", "meaning": "울타리를 둘러친 안"}]
+    assert guide["edits"] == [{"before": "인물의 개념과 분류", "after": "", "reason": "다른 단원 내용이 섞임"}]
 
 
 def test_study_guide_request_sends_transcript_and_json_schema():

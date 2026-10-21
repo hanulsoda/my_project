@@ -167,6 +167,12 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 
 /* 요점 정리 */
 .summary { margin: 0 0 8px; padding: 12px 14px; border-radius: 8px; background: var(--accent-soft); line-height: 1.7; }
+.overview { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.overview .sources { margin: 0 0 6px; color: var(--muted); font-size: 13px; }
+.overview dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; line-height: 1.6; }
+.overview dt { color: var(--muted); font-weight: 600; }
+.overview dd { margin: 0; }
+.overview h3 { margin: 10px 0 4px; font-size: 15px; }
 .chapter { margin: 8px 0; padding: 8px 12px; border-left: 3px solid transparent; border-radius: 6px; }
 .chapter.active { border-left-color: var(--accent); background: var(--highlight); }
 .chapter h3 { margin: 0 0 6px; font-size: 16px; }
