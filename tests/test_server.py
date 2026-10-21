@@ -197,3 +197,17 @@ def test_student_pages_are_revalidated_so_updates_reach_browsers(setup):
 
     for path in ["/", "/watch.html", "/watch.js"]:
         assert client.get(path).headers["cache-control"] == "no-cache"
+
+
+def test_video_detail_sends_page_labels_but_not_screen_text(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    (video_dir / "1강.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    save_analysis(data_dir, video_id, {"title": "1강", "duration": 9.0, "segments": SEGMENTS, "guide": GUIDE,
+                                       "pages": [{"start": 0.0, "text": ["교재 글자"], "label": "12쪽 · 도입"}]})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    pages = client.get(f"/api/videos/{video_id}").json()["analysis"]["pages"]
+
+    assert pages == [{"start": 0.0, "label": "12쪽 · 도입"}]

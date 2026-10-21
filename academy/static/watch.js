@@ -87,9 +87,10 @@ function renderPages(list) {
   pages = list.map((p, n) => {
     const item = el("li", {}, el("button", {
       class: "page",
-      "aria-label": `${n + 1}번째 화면, ${fmt(p.start)}로 이동`,
+      "aria-label": `${p.label || `${n + 1}번째 화면`}, ${fmt(p.start)}로 이동`,
       onclick: () => seek(p.start),
     }, el("img", { src: `/api/videos/${id}/pages/${n}.jpg`, alt: "" }),
+       ...(p.label ? [el("span", { class: "page-label" }, p.label)] : []),
        el("span", { class: "time" }, fmt(p.start))));
     grid.append(item);
     return { start: p.start, item };

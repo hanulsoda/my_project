@@ -13,6 +13,7 @@ GUIDE = {"summary": "요약", "chapters": [], "quiz": []}
 class Recorder:
     def __init__(self, fail_on=None, segments=SEGMENTS, guide=GUIDE):
         self.transcribed, self.guided, self.page_dirs = [], [], []
+        self.screen_reads, self.screens = [], []
         self.fail_on = fail_on
         self.segments = segments
         self.guide = guide
@@ -23,9 +24,14 @@ class Recorder:
             raise RuntimeError("받아쓰기 실패")
         return self.segments, 120.0
 
-    def make_guide(self, title, segments):
+    def make_guide(self, title, segments, screens=None):
         self.guided.append(title)
+        self.screens.append(screens)
         return self.guide
+
+    def read_screens(self, path, pages, duration):
+        self.screen_reads.append(path.name)
+        return [["교재 글자"] for _ in pages]
 
     def detect_pages(self, path, out_dir):
         self.page_dirs.append(out_dir)
@@ -206,3 +212,36 @@ def test_tidy_keeps_repeats_that_are_not_back_to_back():
 def test_tidy_keeps_one_of_a_word_repeated_four_or_more_times_in_a_line():
     assert tidy_repeats([seg(0, 9, "ㄱ, ㄴ, ㅇ, ㅇ, ㅇ, ㅇ, ㅇ,")]) == [seg(0, 9, "ㄱ, ㄴ, ㅇ,")]
     assert tidy_repeats([seg(0, 9, "네 네 네 알겠어요")]) == [seg(0, 9, "네 네 네 알겠어요")]
+
+
+def test_guide_step_reads_screens_and_labels_pages(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder(guide={**GUIDE, "page_labels": [{"start": 0, "label": "12쪽 · 도입"}]})
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide,
+                detect_pages=rec.detect_pages, read_screens=rec.read_screens)
+
+    data = load_analysis(tmp_path / "data", ids["1강"])
+    assert rec.screens == [[{"start": 0.0, "text": ["교재 글자"]}]]
+    assert data["pages"] == [{"start": 0.0, "text": ["교재 글자"], "label": "12쪽 · 도입"}]
+    assert "page_labels" not in data["guide"]
+
+
+def test_screens_are_read_only_when_making_a_guide(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, None,
+                detect_pages=rec.detect_pages, read_screens=rec.read_screens)
+
+    assert rec.screen_reads == []
+
+
+def test_without_ocr_the_guide_uses_the_transcript_only(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide,
+                detect_pages=rec.detect_pages)
+
+    assert rec.screens == [None]

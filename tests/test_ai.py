@@ -1,6 +1,6 @@
 import pytest
 
-from academy.ai import answer_question, fmt_time, make_study_guide, parse_time, transcript_text
+from academy.ai import GUIDE_PROMPT, answer_question, fmt_time, make_study_guide, parse_time, transcript_text
 from tests.fakes import FakeClient
 
 SEGMENTS = [
@@ -25,6 +25,7 @@ GUIDE = {
         {"wrong": "공", "right": "곡"},
         {"wrong": "같음", "right": "같음"},
     ],
+    "page_labels": [],
 }
 
 
@@ -59,6 +60,28 @@ def test_study_guide_keeps_only_real_multi_letter_corrections():
     guide = make_study_guide(FakeClient(GUIDE), "수학/1강", SEGMENTS)
 
     assert guide["corrections"] == [{"wrong": "근의 공시", "right": "근의 공식"}]
+
+
+def test_study_guide_sends_screen_text_and_turns_page_labels_into_times():
+    client = FakeClient({**GUIDE, "page_labels": [{"start": "01:15", "label": "12쪽 · 근의 공식"}]})
+
+    guide = make_study_guide(client, "수학/1강", SEGMENTS,
+                             screens=[{"start": 75.0, "text": ["근의 공식", "판별식 D"]}])
+
+    req = client.requests[0]
+    assert "<화면 글자>\n[01:15]\n근의 공식\n판별식 D\n</화면 글자>" in req["messages"][0]["content"]
+    assert req["system"] != GUIDE_PROMPT and "화면 글자" in req["system"]
+    assert guide["page_labels"] == [{"start": 75, "label": "12쪽 · 근의 공식"}]
+
+
+def test_study_guide_without_screens_sends_transcript_only():
+    client = FakeClient(GUIDE)
+
+    make_study_guide(client, "수학/1강", SEGMENTS)
+
+    req = client.requests[0]
+    assert "<화면 글자>" not in req["messages"][0]["content"]
+    assert req["system"] == GUIDE_PROMPT
 
 
 def test_study_guide_request_sends_transcript_and_json_schema():

@@ -199,6 +199,7 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
   background: var(--hover);
 }
 .pages li.active .page { border-color: var(--accent); background: var(--highlight); }
+.page-label { display: block; margin-bottom: 2px; color: var(--text); font-weight: 600; line-height: 1.4; }
 
 /* 퀴즈 */
 .score { margin: 0 0 12px; font-weight: 600; }

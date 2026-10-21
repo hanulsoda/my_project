@@ -18,8 +18,11 @@ SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], 
 
 
 def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(1, 1),
-                detect_pages=None) -> int:
-    """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다."""
+                detect_pages=None, read_screens=None) -> int:
+    """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
+
+    read_screens가 있으면 요점 정리를 만들 때 페이지마다 화면 글자를 읽어 근거로 함께 보냅니다.
+    """
     videos = find_videos(video_dir)
     if not videos:
         print(f"영상이 없습니다: {Path(video_dir).resolve()} ({' '.join(sorted(VIDEO_EXTS))} 파일만 찾습니다)")
@@ -49,8 +52,22 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
                 data["pages"] = detect_pages(video["path"], Path(data_dir) / video["id"])
                 save_analysis(data_dir, video["id"], data)
             if need_guide:
+                screens = None
+                if data["segments"] and read_screens and data.get("pages"):
+                    if "text" not in data["pages"][0]:  # 요점 정리에서 실패해도 다시 읽지 않도록 저장해 둡니다.
+                        print("  화면 글자 읽는 중...", flush=True)
+                        texts = read_screens(video["path"], data["pages"], data["duration"])
+                        for page, lines in zip(data["pages"], texts):
+                            page["text"] = lines
+                        save_analysis(data_dir, video["id"], data)
+                    screens = [{"start": p["start"], "text": p["text"]} for p in data["pages"]]
                 print("  요점 정리·퀴즈 만드는 중...", flush=True)
-                data["guide"] = make_guide(data["title"], data["segments"]) if data["segments"] else SILENT_GUIDE
+                data["guide"] = (make_guide(data["title"], data["segments"], screens)
+                                 if data["segments"] else SILENT_GUIDE)
+                for label in data["guide"].pop("page_labels", []):
+                    for page in data.get("pages", []):
+                        if abs(page["start"] - label["start"]) <= 1:  # 이름표 시점은 페이지 시작을 초 단위로 버린 값
+                            page["label"] = label["label"]
                 # Claude가 요점 정리 때 찾은 받아쓰기 오타를 대본 탭·질문하기에도 반영합니다.
                 for fix in data["guide"].get("corrections", []):
                     for segment in data["segments"]:
@@ -121,6 +138,7 @@ def whisper_transcriber():
 def main():
     import anthropic
 
+    from academy import screens as screen_text
     from academy.ai import make_study_guide
     from academy.pages import detect_pages
 
@@ -135,10 +153,15 @@ def main():
     if not video_dir.is_dir():
         sys.exit(f"영상 폴더가 없습니다: {video_dir.resolve()} (VIDEO_DIR 설정을 확인하세요)")
 
-    make_guide = None
+    make_guide = read_screens = None
     if not args.no_guide:
         client = anthropic.Anthropic()
-        make_guide = lambda title, segments: make_study_guide(client, title, segments)
+        make_guide = lambda title, segments, screens: make_study_guide(client, title, segments, screens)
+        ocr = screen_text.paddle_ocr()
+        if ocr:
+            read_screens = lambda path, pages, duration: screen_text.read_screens(path, pages, duration, ocr)
+        else:
+            print("화면 글자 인식(PaddleOCR)이 설치되지 않아 대본만으로 요점 정리를 만듭니다. (README의 '화면 글자 인식' 참고)")
     failures = analyze_all(
         video_dir,
         Path(os.environ.get("DATA_DIR", "data")),
@@ -147,6 +170,7 @@ def main():
         force=args.force,
         part=args.part,
         detect_pages=detect_pages,
+        read_screens=read_screens,
     )
     if failures:
         print(f"{failures}개 영상 분석 실패. 다시 실행하면 실패한 영상만 이어서 분석합니다.", file=sys.stderr)

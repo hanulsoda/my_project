@@ -93,8 +93,9 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
         video = get_video(video_id)
         analysis = load_analysis(data_dir, video_id)
         if analysis:
-            # 받아쓰기 대본은 발음대로 틀린 곳이 많아 학생에게 보여 주지 않고, 질문하기·요점 정리에만 씁니다.
+            # 받아쓰기 대본과 화면 글자 원문은 틀린 곳이 많아 학생에게 보내지 않고, 질문하기·요점 정리에만 씁니다.
             analysis.pop("segments", None)
+            analysis["pages"] = [{k: v for k, v in p.items() if k != "text"} for p in analysis.get("pages", [])]
         return {"id": video_id, "title": video["title"], "analysis": analysis}
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")
