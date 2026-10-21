@@ -112,6 +112,7 @@ export REFERENCES_FILE=/경로/references.json
 - 자료 파일은 작품마다 `{"title", "grade", "meta", "features", "stages", "stanzas", "persons", "fillins", "words"}`를 담은 JSON 목록입니다(`meta`는 갈래·주제 같은 이름: 값, `fillins`는 빈칸 문제 `passage`/`answer_line`, `words`는 어휘 `w`/`pos`/`def`).
 - **짝짓기**: 영상 파일 이름에 작품명이 들어 있으면 그 정리를 씁니다(띄어쓰기·기호 무시, 같은 작품이 여러 학년에 있으면 폴더 이름의 학년 우선). 이름에 없으면 화면 글자에서 「작품명」으로 인용된 것을 찾습니다. 두 글자 작품명(「눈」 등)은 화면의 「」로만 짝짓습니다.
 - 교재 PDF에서 자동으로 뽑은 정리에는 엉뚱한 내용·잘린 문장·중복이 섞일 수 있어서, 대본·화면 글자와 맞지 않는 항목은 Claude가 고치거나 뺍니다. **고친 내역은 `data/` JSON의 `guide.edits`에 남고 학생에게는 보내지 않으니**, 선생님이 확인하고 원본 정리를 고칠 때 쓰세요. 어떤 정리를 썼는지는 `guide.sources`에 남습니다.
+- **학생 서버에도 같은 `REFERENCES_FILE`을 설정하면**, Claude 요점 정리가 없는 강의는 짝지어진 학원 정리를 요점 정리 탭에 그대로 보여 줍니다. Claude 비용이 들지 않는 대신 영상 시간 연결·교재 쪽수·퀴즈는 없고, PDF에서 뽑다 깨진 항목도 고치지 않은 채 보입니다. 서버를 켠 뒤 처음 강의 목록을 열 때 짝짓기에 몇 초가 더 걸립니다.
 - 학원 자료이므로 자료 파일과 분석 결과를 공개 저장소에 올리지 마세요.
 
 ## 사용 방법
@@ -171,7 +172,7 @@ uvicorn academy.server:app --host 0.0.0.0 --port 8000
 | `ANTHROPIC_API_KEY` | (없음) | Claude API 키. 분석과 질문하기에 필요하고, 영상 시청에는 필요 없습니다. |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | 요점 정리·질문 답변에 쓸 Claude 모델 |
 | `WHISPER_MODEL` | `large-v3-turbo` | 음성 인식 모델. 더 정확하게는 `large-v3`(느림), 더 빠르게는 `small`(덜 정확) |
-| `REFERENCES_FILE` | (없음) | 학원 요점 정리 자료 파일(JSON). 있으면 요점 정리를 만들 때 근거로 씁니다. |
+| `REFERENCES_FILE` | (없음) | 학원 요점 정리 자료 파일(JSON). 분석에서는 요점 정리의 근거로, 학생 서버에서는 요점 정리가 없는 강의에 그대로 보여 줍니다. |
 | `WHISPER_LANGUAGE` | `ko` | 강의 언어. 비워 두면(`WHISPER_LANGUAGE=`) 자동으로 감지합니다. |
 
 ## 비용 (대략적인 추정)

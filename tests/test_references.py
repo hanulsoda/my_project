@@ -35,6 +35,18 @@ def test_reference_text_lists_every_part_of_the_summary():
         assert part in text
 
 
+def test_found_summaries_come_in_sections_for_showing_as_is():
+    found = find_references("고2/성난 풀잎 강의", [], [POEM])
+
+    assert found[0]["sections"] == [
+        {"name": "개요", "items": ["갈래: 현대 수필", "주제: 자연의 순리"]},
+        {"name": "핵심 특징", "items": ["도덕경을 인용함"]},
+        {"name": "구조", "items": ["전개: 풀독이 오름 / 고추밭"]},
+        {"name": "빈칸 문제", "items": ["글쓴이가 깨달은 것은? → 자연의 순리"]},
+        {"name": "어휘", "items": ["울안(명사): 울타리를 둘러친 안"]},
+    ]
+
+
 def test_a_work_whose_name_is_part_of_another_matched_work_is_dropped():
     longer = {"title": "관점과 형식을 비교하며 읽기", "grade": "중3", "meta": {"갈래": "시"}}
     shorter = {"title": "비교하며 읽기", "grade": "중3", "meta": {"갈래": "시"}}

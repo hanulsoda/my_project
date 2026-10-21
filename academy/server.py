@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from academy.library import find_videos, load_analysis
+from academy.references import find_references, load_references
 
 STATIC_DIR = Path(__file__).parent / "static"
 # NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
@@ -44,7 +45,7 @@ class AskRequest(BaseModel):
     current_time: float | None = None
 
 
-def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
+def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAPI:
     app = FastAPI(title="학원 학습 플레이어")
 
     library = {"at": None, "videos": [], "by_id": {}}
@@ -83,10 +84,23 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
             status_cache[video_id] = (stamp, bool(load_analysis(data_dir, video_id).get("guide")))
         return {"analyzed": True, "guide": status_cache[video_id][1]}
 
+    matched = {}  # 영상 id → 파일 이름으로 짝지어지는 학원 요점 정리. 처음 찾을 때 전체 목록에 몇 초 걸려 기억해 둡니다.
+
+    def academy_summaries(video):
+        if video["id"] not in matched:
+            matched[video["id"]] = [{"source": r["source"], "sections": r["sections"]}
+                                    for r in find_references(video["title"], [], references)]
+        return matched[video["id"]]
+
     @app.get("/api/videos")
     def list_videos():
-        return [{"id": v["id"], "title": v["title"], **analysis_status(v["id"])}
-                for v in current_library()["videos"]]
+        listed = []
+        for v in current_library()["videos"]:
+            status = analysis_status(v["id"])
+            # Claude 요점 정리가 없어도 학원 요점 정리를 보여 줄 수 있으면 요점 정리가 있는 강의입니다.
+            status["guide"] = status["guide"] or (status["analyzed"] and bool(academy_summaries(v)))
+            listed.append({"id": v["id"], "title": v["title"], **status})
+        return listed
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
@@ -98,7 +112,9 @@ def create_app(video_dir: Path, data_dir: Path, answer) -> FastAPI:
             analysis["pages"] = [{k: v for k, v in p.items() if k != "text"} for p in analysis.get("pages", [])]
             if analysis.get("guide"):
                 analysis["guide"].pop("edits", None)  # 학원 정리에서 고친 내역은 선생님 확인용
-        return {"id": video_id, "title": video["title"], "analysis": analysis}
+        # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 그대로 보냅니다.
+        summaries = academy_summaries(video) if analysis and not analysis.get("guide") else []
+        return {"id": video_id, "title": video["title"], "analysis": analysis, "references": summaries}
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")
     def page_thumbnail(video_id: str, n: int):
@@ -146,4 +162,5 @@ def _claude_answer():
 
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
-                 _claude_answer())
+                 _claude_answer(),
+                 load_references(os.environ.get("REFERENCES_FILE")))

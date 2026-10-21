@@ -43,7 +43,8 @@ def find_references(title, screen_lines, references) -> list[dict]:
     hits = [hit for work, hit in found.items() if not any(work != other and work in other for other in found)]
     if any(hit[0] for hit in hits):  # 파일 이름으로 찾았으면 화면에 인용만 된 다른 작품은 뺍니다.
         hits = [hit for hit in hits if hit[0]]
-    return [{"source": f"{ref['grade']} 「{_work(ref['title'])}」", "text": reference_text(ref)} for _, ref, _ in hits]
+    return [{"source": f"{ref['grade']} 「{_work(ref['title'])}」", "text": reference_text(ref),
+             "sections": reference_sections(ref)} for _, ref, _ in hits]
 
 
 def _grade_score(grade, title):
@@ -53,14 +54,17 @@ def _grade_score(grade, title):
     return 2 if exact and grade == exact.group(0) else 1 if level and grade.startswith(level) else 0
 
 
+def reference_sections(ref) -> list[dict]:
+    """정리를 [{"name": "개요"·"핵심 특징"…, "items": [...]}]로 나눕니다(학생 화면에 그대로 보여 줄 때)."""
+    sections = [{"name": "개요", "items": [f"{k}: {v}" for k, v in ref["meta"].items()]}] if ref.get("meta") else []
+    return sections + [{"name": name, "items": [_item(key, item) for item in ref[key]]}
+                       for key, name in PARTS if ref.get(key)]
+
+
 def reference_text(ref) -> str:
     lines = [f"「{_work(ref['title'])}」({ref['grade']})"]
-    if ref.get("meta"):
-        lines.append("개요: " + " / ".join(f"{k}: {v}" for k, v in ref["meta"].items()))
-    for key, name in PARTS:
-        if ref.get(key):
-            lines.append(f"{name}:")
-            lines += ["- " + _item(key, item) for item in ref[key]]
+    for section in reference_sections(ref):
+        lines += [f"{section['name']}:"] + ["- " + item for item in section["items"]]
     return "\n".join(lines)
 
 

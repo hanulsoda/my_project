@@ -33,7 +33,7 @@ fetch(`/api/videos/${id}`)
   .then(render)
   .catch(() => { $("title").textContent = "영상을 찾을 수 없습니다"; });
 
-function render({ title, analysis }) {
+function render({ title, analysis, references = [] }) {
   document.title = title;
   $("title").textContent = title;
   if (!analysis) {
@@ -46,6 +46,9 @@ function render({ title, analysis }) {
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);
     renderQuiz(analysis.guide.quiz);
+  } else if (references.length) {
+    renderReferences(references);
+    renderQuiz([]);
   } else {
     const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지·질문하기는 사용할 수 있습니다.";
     $("tab-guide").replaceChildren(notice(msg));
@@ -85,6 +88,15 @@ function overviewCard({ overview = [], glossary = [], sources = [] }) {
   if (overview.length) card.append(el("dl", {}, ...pairs(overview, "name", "value")));
   if (glossary.length) card.append(el("h3", {}, "핵심 어휘"), el("dl", {}, ...pairs(glossary, "term", "meaning")));
   return card;
+}
+
+// 이 강의를 위한 요점 정리가 없을 때: 학원이 만든 작품별 요점 정리를 그대로 보여 줍니다(영상 시간 연결 없음).
+function renderReferences(references) {
+  $("tab-guide").replaceChildren(
+    notice("학원 요점 정리입니다. 설명하는 장면은 페이지 탭에서 찾아 이동할 수 있습니다."),
+    ...references.map(({ source, sections }) => el("article", { class: "overview reference" },
+      el("h3", {}, source),
+      ...sections.flatMap(({ name, items }) => [el("h4", {}, name), el("ul", {}, ...items.map((item) => el("li", {}, item)))]))));
 }
 
 // ---- 페이지: 교재의 어느 화면을 설명하는지 그림으로 찾아 이동 ----

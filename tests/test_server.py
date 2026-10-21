@@ -111,6 +111,27 @@ def test_lists_videos_with_analysis_and_guide_status(tmp_path):
     assert client.get("/api/videos").json()[1]["guide"] is True
 
 
+def test_lectures_without_a_guide_show_the_academy_summary_as_is(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "고1").mkdir(parents=True)
+    for name in ["제망매가 학습활동", "속미인곡 학습활동", "1강"]:
+        (video_dir / "고1" / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for title, guide in [("고1/제망매가 학습활동", None), ("고1/속미인곡 학습활동", GUIDE), ("고1/1강", None)]:
+        save_analysis(data_dir, ids[title], {"title": title, "segments": SEGMENTS, "guide": guide})
+    refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}},
+            {"title": "속미인곡", "grade": "고1", "meta": {"갈래": "가사"}}]
+    client = TestClient(create_app(video_dir, data_dir, None, refs))
+    references = lambda title: client.get(f"/api/videos/{ids[title]}").json()["references"]
+
+    assert references("고1/제망매가 학습활동") == [
+        {"source": "고1 「제망매가」", "sections": [{"name": "개요", "items": ["갈래: 향가"]}]}]
+    assert references("고1/속미인곡 학습활동") == []  # 학원 정리를 바탕으로 만든 Claude 요점 정리가 이미 있습니다
+    assert references("고1/1강") == []
+    assert {v["title"]: v["guide"] for v in client.get("/api/videos").json()} == {
+        "고1/1강": False, "고1/속미인곡 학습활동": True, "고1/제망매가 학습활동": True}
+
+
 def test_serves_page_thumbnails(setup, tmp_path):
     client, ids, _ = setup
     thumbs = tmp_path / "data" / ids["1강"]
@@ -135,7 +156,7 @@ def test_video_detail(setup):
     assert analyzed["title"] == "1강"
     assert analyzed["analysis"]["guide"] == GUIDE
     assert "segments" not in analyzed["analysis"]  # 받아쓰기 대본은 학생 브라우저로 보내지 않습니다
-    assert not_yet == {"id": ids["2강"], "title": "2강", "analysis": None}
+    assert not_yet == {"id": ids["2강"], "title": "2강", "analysis": None, "references": []}
     assert client.get("/api/videos/nope").status_code == 404
 
 
