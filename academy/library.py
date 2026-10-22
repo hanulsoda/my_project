@@ -37,4 +37,7 @@ def load_analysis(data_dir: Path, video_id: str) -> dict | None:
 def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     path = Path(data_dir) / f"{video_id}.json"
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    # 새 파일에 다 쓴 뒤 바꿔치기해서, 서버가 반쯤 쓰인 파일을 읽거나 저장 도중 끊겨 분석이 망가지지 않게 합니다.
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)

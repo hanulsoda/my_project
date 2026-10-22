@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from academy.library import find_videos, load_analysis, save_analysis
 
 
@@ -41,3 +45,20 @@ def test_save_and_load_analysis(tmp_path):
 
     assert load_analysis(tmp_path / "data", "abc") == data
     assert load_analysis(tmp_path / "data", "없는영상") is None
+
+
+def test_a_save_cut_off_midway_keeps_the_previous_analysis(tmp_path, monkeypatch):
+    save_analysis(tmp_path, "abc", {"title": "예전 분석"})
+    real = Path.write_text
+
+    def cut_off(self, text, **kwargs):  # 쓰는 도중 작업이 끊기거나 디스크가 찬 경우
+        real(self, text[:5], **kwargs)
+        raise OSError("디스크가 가득 참")
+
+    monkeypatch.setattr(Path, "write_text", cut_off)
+    with pytest.raises(OSError):
+        save_analysis(tmp_path, "abc", {"title": "새 분석"})
+    monkeypatch.undo()
+
+    # 서버가 읽는 파일은 늘 온전한 이전 분석이거나 새 분석입니다.
+    assert load_analysis(tmp_path, "abc") == {"title": "예전 분석"}
