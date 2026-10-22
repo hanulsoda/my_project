@@ -77,7 +77,7 @@
               el("span", { class: "video-title" }, rest),
               el("span", { class: "meta" },
                 el("span", { class: v.analyzed ? "badge ready" : "badge" },
-                  v.guide ? "요점 정리" : v.analyzed ? "페이지" : "분석 전"),
+                  v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "페이지" : "분석 전"),
                 watched)));
           ul.append(li);
           return { li, key: norm(v.title), guide: v.guide };

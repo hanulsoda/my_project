@@ -115,13 +115,14 @@ def test_lists_videos_with_analysis_and_guide_status(tmp_path):
         (video_dir / name).write_bytes(b"x")
     ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
     save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": SEGMENTS, "guide": GUIDE})
-    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": None})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": None,
+                                          "toc": {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}]}})
     client = TestClient(create_app(video_dir, data_dir, None))
 
     assert client.get("/api/videos").json() == [
-        {"id": ids["1강"], "title": "1강", "analyzed": True, "guide": True},
-        {"id": ids["2강"], "title": "2강", "analyzed": True, "guide": False},
-        {"id": ids["3강"], "title": "3강", "analyzed": False, "guide": False},
+        {"id": ids["1강"], "title": "1강", "analyzed": True, "guide": True, "toc": False},
+        {"id": ids["2강"], "title": "2강", "analyzed": True, "guide": False, "toc": True},  # 로컬 AI 자동 목차
+        {"id": ids["3강"], "title": "3강", "analyzed": False, "guide": False, "toc": False},
     ]
 
     save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": GUIDE})

@@ -81,16 +81,18 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
             raise HTTPException(404, "영상을 찾을 수 없습니다")
         return video
 
-    status_cache = {}  # 영상 id → (파일 수정 시각·크기, 요점 정리 유무). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
+    status_cache = {}  # 영상 id → (파일 수정 시각·크기, 요점 정리 유무, 자동 목차 유무). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
 
     def analysis_status(video_id):
         path = Path(data_dir) / f"{video_id}.json"
         if not path.exists():
-            return {"analyzed": False, "guide": False}
+            return {"analyzed": False, "guide": False, "toc": False}
         stamp = (path.stat().st_mtime_ns, path.stat().st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
-            status_cache[video_id] = (stamp, bool(load_analysis(data_dir, video_id).get("guide")))
-        return {"analyzed": True, "guide": status_cache[video_id][1]}
+            data = load_analysis(data_dir, video_id)
+            status_cache[video_id] = (stamp, bool(data.get("guide")), bool((data.get("toc") or {}).get("chapters")))
+        _, guide, toc = status_cache[video_id]
+        return {"analyzed": True, "guide": guide, "toc": toc}
 
     matched = {}  # 영상 id → 파일 이름으로 짝지어지는 학원 요점 정리. 처음 찾을 때 전체 목록에 몇 초 걸려 기억해 둡니다.
 

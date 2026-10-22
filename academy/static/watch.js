@@ -50,6 +50,11 @@ function render({ title, analysis, references = [] }) {
   } else if (references.length) {
     renderReferences(references);
     renderQuiz(references.flatMap((r) => r.quiz));
+  } else if (analysis.toc?.chapters.length) {
+    // 로컬 AI가 대본으로 만든 목차: 챕터 제목·시간만 있고 핵심 내용·퀴즈는 없습니다.
+    renderGuide({ chapters: analysis.toc.chapters.map((c) => ({ ...c, points: [] })) }, analysis.duration);
+    $("tab-guide").prepend(notice("강의 대본으로 자동으로 만든 목차입니다. 틀릴 수 있습니다. 시간을 누르면 그 장면으로 이동합니다."));
+    renderQuiz([]);
   } else {
     const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지는 사용할 수 있습니다.";
     $("tab-guide").replaceChildren(notice(msg));
@@ -60,7 +65,7 @@ function render({ title, analysis, references = [] }) {
 // ---- 요점 정리 + 챕터 점프 ----
 function renderGuide(guide, duration) {
   const box = $("tab-guide");
-  box.replaceChildren(el("p", { class: "summary" }, guide.summary));
+  box.replaceChildren(...(guide.summary ? [el("p", { class: "summary" }, guide.summary)] : []));
   if (guide.overview?.length || guide.glossary?.length) box.append(overviewCard(guide));
   const bar = $("chapter-bar");
   bar.hidden = guide.chapters.length === 0;
