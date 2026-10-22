@@ -56,9 +56,27 @@ def _grade_score(grade, title):
 
 def reference_sections(ref) -> list[dict]:
     """정리를 [{"name": "개요"·"핵심 특징"…, "items": [...]}]로 나눕니다(학생 화면에 그대로 보여 줄 때)."""
-    sections = [{"name": "개요", "items": [f"{k}: {v}" for k, v in ref["meta"].items()]}] if ref.get("meta") else []
-    return sections + [{"name": name, "items": [_item(key, item) for item in ref[key]]}
-                       for key, name in PARTS if ref.get(key)]
+    ref = _tidy(ref)
+    sections = [("개요", [f"{k}: {v}" for k, v in ref["meta"].items()])] if ref.get("meta") else []
+    sections += [(name, [_item(key, item) for item in ref[key]]) for key, name in PARTS if ref.get(key)]
+    # 내용 없는 항목('전개:')과 같은 칸 안의 중복은 뺍니다.
+    sections = [(name, list(dict.fromkeys(i for i in items if i.strip() and not i.strip().endswith(":"))))
+                for name, items in sections]
+    return [{"name": name, "items": items} for name, items in sections if items]
+
+
+def _tidy(value):
+    """교재 PDF에서 뽑을 때 남은 흔적을 정리합니다. 빈칸 표시인 두 칸 띄어쓰기는 그대로 둡니다."""
+    if isinstance(value, list):
+        return [_tidy(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _tidy(v) for k, v in value.items()}
+    if not isinstance(value, str):
+        return value
+    value = value.split("\n\n")[0]  # 빈 줄 뒤는 쪽 머리글(단원 번호·UCI 코드·다음 단원 제목)
+    value = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-�]", "", value)  # 깨진 기호 글꼴·제어 문자
+    value = re.sub(r"(?<=[가-힣])\n(?=[가-힣])", "", value)  # 낱말 중간에서 끊긴 줄
+    return re.sub(r" *\n *", " ", value).strip()
 
 
 def reference_text(ref) -> str:

@@ -1,4 +1,4 @@
-from academy.references import find_references, reference_text
+from academy.references import find_references, reference_sections, reference_text
 
 POEM = {"title": "1-1.(2)성난 풀잎", "grade": "고2", "meta": {"갈래": "현대 수필", "주제": "자연의 순리"},
         "features": [{"num": "①", "text": "도덕경을 인용함"}],
@@ -44,6 +44,20 @@ def test_found_summaries_come_in_sections_for_showing_as_is():
         {"name": "구조", "items": ["전개: 풀독이 오름 / 고추밭"]},
         {"name": "빈칸 문제", "items": ["글쓴이가 깨달은 것은? → 자연의 순리"]},
         {"name": "어휘", "items": ["울안(명사): 울타리를 둘러친 안"]},
+    ]
+
+
+def test_summaries_are_cleaned_of_pdf_extraction_leftovers():
+    messy = {"title": "노새 두 마리", "grade": "고1", "meta": {"갈래": "단편 \n소설"},
+             "features": [{"text": "평소에 \n말수가 적은 아버지"}, {"text": "평소에 말수가 적은 아버지"},
+                          {"text": "1인칭 관찰자 시점\n\n1-2.노새 두 마리\nI410-UCI(KEPA)201"},
+                          {"text": "인물이 왜 그랬는\n지\x01 생각해 봄"}],
+             "stages": [{"label": "전개", "bullets": []}, {"label": "결말", "bullets": ["노새가 된 아버지"]}]}
+
+    assert reference_sections(messy) == [
+        {"name": "개요", "items": ["갈래: 단편 소설"]},
+        {"name": "핵심 특징", "items": ["평소에 말수가 적은 아버지", "1인칭 관찰자 시점", "인물이 왜 그랬는지 생각해 봄"]},
+        {"name": "구조", "items": ["결말: 노새가 된 아버지"]},
     ]
 
 
