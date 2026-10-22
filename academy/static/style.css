@@ -229,6 +229,9 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .choice.right { border-color: var(--right); background: var(--right-soft); }
 .choice.wrong { border-color: var(--wrong); background: var(--wrong-soft); }
 .feedback { margin-top: 8px; line-height: 1.6; }
+.question blockquote { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--border); color: var(--muted); line-height: 1.7; }
+.blank-line { margin: 0 0 8px; line-height: 1.8; }
+.blank { color: var(--accent); white-space: pre-wrap; }  /* 가린 칸의 공백 유지, 긴 답은 줄바꿈 */
 
 /* 질문하기 */
 #tab-ask { display: flex; flex-direction: column; gap: 12px; }

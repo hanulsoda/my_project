@@ -88,7 +88,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
 
     def academy_summaries(video):
         if video["id"] not in matched:
-            matched[video["id"]] = [{"source": r["source"], "sections": r["sections"]}
+            # 빈칸 문제는 퀴즈 탭에서 풀도록 요점 정리에서는 뺍니다.
+            matched[video["id"]] = [{"source": r["source"], "quiz": r["quiz"],
+                                     "sections": [s for s in r["sections"] if s["name"] != "빈칸 문제"]}
                                     for r in find_references(video["title"], [], references)]
         return matched[video["id"]]
 

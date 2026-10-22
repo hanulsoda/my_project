@@ -48,7 +48,7 @@ function render({ title, analysis, references = [] }) {
     renderQuiz(analysis.guide.quiz);
   } else if (references.length) {
     renderReferences(references);
-    renderQuiz([]);
+    renderQuiz(references.flatMap((r) => r.quiz));
   } else {
     const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지는 사용할 수 있습니다.";
     $("tab-guide").replaceChildren(notice(msg));
@@ -125,11 +125,14 @@ function renderPages(list) {
 function renderQuiz(quiz) {
   const box = $("tab-quiz");
   if (!quiz.length) { box.replaceChildren(notice("이 강의에는 퀴즈가 없습니다.")); return; }
+  const choiceCount = quiz.filter((q) => q.choices).length;
   let answered = 0, correct = 0;
   const score = el("p", { class: "score" });
-  const updateScore = () => { score.textContent = `${quiz.length}문제 중 ${answered}문제 풀이 · ${correct}개 정답`; };
+  const updateScore = () => { score.textContent = `${choiceCount}문제 중 ${answered}문제 풀이 · ${correct}개 정답`; };
   updateScore();
+  score.hidden = choiceCount === 0;
   const cards = quiz.map((q, n) => {
+    if (q.parts) return blankCard(q, n);
     const feedback = el("div", { class: "feedback", hidden: "" });
     const choices = q.choices.map((choice, i) => el("button", {
       class: "choice",
@@ -143,14 +146,26 @@ function renderQuiz(quiz) {
           else if (k === i) b.classList.add("wrong");
         });
         feedback.replaceChildren(
-          el("strong", {}, i === q.answer ? "정답입니다! " : "아쉬워요. "), q.explanation, " ",
-          el("button", { class: "link", onclick: () => seek(q.time) }, `▶ ${fmt(q.time)} 설명 다시 보기`));
+          el("strong", {}, i === q.answer ? "정답입니다! " : "아쉬워요. "), q.explanation,
+          // 학원 정리로 만든 문제는 영상 시간이 없습니다.
+          ...(q.time == null ? [] : [" ", el("button", { class: "link", onclick: () => seek(q.time) }, `▶ ${fmt(q.time)} 설명 다시 보기`)]));
         feedback.hidden = false;
       },
     }, `${i + 1}. ${choice}`));
     return el("article", { class: "question" }, el("h3", {}, `Q${n + 1}. ${q.question}`), ...choices, feedback);
   });
   box.replaceChildren(score, ...cards, el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, "다시 풀기"));
+}
+
+// 학원 정리의 빈칸 문제: parts는 글과 빈칸이 번갈아 옵니다. 떠올려 본 뒤 답을 확인합니다.
+function blankCard(q, n) {
+  const line = el("p", { class: "blank-line" });
+  const show = (open) => line.replaceChildren(...q.parts.flatMap((part, i) =>
+    [i ? " " : "", i % 2 ? el("strong", { class: "blank" }, open ? part : "(          )") : part]));
+  show(false);
+  const reveal = el("button", { class: "choice", onclick: () => { show(true); reveal.hidden = true; } }, "답 보기");
+  return el("article", { class: "question" }, el("h3", {}, `Q${n + 1}. 빈칸에 들어갈 말은?`),
+    ...(q.context ? [el("blockquote", {}, q.context)] : []), line, reveal);
 }
 
 // ---- AI에게 질문하기 ----

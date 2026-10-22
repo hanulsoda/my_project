@@ -1,4 +1,4 @@
-from academy.references import find_references, reference_sections, reference_text
+from academy.references import find_references, reference_quiz, reference_sections, reference_text
 
 POEM = {"title": "1-1.(2)성난 풀잎", "grade": "고2", "meta": {"갈래": "현대 수필", "주제": "자연의 순리"},
         "features": [{"num": "①", "text": "도덕경을 인용함"}],
@@ -59,6 +59,39 @@ def test_summaries_are_cleaned_of_pdf_extraction_leftovers():
         {"name": "핵심 특징", "items": ["평소에 말수가 적은 아버지", "1인칭 관찰자 시점", "인물이 왜 그랬는지 생각해 봄"]},
         {"name": "구조", "items": ["결말: 노새가 된 아버지"]},
     ]
+
+
+def test_fill_in_questions_hide_the_blanks_marked_by_double_spaces():
+    ref = {"title": "노새 두 마리", "grade": "고1", "fillins": [
+        {"no": "Q1", "passage": "아버지는 연탄을 나른다.", "answer_line": "아버지의 직업은   연탄배달부  이고,   과묵한  성격이다."},
+        {"no": "Q2", "passage": "이 글의 주제는?", "answer_line": "가난한 삶의 애환"}]}
+
+    assert reference_quiz(ref) == [
+        {"context": "아버지는 연탄을 나른다.", "parts": ["아버지의 직업은", "연탄배달부", "이고,", "과묵한", "성격이다."]},
+        {"context": "이 글의 주제는?", "parts": ["", "가난한 삶의 애환", ""]},  # 빈칸 표시가 없으면 답 전체를 가립니다
+    ]
+
+
+def test_word_questions_ask_for_the_meaning_among_other_words_of_the_same_work():
+    ref = {"title": "노새 두 마리", "grade": "고1",
+           "words": [{"w": f"낱말{i}", "pos": "명사", "def": f"뜻{i}"} for i in range(5)]}
+
+    quiz = reference_quiz(ref)
+
+    assert len(quiz) == 5
+    first = quiz[0]
+    assert first["question"] == "‘낱말0’의 뜻으로 알맞은 것은?"
+    assert len(set(first["choices"])) == 4 and set(first["choices"]) <= {f"뜻{i}" for i in range(5)}
+    assert first["choices"][first["answer"]] == "뜻0"
+    assert first["explanation"] == "낱말0(명사): 뜻0"
+    assert reference_quiz(ref) == quiz  # 열 때마다 같은 문제·순서
+
+
+def test_no_word_questions_when_too_few_words_to_make_four_choices():
+    ref = {"title": "노새 두 마리", "grade": "고1",
+           "words": [{"w": f"낱말{i}", "pos": "명사", "def": f"뜻{i}"} for i in range(3)]}
+
+    assert reference_quiz(ref) == []
 
 
 def test_a_work_whose_name_is_part_of_another_matched_work_is_dropped():

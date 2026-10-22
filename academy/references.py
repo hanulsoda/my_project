@@ -5,6 +5,7 @@
 """
 
 import json
+import random
 import re
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def find_references(title, screen_lines, references) -> list[dict]:
     if any(hit[0] for hit in hits):  # 파일 이름으로 찾았으면 화면에 인용만 된 다른 작품은 뺍니다.
         hits = [hit for hit in hits if hit[0]]
     return [{"source": f"{ref['grade']} 「{_work(ref['title'])}」", "text": reference_text(ref),
-             "sections": reference_sections(ref)} for _, ref, _ in hits]
+             "sections": reference_sections(ref), "quiz": reference_quiz(ref)} for _, ref, _ in hits]
 
 
 def _grade_score(grade, title):
@@ -63,6 +64,26 @@ def reference_sections(ref) -> list[dict]:
     sections = [(name, list(dict.fromkeys(i for i in items if i.strip() and not i.strip().endswith(":"))))
                 for name, items in sections]
     return [{"name": name, "items": items} for name, items in sections if items]
+
+
+def reference_quiz(ref) -> list[dict]:
+    """빈칸 문제는 {"context", "parts": [글, 빈칸, 글, …]}, 어휘는 뜻을 고르는 4지선다로 만듭니다."""
+    ref = _tidy(ref)
+    quiz = []
+    for fill in ref.get("fillins") or []:
+        if fill.get("answer_line"):
+            # 교재에서 빈칸에 들어갈 말은 앞뒤를 두 칸 이상 띄워 둡니다.
+            parts = [p.strip() for p in re.split(r" {2,}(\S(?:.*?\S)?) {2,}", fill["answer_line"])]
+            quiz.append({"context": fill.get("passage", ""), "parts": parts if len(parts) > 1 else ["", parts[0], ""]})
+    words = {w["def"]: w for w in ref.get("words") or [] if w.get("w") and w.get("def")}  # 오답 보기가 겹치지 않게 뜻별로 하나
+    if len(words) >= 4:
+        for meaning, word in words.items():
+            rng = random.Random(word["w"] + meaning)  # 강의를 열 때마다 같은 보기·순서
+            choices = rng.sample([m for m in words if m != meaning], 3) + [meaning]
+            rng.shuffle(choices)
+            quiz.append({"question": f"‘{word['w']}’의 뜻으로 알맞은 것은?", "choices": choices,
+                         "answer": choices.index(meaning), "explanation": _item("words", word)})
+    return quiz
 
 
 def _tidy(value):
