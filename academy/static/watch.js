@@ -5,6 +5,7 @@ video.src = `/media/${id}`;
 
 let chapters = [];  // { start, title, card, bar }
 let pages = [];     // { start, item }
+let refItems = [];  // { start, item } 시간이 붙은 학원 정리 항목, 시간 순
 
 function seek(t) {
   video.currentTime = t;
@@ -92,12 +93,17 @@ function overviewCard({ overview = [], glossary = [], sources = [] }) {
 
 // 이 강의를 위한 요점 정리가 없을 때: 학원이 만든 작품별 요점 정리를 그대로 보여 줍니다(영상 시간 연결 없음).
 function renderReferences(references) {
+  refItems = [];
   $("tab-guide").replaceChildren(
     notice("학원 요점 정리입니다. 시간을 누르면 그 설명으로 이동합니다. 시간은 대본에서 자동으로 찾은 것이라 가끔 틀릴 수 있고, 시간이 없는 내용은 페이지 탭에서 찾을 수 있습니다."),
     ...references.map(({ source, sections }) => el("article", { class: "overview reference" },
       el("h3", {}, source),
-      ...sections.flatMap(({ name, items, times = [] }) => [el("h4", {}, name), el("ul", {}, ...items.map((item, i) =>
-        el("li", {}, ...(times[i] == null ? [] : [timeButton(times[i]), " "]), item)))]))));
+      ...sections.flatMap(({ name, items, times = [] }) => [el("h4", {}, name), el("ul", {}, ...items.map((item, i) => {
+        const li = el("li", {}, ...(times[i] == null ? [] : [timeButton(times[i]), " "]), item);
+        if (times[i] != null) refItems.push({ start: times[i], item: li });
+        return li;
+      }))]))));
+  refItems.sort((a, b) => a.start - b.start);
 }
 
 // ---- 페이지: 교재의 어느 화면을 설명하는지 그림으로 찾아 이동 ----
@@ -283,7 +289,7 @@ function currentItem(items, t) {
   return found;
 }
 
-let activeChapter = null, activePage = null;
+let activeChapter = null, activePage = null, activeRef = null;
 function showCurrent(t) {
   const page = currentItem(pages, t);
   if (page !== activePage) {
@@ -299,5 +305,13 @@ function showCurrent(t) {
     chapter?.bar.classList.add("active");
     $("now").textContent = chapter ? `지금: ${chapter.title}` : "";
     activeChapter = chapter;
+  }
+  // 학원 정리 항목은 시간을 찾을 때 본 3분 구간 동안만 강조합니다.
+  const latest = currentItem(refItems, t);
+  const ref = latest && t - latest.start <= 180 ? latest : null;
+  if (ref !== activeRef) {
+    activeRef?.item.classList.remove("active");
+    ref?.item.classList.add("active");
+    activeRef = ref;
   }
 }
