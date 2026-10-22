@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from academy.library import find_videos, load_analysis
 from academy.references import find_references, load_references
+from academy.timelink import link_times
 
 STATIC_DIR = Path(__file__).parent / "static"
 # NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
@@ -115,14 +116,15 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
     def video_detail(video_id: str):
         video = get_video(video_id)
         analysis = load_analysis(data_dir, video_id)
+        # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 대본에서 찾은 시간과 함께 보냅니다.
+        summaries = (link_times(academy_summaries(video), analysis.get("segments") or [])
+                     if analysis and not analysis.get("guide") else [])
         if analysis:
             # 받아쓰기 대본과 화면 글자 원문은 틀린 곳이 많아 학생에게 보내지 않고, 질문하기·요점 정리에만 씁니다.
             analysis.pop("segments", None)
             analysis["pages"] = [{k: v for k, v in p.items() if k != "text"} for p in analysis.get("pages", [])]
             if analysis.get("guide"):
                 analysis["guide"].pop("edits", None)  # 학원 정리에서 고친 내역은 선생님 확인용
-        # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 그대로 보냅니다.
-        summaries = academy_summaries(video) if analysis and not analysis.get("guide") else []
         return {"id": video_id, "title": video["title"], "analysis": analysis, "references": summaries}
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")

@@ -135,16 +135,17 @@ def test_lectures_without_a_guide_show_the_academy_summary_as_is(tmp_path):
         (video_dir / "고1" / f"{name}.mp4").write_bytes(b"x")
     ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
     for title, guide in [("고1/제망매가 학습활동", None), ("고1/속미인곡 학습활동", GUIDE), ("고1/1강", None)]:
-        save_analysis(data_dir, ids[title], {"title": title, "segments": SEGMENTS, "guide": guide})
+        said = [{"start": 30.0, "end": 35.0, "text": "이 작품의 갈래 향가"}] if "제망매가" in title else SEGMENTS
+        save_analysis(data_dir, ids[title], {"title": title, "segments": said, "guide": guide})
     refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"},
              "fillins": [{"passage": "누이의 죽음", "answer_line": "슬픔을   종교적  으로 극복함"}]},
             {"title": "속미인곡", "grade": "고1", "meta": {"갈래": "가사"}}]
     client = TestClient(create_app(video_dir, data_dir, None, refs))
     references = lambda title: client.get(f"/api/videos/{ids[title]}").json()["references"]
 
-    # 빈칸 문제는 답이 미리 보이지 않게 요점 정리에서 빼고 퀴즈로 보냅니다.
+    # 빈칸 문제는 답이 미리 보이지 않게 요점 정리에서 빼고 퀴즈로 보냅니다. 항목마다 대본에서 찾은 시간이 붙습니다.
     assert references("고1/제망매가 학습활동") == [
-        {"source": "고1 「제망매가」", "sections": [{"name": "개요", "items": ["갈래: 향가"]}],
+        {"source": "고1 「제망매가」", "sections": [{"name": "개요", "items": ["갈래: 향가"], "times": [30.0]}],
          "quiz": [{"context": "누이의 죽음", "parts": ["슬픔을", "종교적", "으로 극복함"]}]}]
     assert references("고1/속미인곡 학습활동") == []  # 학원 정리를 바탕으로 만든 Claude 요점 정리가 이미 있습니다
     assert references("고1/1강") == []
