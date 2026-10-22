@@ -9,24 +9,83 @@
 <body>
   <header class="top"><h1>강의 목록</h1></header>
   <main class="list-page">
+    <div class="list-tools">
+      <input id="search" type="search" placeholder="강의 찾기 (예: 제망매가, 고2 미래엔)" aria-label="강의 찾기">
+      <label><input type="checkbox" id="guide-only"> 요점 정리 있는 것만</label>
+    </div>
     <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
-    <ul id="videos" class="video-list"></ul>
+    <div id="folders"></div>
   </main>
   <script src="common.js"></script>
   <script>
-    fetch("/api/videos").then((r) => r.json()).then((videos) => {
-      document.getElementById("empty").hidden = videos.length > 0;
-      for (const v of videos) {
-        const pos = store.get(`pos:${v.id}`);
-        const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
-        document.getElementById("videos").append(el("li", {},
-          el("a", { href: `watch.html?id=${v.id}` },
-            el("span", { class: "video-title" }, v.title),
-            el("span", { class: "meta" },
-              el("span", { class: v.analyzed ? "badge ready" : "badge" },
-                v.guide ? "요점 정리" : v.analyzed ? "페이지" : "분석 전"),
-              watched))));
+    const search = document.getElementById("search"), guideOnly = document.getElementById("guide-only");
+    const norm = (text) => text.toLowerCase().replace(/\s+/g, "");
+    // 검색어·체크·펼친 폴더는 강의를 보고 돌아와도 그대로 있도록 브라우저에 기억합니다.
+    const saved = store.get("list") || {};
+    search.value = saved.q || "";
+    guideOnly.checked = !!saved.guideOnly;
+    const opened = new Set(saved.open || []);
+    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, open: [...opened] });
+    let folders = [];
+
+    // 낱말마다 제목(폴더 경로 포함)에 들어 있으면 보여 줍니다. 띄어쓰기와 낱말 순서는 상관없습니다.
+    function apply() {
+      const words = search.value.trim().split(/\s+/).filter(Boolean).map(norm);
+      let total = 0;
+      for (const folder of folders) {
+        let shown = 0;
+        for (const item of folder.items) {
+          const hit = words.every((w) => item.key.includes(w)) && (!guideOnly.checked || item.guide);
+          item.li.hidden = !hit;
+          shown += hit;
+        }
+        folder.box.hidden = !shown;
+        folder.count.textContent = shown;
+        folder.box.open = words.length ? true : opened.has(folder.name);  // 찾는 중에는 맞는 폴더를 모두 펼칩니다
+        total += shown;
       }
+      const empty = document.getElementById("empty");
+      empty.textContent = folders.length ? "찾는 강의가 없습니다." : "아직 올라온 강의가 없습니다.";
+      empty.hidden = total > 0;
+      save();
+    }
+    search.oninput = apply;
+    guideOnly.onchange = apply;
+
+    fetch("/api/videos").then((r) => r.json()).then((videos) => {
+      const byFolder = new Map();
+      for (const v of videos) {
+        const cut = v.title.indexOf("/");
+        const name = cut < 0 ? "기타" : v.title.slice(0, cut);
+        if (!byFolder.has(name)) byFolder.set(name, []);
+        byFolder.get(name).push({ v, rest: v.title.slice(cut + 1) });
+      }
+      folders = [...byFolder].map(([name, list]) => {
+        const count = el("span", { class: "count" });
+        const ul = el("ul", { class: "video-list" });
+        const box = el("details", { class: "folder" }, el("summary", {}, name, count), ul);
+        box.ontoggle = () => {
+          if (search.value.trim()) return;  // 찾는 중에 자동으로 펼친 것은 기억하지 않습니다
+          if (box.open) opened.add(name); else opened.delete(name);
+          save();
+        };
+        const items = list.map(({ v, rest }) => {
+          const pos = store.get(`pos:${v.id}`);
+          const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
+          const li = el("li", {},
+            el("a", { href: `watch.html?id=${v.id}` },
+              el("span", { class: "video-title" }, rest),
+              el("span", { class: "meta" },
+                el("span", { class: v.analyzed ? "badge ready" : "badge" },
+                  v.guide ? "요점 정리" : v.analyzed ? "페이지" : "분석 전"),
+                watched)));
+          ul.append(li);
+          return { li, key: norm(v.title), guide: v.guide };
+        });
+        document.getElementById("folders").append(box);
+        return { name, box, count, items };
+      });
+      apply();
     });
   </script>
 </body>

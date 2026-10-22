@@ -83,6 +83,19 @@ button[type="submit"]:disabled { opacity: 0.6; }
 
 /* ---- 강의 목록 ---- */
 .list-page { max-width: 760px; margin: 0 auto; padding: 16px; }
+.list-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.list-tools input[type="search"] { flex: 1 1 240px; min-width: 0; }
+.folder { margin-bottom: 8px; }
+.folder > summary {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-weight: 700;
+  cursor: pointer;
+}
+.folder[open] > summary { margin-bottom: 8px; }
+.folder .count { margin-left: 8px; color: var(--muted); font-size: 13px; font-weight: 400; }
 .video-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .video-list a {
   display: flex;
