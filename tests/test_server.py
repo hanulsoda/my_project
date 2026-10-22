@@ -91,6 +91,23 @@ def test_serves_old_list_while_rescanning_in_background(setup, monkeypatch, tmp_
     assert len(client.get("/api/videos").json()) == 3
 
 
+def test_prepares_the_list_in_the_background_when_the_server_starts(tmp_path, monkeypatch):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+    (video_dir / "제망매가.mp4").write_bytes(b"x")
+    save_analysis(tmp_path / "data", find_videos(video_dir)[0]["id"], {"title": "제망매가", "segments": SEGMENTS})
+    scans, matched, real = count_scans(monkeypatch), [], server.find_references
+    monkeypatch.setattr(server, "find_references", lambda *a: matched.append(a) or real(*a))
+
+    with TestClient(create_app(video_dir, tmp_path / "data", None, [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}])):
+        deadline = time.monotonic() + 5
+        while not matched and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    # 아무도 목록을 열지 않았는데 영상 폴더를 훑고 학원 정리까지 짝지어 두었습니다.
+    assert len(scans) == 1 and len(matched) == 1
+
+
 def test_lists_videos_with_analysis_and_guide_status(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()

@@ -5,6 +5,7 @@
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock, Thread
 from time import monotonic
@@ -46,7 +47,13 @@ class AskRequest(BaseModel):
 
 
 def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAPI:
-    app = FastAPI(title="학원 학습 플레이어")
+    @asynccontextmanager
+    async def lifespan(app):
+        # NAS를 훑고 분석 상태를 읽고 학원 정리를 짝짓는 데 30초쯤 걸려, 첫 학생이 기다리지 않게 켜자마자 해 둡니다.
+        Thread(target=list_videos, daemon=True).start()
+        yield
+
+    app = FastAPI(title="학원 학습 플레이어", lifespan=lifespan)
 
     library = {"at": None, "videos": [], "by_id": {}}
     scan_lock = Lock()
