@@ -1,4 +1,5 @@
-const id = new URLSearchParams(location.search).get("id");
+const params = new URLSearchParams(location.search);
+const id = params.get("id");
 const $ = (elementId) => document.getElementById(elementId);
 const video = $("video");
 video.src = `/media/${id}`;
@@ -268,12 +269,16 @@ const posKey = `pos:${id}`;
 let lastSaved = 0;
 const savePosition = () => {
   lastSaved = video.currentTime;
-  store.set(posKey, { t: video.currentTime, d: video.duration });
+  store.set(posKey, { t: video.currentTime, d: video.duration, at: Date.now() });  // at: 목록의 '이어 보기' 순서
 };
 
 video.addEventListener("loadedmetadata", () => {
   const saved = store.get(posKey);
-  if (saved && saved.t > 5 && saved.t < video.duration - 5) {
+  const from = Number(params.get("t"));  // 내용 검색 결과에서 고른 시각
+  if (from > 0) {
+    video.currentTime = from;
+    $("status").textContent = `찾은 낱말을 말한 ${fmt(from)}부터 봅니다.`;
+  } else if (saved && saved.t > 5 && saved.t < video.duration - 5) {
     video.currentTime = saved.t;
     $("status").textContent = `지난번에 보던 ${fmt(saved.t)}부터 이어서 봅니다.`;
   }

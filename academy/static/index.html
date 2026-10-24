@@ -9,10 +9,13 @@
 <body>
   <header class="top"><h1>강의 목록</h1></header>
   <main class="list-page">
-    <div class="list-tools">
+    <form id="tools" class="list-tools">
       <input id="search" type="search" placeholder="강의 찾기 (예: 제망매가, 고2 미래엔)" aria-label="강의 찾기">
+      <button type="submit">내용에서 찾기</button>
       <label><input type="checkbox" id="guide-only"> 요점 정리 있는 것만</label>
-    </div>
+    </form>
+    <section id="found" hidden></section>
+    <section id="recent" hidden><h2>이어 보기</h2><ul id="recent-list" class="video-list"></ul></section>
     <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
     <div id="folders"></div>
   </main>
@@ -45,14 +48,49 @@
         total += shown;
       }
       const empty = document.getElementById("empty");
-      empty.textContent = folders.length ? "찾는 강의가 없습니다." : "아직 올라온 강의가 없습니다.";
+      empty.textContent = folders.length ? "제목으로 찾은 강의가 없습니다." : "아직 올라온 강의가 없습니다.";
       empty.hidden = total > 0;
       save();
     }
     search.oninput = apply;
     guideOnly.onchange = apply;
 
+    function lectureLink(v, label) {
+      const pos = store.get(`pos:${v.id}`);
+      const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
+      return el("a", { href: `watch.html?id=${v.id}` },
+        el("span", { class: "video-title" }, label),
+        el("span", { class: "meta" },
+          el("span", { class: v.analyzed ? "badge ready" : "badge" },
+            v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "페이지" : "분석 전"),
+          watched));
+    }
+
+    // 내용에서 찾기: 선생님이 그 낱말을 말한 강의와 시각(받아쓰기 대본에서 찾음)
+    document.getElementById("tools").onsubmit = async (e) => {
+      e.preventDefault();
+      const q = search.value.trim(), box = document.getElementById("found");
+      box.hidden = false;
+      box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const found = await res.json().catch(() => ({}));
+      if (!res.ok) { box.replaceChildren(el("p", { class: "notice" }, found.detail || "찾지 못했습니다.")); return; }
+      box.replaceChildren(
+        el("h2", {}, `‘${q}’ 내용 검색: 강의 ${found.length}개 (많이 말한 순)`),
+        el("p", { class: "notice" }, "선생님 말을 받아 적은 글에서 찾아서, 받아쓰기가 틀리게 적은 말은 못 찾을 수 있습니다. 시각을 누르면 그 장면부터 봅니다."),
+        el("ul", { class: "found-list" }, ...found.map((r) => el("li", {},
+          el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+          ...r.times.flatMap((t) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` }, fmt(t)), " "]),
+          el("span", { class: "meta" }, `${r.count}번`)))));
+    };
+
     fetch("/api/videos").then((r) => r.json()).then((videos) => {
+      // 이어 보기: 다 보지 않은 강의를 최근에 본 순서로 5개
+      const recent = videos.map((v) => ({ v, pos: store.get(`pos:${v.id}`) }))
+        .filter(({ pos }) => pos && pos.t > 5 && pos.t < pos.d - 5)
+        .sort((a, b) => (b.pos.at || 0) - (a.pos.at || 0)).slice(0, 5);
+      document.getElementById("recent-list").replaceChildren(...recent.map(({ v }) => el("li", {}, lectureLink(v, v.title))));
+      document.getElementById("recent").hidden = !recent.length;
       const byFolder = new Map();
       for (const v of videos) {
         const cut = v.title.indexOf("/");
@@ -70,15 +108,7 @@
           save();
         };
         const items = list.map(({ v, rest }) => {
-          const pos = store.get(`pos:${v.id}`);
-          const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
-          const li = el("li", {},
-            el("a", { href: `watch.html?id=${v.id}` },
-              el("span", { class: "video-title" }, rest),
-              el("span", { class: "meta" },
-                el("span", { class: v.analyzed ? "badge ready" : "badge" },
-                  v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "페이지" : "분석 전"),
-                watched)));
+          const li = el("li", {}, lectureLink(v, rest));
           ul.append(li);
           return { li, key: norm(v.title), guide: v.guide };
         });

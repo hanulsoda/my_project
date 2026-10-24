@@ -154,6 +154,30 @@ def test_lectures_without_a_guide_show_the_academy_summary_as_is(tmp_path):
         "고1/1강": False, "고1/속미인곡 학습활동": True, "고1/제망매가 학습활동": True}
 
 
+def test_finds_lectures_where_a_word_is_spoken_most_first(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강", "3강", "4강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    said = {
+        "1강": [(10.0, "오늘은 구개음화를 볼게"), (30.0, "구개 음화 예시"), (200.0, "다시 구개음화")],
+        "2강": [(5.0, "비음화와"), (95.0, "구개음화의 조건"), (100.0, "구개음화 정리"), (300.0, "구개음화"), (400.0, "구개음화")],
+        "3강": [(0.0, "비음화만 다룹니다")],
+    }
+    for name, lines in said.items():
+        save_analysis(data_dir, ids[name], {"title": name, "duration": 500.0,
+                                            "segments": [{"start": s, "end": s + 3, "text": t} for s, t in lines]})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    # 띄어쓰기는 무시하고 많이 말한 강의부터, 1분 안에 다시 말한 것은 한 번으로 봅니다. 대본 글은 보내지 않습니다.
+    assert client.get("/api/search", params={"q": "구개 음화"}).json() == [
+        {"id": ids["2강"], "title": "2강", "count": 4, "times": [95.0, 300.0, 400.0]},
+        {"id": ids["1강"], "title": "1강", "count": 3, "times": [10.0, 200.0]},
+    ]
+    assert client.get("/api/search", params={"q": "음"}).status_code == 400  # 한 글자는 너무 많이 걸립니다
+
+
 def test_serves_page_thumbnails(setup, tmp_path):
     client, ids, _ = setup
     thumbs = tmp_path / "data" / ids["1강"]

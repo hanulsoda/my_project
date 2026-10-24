@@ -5,7 +5,10 @@
 
 import logging
 import os
+import re
+from bisect import bisect_right
 from contextlib import asynccontextmanager
+from itertools import accumulate
 from pathlib import Path
 from threading import Lock, Thread
 from time import monotonic
@@ -81,18 +84,27 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
             raise HTTPException(404, "영상을 찾을 수 없습니다")
         return video
 
-    status_cache = {}  # 영상 id → (파일 수정 시각·크기, 요점 정리 유무, 자동 목차 유무). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
+    # 영상 id → (파일 수정 시각·크기, 상태). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
+    # 상태에는 내용 검색용으로 띄어쓰기·기호를 뺀 대본과, 각 말이 그 글에서 시작하는 자리·시각도 둡니다.
+    status_cache = {}
 
-    def analysis_status(video_id):
+    def analysis_entry(video_id):
         path = Path(data_dir) / f"{video_id}.json"
         if not path.exists():
-            return {"analyzed": False, "guide": False, "toc": False}
+            return None
         stamp = (path.stat().st_mtime_ns, path.stat().st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
             data = load_analysis(data_dir, video_id)
-            status_cache[video_id] = (stamp, bool(data.get("guide")), bool((data.get("toc") or {}).get("chapters")))
-        _, guide, toc = status_cache[video_id]
-        return {"analyzed": True, "guide": guide, "toc": toc}
+            spoken = [(_norm(s["text"]), s["start"]) for s in data.get("segments") or []]
+            status_cache[video_id] = (stamp, {
+                "guide": bool(data.get("guide")), "toc": bool((data.get("toc") or {}).get("chapters")),
+                "text": "".join(t for t, _ in spoken), "offsets": list(accumulate((len(t) for t, _ in spoken), initial=0))[:-1],
+                "times": [start for _, start in spoken]})
+        return status_cache[video_id][1]
+
+    def analysis_status(video_id):
+        entry = analysis_entry(video_id)
+        return {"analyzed": bool(entry), "guide": bool(entry and entry["guide"]), "toc": bool(entry and entry["toc"])}
 
     matched = {}  # 영상 id → 파일 이름으로 짝지어지는 학원 요점 정리. 처음 찾을 때 전체 목록에 몇 초 걸려 기억해 둡니다.
 
@@ -113,6 +125,29 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
             status["guide"] = status["guide"] or (status["analyzed"] and bool(academy_summaries(v)))
             listed.append({"id": v["id"], "title": v["title"], **status})
         return listed
+
+    @app.get("/api/search")
+    def search(q: str = ""):
+        """낱말을 말한 강의를 많이 말한 순서로. 대본 글은 학생에게 보내지 않고 시각만 보냅니다."""
+        word = _norm(q)
+        if len(word) < 2:
+            raise HTTPException(400, "두 글자 이상 넣어 주세요")
+        found = []
+        for v in current_library()["videos"]:
+            entry = analysis_entry(v["id"])
+            if not entry:
+                continue
+            spots, at = [], entry["text"].find(word)
+            while at >= 0:
+                spots.append(entry["times"][bisect_right(entry["offsets"], at) - 1])
+                at = entry["text"].find(word, at + len(word))
+            times = []
+            for t in spots:
+                if not times or t - times[-1] >= 60:  # 1분 안에 다시 말한 것은 한 번으로 봅니다
+                    times.append(t)
+            if spots:
+                found.append({"id": v["id"], "title": v["title"], "count": len(spots), "times": times[:5]})
+        return sorted(found, key=lambda r: -r["count"])[:50]
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
@@ -159,6 +194,10 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
 
     app.mount("/", RevalidatedStaticFiles(directory=STATIC_DIR, html=True))
     return app
+
+
+def _norm(text):
+    return re.sub(r"[^가-힣a-z0-9]", "", text.lower())
 
 
 def _claude_answer():
