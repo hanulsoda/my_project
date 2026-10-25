@@ -165,17 +165,45 @@ def test_finds_lectures_where_a_word_is_spoken_most_first(tmp_path):
         "2강": [(5.0, "비음화와"), (95.0, "구개음화의 조건"), (100.0, "구개음화 정리"), (300.0, "구개음화"), (400.0, "구개음화")],
         "3강": [(0.0, "비음화만 다룹니다")],
     }
+    said["4강"] = said["1강"]  # 같은 녹화를 다른 폴더에도 넣어 둔 경우
+    toc = {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}, {"start": 90.0, "title": "구개음화의 조건"},
+                                      {"start": 290.0, "title": "정리"}]}
     for name, lines in said.items():
-        save_analysis(data_dir, ids[name], {"title": name, "duration": 500.0,
+        save_analysis(data_dir, ids[name], {"title": name, "duration": 500.0, **({"toc": toc} if name == "2강" else {}),
                                             "segments": [{"start": s, "end": s + 3, "text": t} for s, t in lines]})
     client = TestClient(create_app(video_dir, data_dir, None))
 
     # 띄어쓰기는 무시하고 많이 말한 강의부터, 1분 안에 다시 말한 것은 한 번으로 봅니다. 대본 글은 보내지 않습니다.
+    # 시각마다 그때의 챕터 제목을 붙이고, 같은 녹화는 한 번만 보여 주며 다른 폴더의 것을 함께 적습니다.
     assert client.get("/api/search", params={"q": "구개 음화"}).json() == [
-        {"id": ids["2강"], "title": "2강", "count": 4, "times": [95.0, 300.0, 400.0]},
-        {"id": ids["1강"], "title": "1강", "count": 3, "times": [10.0, 200.0]},
+        {"id": ids["2강"], "title": "2강", "count": 4, "times": [95.0, 300.0, 400.0],
+         "chapters": ["구개음화의 조건", "정리", "정리"], "also": []},
+        {"id": ids["1강"], "title": "1강", "count": 3, "times": [10.0, 200.0], "chapters": [None, None], "also": ["4강"]},
     ]
     assert client.get("/api/search", params={"q": "음"}).status_code == 400  # 한 글자는 너무 많이 걸립니다
+
+
+def test_status_counts_what_students_get_for_each_lecture(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["Claude", "제망매가", "목차", "짧은 강의", "긴 강의", "소리 없는 강의", "망가진 파일"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    base = {"segments": SEGMENTS, "duration": 600.0}
+    save_analysis(data_dir, ids["Claude"], {**base, "title": "Claude", "guide": GUIDE})
+    save_analysis(data_dir, ids["제망매가"], {**base, "title": "제망매가"})
+    save_analysis(data_dir, ids["목차"], {**base, "title": "목차",
+                                         "toc": {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}]}})
+    save_analysis(data_dir, ids["짧은 강의"], {**base, "title": "짧은 강의"})
+    save_analysis(data_dir, ids["긴 강의"], {**base, "title": "긴 강의", "duration": 3000.0})
+    save_analysis(data_dir, ids["소리 없는 강의"], {**base, "title": "소리 없는 강의", "segments": []})
+    refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}]
+    client = TestClient(create_app(video_dir, data_dir, None, refs))
+
+    # 자동 목차 대상: 대본이 있고 40분 이하이며 Claude 요점 정리·학원 정리가 없는 강의(목차, 짧은 강의)
+    assert client.get("/api/status").json() == {
+        "total": 7, "analyzed": 6, "guide": 1, "summary": 1, "toc": 1, "pages": 3,
+        "toc_progress": {"target": 2, "done": 1}, "unanalyzed": ["망가진 파일"]}
 
 
 def test_serves_page_thumbnails(setup, tmp_path):

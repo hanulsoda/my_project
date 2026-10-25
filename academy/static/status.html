@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>강의 현황</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top"><a class="back" href="./">← 강의 목록</a><h1>강의 현황</h1></header>
+  <main class="list-page">
+    <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 페이지만 순서로 하나에만 셉니다.</p>
+    <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
+    <h2>자동 목차 진행</h2>
+    <p id="toc" class="notice"></p>
+    <progress id="toc-bar" max="1" value="0"></progress>
+    <h2>분석되지 않은 강의</h2>
+    <ul id="unanalyzed" class="plain"></ul>
+  </main>
+  <script src="common.js"></script>
+  <script>
+    fetch("/api/status").then((r) => r.json()).then((s) => {
+      const rows = [["전체 강의", s.total], ["분석 끝남", s.analyzed], ["Claude 요점 정리", s.guide], ["학원 정리", s.summary],
+                    ["자동 목차", s.toc], ["페이지만", s.pages], ["분석 안 됨", s.total - s.analyzed]];
+      document.getElementById("counts").replaceChildren(...rows.flatMap(([name, n]) => [el("dt", {}, name), el("dd", {}, n.toLocaleString())]));
+      // 쓸 수 없는 답이 나와 빈 목차로 남긴 강의도 처리한 것으로 셉니다.
+      const { target, done } = s.toc_progress;
+      document.getElementById("toc").textContent = `대상(40분 이하, 요점 정리·학원 정리 없음) ${target.toLocaleString()}개 중 `
+        + `${done.toLocaleString()}개 처리 (${target ? Math.floor(done / target * 100) : 100}%), 남은 강의 ${(target - done).toLocaleString()}개`;
+      const bar = document.getElementById("toc-bar");
+      bar.max = target || 1;
+      bar.value = done;
+      document.getElementById("unanalyzed").replaceChildren(...(s.unanalyzed.length
+        ? s.unanalyzed.map((title) => el("li", {}, title)) : [el("li", { class: "notice" }, "없습니다.")]));
+    });
+  </script>
+</body>
+</html>

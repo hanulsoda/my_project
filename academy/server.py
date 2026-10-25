@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from academy.library import find_videos, load_analysis
 from academy.references import find_references, load_references
 from academy.timelink import link_times
+from academy.toc import MAX_SECONDS as TOC_MAX_SECONDS
 
 STATIC_DIR = Path(__file__).parent / "static"
 # NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
@@ -96,8 +97,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
         if status_cache.get(video_id, (None,))[0] != stamp:
             data = load_analysis(data_dir, video_id)
             spoken = [(_norm(s["text"]), s["start"]) for s in data.get("segments") or []]
+            chapters = ((data.get("guide") or {}).get("chapters") or (data.get("toc") or {}).get("chapters") or [])
             status_cache[video_id] = (stamp, {
                 "guide": bool(data.get("guide")), "toc": bool((data.get("toc") or {}).get("chapters")),
+                "toc_tried": "toc" in data, "duration": data.get("duration") or 0,
+                "chapters": sorted((c["start"], c["title"]) for c in chapters),
                 "text": "".join(t for t, _ in spoken), "offsets": list(accumulate((len(t) for t, _ in spoken), initial=0))[:-1],
                 "times": [start for _, start in spoken]})
         return status_cache[video_id][1]
@@ -146,8 +150,40 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
                 if not times or t - times[-1] >= 60:  # 1분 안에 다시 말한 것은 한 번으로 봅니다
                     times.append(t)
             if spots:
-                found.append({"id": v["id"], "title": v["title"], "count": len(spots), "times": times[:5]})
-        return sorted(found, key=lambda r: -r["count"])[:50]
+                starts = [start for start, _ in entry["chapters"]]
+                chapters = [entry["chapters"][i - 1][1] if (i := bisect_right(starts, t)) else None for t in times[:5]]
+                # 같은 녹화를 여러 폴더에 넣어 둔 경우: 길이와 대본 앞부분이 같으면 같은 녹화로 봅니다.
+                found.append(({"id": v["id"], "title": v["title"], "count": len(spots), "times": times[:5],
+                               "chapters": chapters, "also": []}, (round(entry["duration"]), entry["text"][:150])))
+        merged, first = [], {}
+        for result, recording in sorted(found, key=lambda f: -f[0]["count"]):
+            if recording in first:
+                first[recording]["also"].append(result["title"])
+            else:
+                first[recording] = result
+                merged.append(result)
+        return merged[:50]
+
+    @app.get("/api/status")
+    def status():
+        """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 페이지만)과 자동 목차 진행률"""
+        counts = {"guide": 0, "summary": 0, "toc": 0, "pages": 0}
+        target = done = 0
+        unanalyzed = []
+        videos = current_library()["videos"]
+        for v in videos:
+            entry = analysis_entry(v["id"])
+            if not entry:
+                unanalyzed.append(v["title"])
+                continue
+            summary = not entry["guide"] and bool(academy_summaries(v))
+            counts["guide" if entry["guide"] else "summary" if summary else "toc" if entry["toc"] else "pages"] += 1
+            # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 40분 이하이며 요점 정리·학원 정리가 없는 강의
+            if not entry["guide"] and not summary and entry["times"] and entry["duration"] <= TOC_MAX_SECONDS:
+                target += 1
+                done += entry["toc_tried"]
+        return {"total": len(videos), "analyzed": len(videos) - len(unanalyzed), **counts,
+                "toc_progress": {"target": target, "done": done}, "unanalyzed": unanalyzed}
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
