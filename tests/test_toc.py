@@ -36,9 +36,10 @@ def test_the_model_reads_the_transcript_with_times():
 
 def test_long_lectures_are_asked_in_20_minute_parts_and_joined_in_order():
     # 시험에서 40분 넘는 강의는 통째로 물으면 챕터 자리가 크게 틀리고, 20분씩 물으면 잘 맞았습니다.
+    # 다만 챕터가 너무 잘게 나뉘어(Claude의 두 배) 앞 챕터와 2분 안에 붙은 챕터는 뺍니다.
     segments = [{"start": float(t), "end": t + 5.0, "text": f"{t}초 설명"} for t in range(0, 3000, 300)]
     replies = iter([answer(("00:00", "도입"), ("19:40", "마무리")),
-                    answer(("19:30", "조각 앞"), ("20:20", "앞 챕터와 1분 안"), ("30:00", "위기")),
+                    answer(("19:30", "조각 앞"), ("20:20", "앞 챕터와 1분 안"), ("21:30", "앞 챕터와 2분 안"), ("30:00", "위기")),
                     answer(("40:10", "결말"), ("99:00", "영상 밖"))])
     prompts = []
 

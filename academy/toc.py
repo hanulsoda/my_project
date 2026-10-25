@@ -21,6 +21,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 WHOLE_SECONDS = 40 * 60  # 이보다 긴 강의는
 PART_SECONDS = 20 * 60  # 이만큼씩 나눠 묻습니다(5분이 안 되는 끝자락은 앞 조각에 붙임)
 MIN_GAP = 60  # 이보다 가까운 챕터는 앞 챕터에 합칩니다
+PART_GAP = 120  # 나눠 물은 긴 강의는 챕터가 Claude의 두 배로 잘게 나뉘어 2분(시험에서 Claude 챕터 일치 98%→93%, 개수 19→15)
 SCHEMA = {"type": "object", "properties": {"chapters": {"type": "array", "items": {
     "type": "object", "properties": {"start": {"type": "string"}, "title": {"type": "string"}},
     "required": ["start", "title"]}}}, "required": ["chapters"]}
@@ -48,11 +49,12 @@ def make_toc(segments, duration, ask) -> list[dict] | None:
         starts = range(0, int(duration) - 300, PART_SECONDS)
         ends = [*starts[1:], duration]
         parts = [(b, e, [s for s in segments if b <= s["start"] < e]) for b, e in zip(starts, ends)]
+    gap = MIN_GAP if len(parts) == 1 else PART_GAP
     kept = []
     for begin, end, said in parts:
         for c in _ask(said, ask) if said else []:
-            # 조각 밖·앞으로 돌아간·바로 앞과 1분도 안 떨어진 시간은 모델이 잘못 짚은 것으로 봅니다.
-            if begin <= c["start"] <= end and not (kept and c["start"] < kept[-1]["start"] + MIN_GAP):
+            # 조각 밖·앞으로 돌아간·바로 앞 챕터와 너무 가까운 시간은 모델이 잘못 짚은 것으로 봅니다.
+            if begin <= c["start"] <= end and not (kept and c["start"] < kept[-1]["start"] + gap):
                 kept.append(c)
     return kept if len(kept) >= 2 else None
 
