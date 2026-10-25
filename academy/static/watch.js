@@ -264,6 +264,26 @@ $("note-form").onsubmit = (e) => {
 };
 renderNotes();
 
+// ---- 재생 속도(브라우저에 기억해 다른 강의에도 씀)와 단축키 ----
+function setSpeed(rate) {
+  video.playbackRate = video.defaultPlaybackRate = rate;  // 영상을 불러올 때 기본 속도로 되돌아가지 않게 둘 다 바꿉니다
+  store.set("speed", rate);
+  for (const b of $("speed").children) b.setAttribute("aria-pressed", String(Number(b.dataset.rate) === rate));
+}
+$("speed").replaceChildren(...[0.8, 1, 1.25, 1.5, 2].map((rate) =>
+  el("button", { "data-rate": rate, onclick: () => setSpeed(rate) }, `${rate}×`)));
+setSpeed(store.get("speed") || 1);
+
+document.addEventListener("keydown", (e) => {
+  // 글을 쓰는 중이거나 버튼·링크·영상에 초점이 있으면 그쪽 동작에 맡깁니다(영상 자체 단축키와 두 번 실행되지 않게).
+  if (e.target.closest("input, textarea, select, button, a, video") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === " ") video.paused ? video.play().catch(() => {}) : video.pause();
+  else if (e.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);
+  else if (e.key === "ArrowRight") video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+  else return;
+  e.preventDefault();  // 스페이스·화살표로 화면이 움직이지 않게
+});
+
 // ---- 이어보기 + 지금 위치 표시 ----
 const posKey = `pos:${id}`;
 let lastSaved = 0;
