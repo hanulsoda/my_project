@@ -75,15 +75,21 @@
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const found = await res.json().catch(() => ({}));
       if (!res.ok) { box.replaceChildren(el("p", { class: "notice" }, found.detail || "찾지 못했습니다.")); return; }
+      const results = (list) => el("ul", { class: "found-list" }, ...list.map((r) => el("li", {},
+        el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+        ...r.times.flatMap((t, i) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` },
+          fmt(t), ...(r.chapters[i] ? [` · ${r.chapters[i]}`] : [])), " "]),
+        el("span", { class: "meta" }, `${r.count}번`),
+        ...(r.heard_as ? [el("p", { class: "also" }, `받아 적힌 말: ${r.heard_as.map((w) => `‘${w}’`).join(", ")}`)] : []),
+        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []))));
       box.replaceChildren(
-        el("h2", {}, `‘${q}’ 내용 검색: 강의 ${found.length}개 (많이 말한 순)`),
-        el("p", { class: "notice" }, "선생님 말을 받아 적은 글에서 찾아서, 받아쓰기가 틀리게 적은 말은 못 찾을 수 있습니다. 시각을 누르면 그 장면부터 봅니다."),
-        el("ul", { class: "found-list" }, ...found.map((r) => el("li", {},
-          el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
-          ...r.times.flatMap((t, i) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` },
-            fmt(t), ...(r.chapters[i] ? [` · ${r.chapters[i]}`] : [])), " "]),
-          el("span", { class: "meta" }, `${r.count}번`),
-          ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : [])))));
+        el("h2", {}, `‘${q}’ 내용 검색: 강의 ${found.exact.length}개 (많이 말한 순)`),
+        el("p", { class: "notice" }, "선생님 말을 받아 적은 글에서 찾습니다. 시각을 누르면 그 장면부터 봅니다."),
+        results(found.exact),
+        ...(found.similar.length ? [
+          el("h2", {}, `비슷한 말로 받아 적힌 강의 ${found.similar.length}개`),
+          el("p", { class: "notice" }, "받아쓰기가 소리 하나를 다르게 적은 곳입니다. 다른 낱말일 수도 있으니 적힌 말을 확인하세요."),
+          results(found.similar)] : []));
     };
 
     fetch("/api/videos").then((r) => r.json()).then((videos) => {

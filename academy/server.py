@@ -7,6 +7,7 @@ import logging
 import os
 import re
 from bisect import bisect_right
+from collections import Counter
 from contextlib import asynccontextmanager
 from itertools import accumulate
 from pathlib import Path
@@ -132,29 +133,41 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
 
     @app.get("/api/search")
     def search(q: str = ""):
-        """낱말을 말한 강의를 많이 말한 순서로. 대본 글은 학생에게 보내지 않고 시각만 보냅니다."""
+        """낱말을 말한 강의를 많이 말한 순서로. 대본 글은 학생에게 보내지 않고 시각만 보냅니다.
+
+        exact: 그대로 말한 강의, similar: 그대로는 없고 받아쓰기가 한 소리 다르게 적은 말만 있는 강의(적힌 말과 함께)
+        """
         word = _norm(q)
         if len(word) < 2:
             raise HTTPException(400, "두 글자 이상 넣어 주세요")
-        found = []
+        near = _near(word)
+        exact, similar = [], []
         for v in current_library()["videos"]:
             entry = analysis_entry(v["id"])
             if not entry:
                 continue
-            spots, at = [], entry["text"].find(word)
-            while at >= 0:
-                spots.append(entry["times"][bisect_right(entry["offsets"], at) - 1])
-                at = entry["text"].find(word, at + len(word))
-            times = []
-            for t in spots:
-                if not times or t - times[-1] >= 60:  # 1분 안에 다시 말한 것은 한 번으로 봅니다
-                    times.append(t)
-            if spots:
-                starts = [start for start, _ in entry["chapters"]]
-                chapters = [entry["chapters"][i - 1][1] if (i := bisect_right(starts, t)) else None for t in times[:5]]
-                # 같은 녹화를 여러 폴더에 넣어 둔 경우: 길이와 대본 앞부분이 같으면 같은 녹화로 봅니다.
-                found.append(({"id": v["id"], "title": v["title"], "count": len(spots), "times": times[:5],
-                               "chapters": chapters, "also": []}, (round(entry["duration"]), entry["text"][:150])))
+            at = [m.start() for m in re.finditer(re.escape(word), entry["text"])]
+            if at:
+                exact.append(found_at(v, entry, at))
+            elif near and (matches := list(near.finditer(entry["text"]))):
+                result, recording = found_at(v, entry, [m.start() for m in matches])
+                result["heard_as"] = [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
+                similar.append((result, recording))
+        return {"exact": merge_copies(exact), "similar": merge_copies(similar)}
+
+    def found_at(v, entry, positions):
+        spots = [entry["times"][bisect_right(entry["offsets"], at) - 1] for at in positions]
+        times = []
+        for t in spots:
+            if not times or t - times[-1] >= 60:  # 1분 안에 다시 말한 것은 한 번으로 봅니다
+                times.append(t)
+        starts = [start for start, _ in entry["chapters"]]
+        chapters = [entry["chapters"][i - 1][1] if (i := bisect_right(starts, t)) else None for t in times[:5]]
+        # 같은 녹화를 여러 폴더에 넣어 둔 경우: 길이와 대본 앞부분이 같으면 같은 녹화로 봅니다.
+        return ({"id": v["id"], "title": v["title"], "count": len(spots), "times": times[:5], "chapters": chapters, "also": []},
+                (round(entry["duration"]), entry["text"][:150]))
+
+    def merge_copies(found):
         merged, first = [], {}
         for result, recording in sorted(found, key=lambda f: -f[0]["count"]):
             if recording in first:
@@ -234,6 +247,22 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
 
 def _norm(text):
     return re.sub(r"[^가-힣a-z0-9]", "", text.lower())
+
+
+def _near(word):
+    """받아쓰기가 한 음절의 자음이나 모음 하나만 다르게 적은 말('제망매가'→'제막매가')을 찾는 정규식. 세 글자 이상만."""
+    branches = []
+    for i, ch in enumerate(word):
+        code = ord(ch) - 0xAC00
+        if len(word) < 3 or not 0 <= code < 11172:
+            continue
+        first, middle, last = code // 588, code // 28 % 21, code % 28
+        near = [(x, middle, last) for x in range(19) if x != first] + [(first, x, last) for x in range(21) if x != middle]
+        if i < len(word) - 1:  # 마지막 음절의 받침만 다른 말은 조사가 붙은 다른 말일 때가 많습니다('군주로서')
+            near += [(first, middle, x) for x in range(28) if x != last]
+        syllables = "".join(chr(0xAC00 + a * 588 + b * 28 + c) for a, b, c in near)
+        branches.append(f"{re.escape(word[:i])}[{syllables}]{re.escape(word[i + 1:])}")
+    return re.compile("|".join(branches)) if branches else None
 
 
 def _claude_answer():

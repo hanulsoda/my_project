@@ -175,12 +175,37 @@ def test_finds_lectures_where_a_word_is_spoken_most_first(tmp_path):
 
     # 띄어쓰기는 무시하고 많이 말한 강의부터, 1분 안에 다시 말한 것은 한 번으로 봅니다. 대본 글은 보내지 않습니다.
     # 시각마다 그때의 챕터 제목을 붙이고, 같은 녹화는 한 번만 보여 주며 다른 폴더의 것을 함께 적습니다.
-    assert client.get("/api/search", params={"q": "구개 음화"}).json() == [
+    assert client.get("/api/search", params={"q": "구개 음화"}).json() == {"exact": [
         {"id": ids["2강"], "title": "2강", "count": 4, "times": [95.0, 300.0, 400.0],
          "chapters": ["구개음화의 조건", "정리", "정리"], "also": []},
         {"id": ids["1강"], "title": "1강", "count": 3, "times": [10.0, 200.0], "chapters": [None, None], "also": ["4강"]},
-    ]
+    ], "similar": []}
     assert client.get("/api/search", params={"q": "음"}).status_code == 400  # 한 글자는 너무 많이 걸립니다
+
+
+def test_also_finds_lectures_where_the_word_was_transcribed_one_sound_off(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    said = {"정확": [(5.0, "성에꽃을 보자"), (20.0, "성의꽃")],
+            "비슷": [(10.0, "최두석의 성의꽃을 볼게"), (90.0, "다시 성의꽃")],
+            "군주로": [(0.0, "군주로서 백성을 다스린다")],
+            "군지론": [(0.0, "마키아벨리의 군지론과 백상")]}
+    for name in said:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for name, lines in said.items():
+        save_analysis(data_dir, ids[name], {"title": name, "duration": 500.0,
+                                            "segments": [{"start": s, "end": s + 3, "text": t} for s, t in lines]})
+    client = TestClient(create_app(video_dir, data_dir, None))
+    search = lambda q: client.get("/api/search", params={"q": q}).json()
+
+    # 받아쓰기가 한 음절의 자음·모음 하나를 다르게 적은 강의는 따로, 실제로 적힌 말과 함께 보냅니다.
+    assert [r["title"] for r in search("성에꽃")["exact"]] == ["정확"]
+    assert search("성에꽃")["similar"] == [{"id": ids["비슷"], "title": "비슷", "count": 2, "times": [10.0, 90.0],
+                                          "chapters": [None, None], "also": [], "heard_as": ["성의꽃"]}]
+    # '군주로(서)'처럼 마지막 음절의 받침만 다른 말은 조사가 붙은 다른 말일 때가 많아 빼고, 두 글자 낱말은 비슷한 말을 찾지 않습니다.
+    assert [r["title"] for r in search("군주론")["similar"]] == ["군지론"]
+    assert search("백성")["similar"] == []
 
 
 def test_status_counts_what_students_get_for_each_lecture(tmp_path):
