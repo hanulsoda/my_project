@@ -24,7 +24,6 @@ from pydantic import BaseModel, Field
 from academy.library import find_videos, load_analysis
 from academy.references import find_references, load_references
 from academy.timelink import link_times
-from academy.toc import MAX_SECONDS as TOC_MAX_SECONDS
 
 STATIC_DIR = Path(__file__).parent / "static"
 # NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
@@ -191,8 +190,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
                 continue
             summary = not entry["guide"] and bool(academy_summaries(v))
             counts["guide" if entry["guide"] else "summary" if summary else "toc" if entry["toc"] else "pages"] += 1
-            # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 40분 이하이며 요점 정리·학원 정리가 없는 강의
-            if not entry["guide"] and not summary and entry["times"] and entry["duration"] <= TOC_MAX_SECONDS:
+            # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 요점 정리·학원 정리가 없는 강의
+            if not entry["guide"] and not summary and entry["times"]:
                 target += 1
                 done += entry["toc_tried"]
         return {"total": len(videos), "analyzed": len(videos) - len(unanalyzed), **counts,

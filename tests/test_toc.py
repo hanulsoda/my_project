@@ -34,6 +34,25 @@ def test_the_model_reads_the_transcript_with_times():
     assert "[00:00] 오늘은 꺼삐딴 리를 봅니다\n[01:05] 회중시계가 중요해요" in prompts[0]
 
 
+def test_long_lectures_are_asked_in_20_minute_parts_and_joined_in_order():
+    # 시험에서 40분 넘는 강의는 통째로 물으면 챕터 자리가 크게 틀리고, 20분씩 물으면 잘 맞았습니다.
+    segments = [{"start": float(t), "end": t + 5.0, "text": f"{t}초 설명"} for t in range(0, 3000, 300)]
+    replies = iter([answer(("00:00", "도입"), ("19:40", "마무리")),
+                    answer(("19:30", "조각 앞"), ("20:20", "앞 챕터와 1분 안"), ("30:00", "위기")),
+                    answer(("40:10", "결말"), ("99:00", "영상 밖"))])
+    prompts = []
+
+    def ask(prompt, schema):
+        prompts.append(prompt)
+        return next(replies)(prompt, schema)
+
+    assert make_toc(segments, 3000.0, ask) == [
+        {"start": 0.0, "title": "도입"}, {"start": 1180.0, "title": "마무리"},
+        {"start": 1800.0, "title": "위기"}, {"start": 2410.0, "title": "결말"}]
+    assert len(prompts) == 3
+    assert "[20:00] 1200초 설명" in prompts[1] and "[15:00]" not in prompts[1]  # 조각마다 그 20분의 대본만
+
+
 def lectures(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
@@ -47,7 +66,7 @@ def lectures(tmp_path):
     return video_dir, data_dir, ids
 
 
-def test_adds_a_toc_only_to_short_lectures_without_any_summary(tmp_path):
+def test_adds_a_toc_only_to_lectures_without_any_summary(tmp_path):
     video_dir, data_dir, ids = lectures(tmp_path)
     asked = []
 
@@ -59,9 +78,10 @@ def test_adds_a_toc_only_to_short_lectures_without_any_summary(tmp_path):
 
     toc = lambda name: (load_analysis(data_dir, ids[name]) or {}).get("toc")
     assert toc("1강") == {"model": MODEL, "chapters": [{"start": 5.0, "title": "도입"}, {"start": 300.0, "title": "전개"}]}
-    assert toc("6강")["chapters"]
-    assert [toc(n) for n in ["2강", "3강", "제망매가"]] == [None, None, None]  # 요점 정리·40분 넘음·학원 정리
-    assert len(asked) == 2  # 이미 해 본 5강은 다시 묻지 않습니다
+    assert toc("6강")["chapters"] and toc("3강")["chapters"]  # 50분짜리 3강도 만듭니다
+    assert [toc(n) for n in ["2강", "제망매가"]] == [None, None]  # Claude 요점 정리·학원 정리가 있음
+    # 1강·6강 한 번씩, 3강은 20분 조각 중 대본이 있는 첫 조각만 묻고, 이미 해 본 5강은 다시 묻지 않습니다.
+    assert len(asked) == 3
 
 
 def test_stops_starting_lectures_at_the_morning_time(tmp_path):

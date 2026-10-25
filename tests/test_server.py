@@ -225,10 +225,10 @@ def test_status_counts_what_students_get_for_each_lecture(tmp_path):
     refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}]
     client = TestClient(create_app(video_dir, data_dir, None, refs))
 
-    # 자동 목차 대상: 대본이 있고 40분 이하이며 Claude 요점 정리·학원 정리가 없는 강의(목차, 짧은 강의)
+    # 자동 목차 대상: 대본이 있고 Claude 요점 정리·학원 정리가 없는 강의(목차, 짧은 강의, 긴 강의)
     assert client.get("/api/status").json() == {
         "total": 7, "analyzed": 6, "guide": 1, "summary": 1, "toc": 1, "pages": 3,
-        "toc_progress": {"target": 2, "done": 1}, "unanalyzed": ["망가진 파일"]}
+        "toc_progress": {"target": 3, "done": 1}, "unanalyzed": ["망가진 파일"]}
 
 
 def test_serves_page_thumbnails(setup, tmp_path):

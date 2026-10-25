@@ -2,7 +2,7 @@
 
 실행: python -m academy.toc [--until 07:00]
 시험해 보니 로컬 모델은 핵심 내용·퀴즈에서 틀린 설명을 지어내서 목차만 만들고,
-긴 강의는 챕터 자리가 크게 틀려 40분 이하 강의만 다룹니다.
+40분 넘는 강의는 통째로 물으면 챕터 자리가 크게 틀려 20분씩 나눠 묻고 이어 붙입니다.
 """
 
 import argparse
@@ -18,7 +18,8 @@ from academy.library import find_videos, load_analysis, save_analysis
 
 MODEL = os.environ.get("TOC_MODEL", "exaone3.5:7.8b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-MAX_SECONDS = 40 * 60
+WHOLE_SECONDS = 40 * 60  # 이보다 긴 강의는
+PART_SECONDS = 20 * 60  # 이만큼씩 나눠 묻습니다(5분이 안 되는 끝자락은 앞 조각에 붙임)
 MIN_GAP = 60  # 이보다 가까운 챕터는 앞 챕터에 합칩니다
 SCHEMA = {"type": "object", "properties": {"chapters": {"type": "array", "items": {
     "type": "object", "properties": {"start": {"type": "string"}, "title": {"type": "string"}},
@@ -41,6 +42,22 @@ def _seconds(text):
 
 def make_toc(segments, duration, ask) -> list[dict] | None:
     """ask(prompt, schema)는 모델의 답(JSON 글)을 돌려줍니다. 쓸 만한 챕터가 2개 미만이면 None."""
+    if duration <= WHOLE_SECONDS:
+        parts = [(0.0, duration, segments)]
+    else:
+        starts = range(0, int(duration) - 300, PART_SECONDS)
+        ends = [*starts[1:], duration]
+        parts = [(b, e, [s for s in segments if b <= s["start"] < e]) for b, e in zip(starts, ends)]
+    kept = []
+    for begin, end, said in parts:
+        for c in _ask(said, ask) if said else []:
+            # 조각 밖·앞으로 돌아간·바로 앞과 1분도 안 떨어진 시간은 모델이 잘못 짚은 것으로 봅니다.
+            if begin <= c["start"] <= end and not (kept and c["start"] < kept[-1]["start"] + MIN_GAP):
+                kept.append(c)
+    return kept if len(kept) >= 2 else None
+
+
+def _ask(segments, ask):
     lines, start = [], None
     for s in segments:  # 15초쯤씩 묶어 모델이 읽을 줄 수를 줄입니다
         if start is None or s["start"] - start >= 15:
@@ -51,15 +68,13 @@ def make_toc(segments, duration, ask) -> list[dict] | None:
     try:
         chapters = json.loads(ask(f"{PROMPT}\n\n<대본>\n" + "\n".join(lines) + "\n</대본>", SCHEMA))["chapters"]
     except (json.JSONDecodeError, KeyError, TypeError):
-        return None
-    kept = []
+        return []
+    found = []
     for c in chapters:
         t, title = _seconds(c.get("start")), str(c.get("title", "")).strip()
-        # 영상 밖·앞으로 돌아간·바로 앞과 1분도 안 떨어진 시간은 모델이 잘못 짚은 것으로 봅니다.
-        if t is None or not title or t > duration or (kept and t < kept[-1]["start"] + MIN_GAP):
-            continue
-        kept.append({"start": float(t), "title": title})
-    return kept if len(kept) >= 2 else None
+        if t is not None and title:
+            found.append({"start": float(t), "title": title})
+    return found
 
 
 def ollama_ask(prompt, schema):
@@ -73,7 +88,7 @@ def ollama_ask(prompt, schema):
 
 
 def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now) -> tuple[int, bool]:
-    """요점 정리·학원 정리가 없는 40분 이하 강의에 목차를 붙입니다. (실패 수, 끝까지 했는지)를 돌려줍니다.
+    """요점 정리·학원 정리가 없는 강의에 목차를 붙입니다. (실패 수, 끝까지 했는지)를 돌려줍니다.
 
     until("07:00")을 주면 처음 부른 때 다음에 오는 그 시각부터는 새 강의를 시작하지 않습니다.
     """
@@ -86,8 +101,7 @@ def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now
     failures = 0
     for video in find_videos(video_dir):
         data = load_analysis(data_dir, video["id"])
-        if (not data or not data.get("segments") or data.get("guide") or "toc" in data
-                or data["duration"] > MAX_SECONDS or has_summary(video["title"])):
+        if not data or not data.get("segments") or data.get("guide") or "toc" in data or has_summary(video["title"]):
             continue
         if deadline and now() >= deadline:
             print(f"{until}이 지나 멈춥니다. 다음에 실행하면 이어서 합니다.", flush=True)
