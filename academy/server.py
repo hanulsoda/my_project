@@ -185,7 +185,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             else:
                 first[recording] = result
                 merged.append(result)
-        return merged[:50]
+        return merged[:300]  # 화면은 30개씩 '더 보기'
 
     @app.get("/api/status")
     def status():
@@ -201,8 +201,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 continue
             summary = not entry["guide"] and bool(academy_summaries(v))
             counts["guide" if entry["guide"] else "summary" if summary else "toc" if entry["toc"] else "pages"] += 1
-            # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 요점 정리·학원 정리가 없는 강의
-            if not entry["guide"] and not summary and entry["times"]:
+            # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 Claude 요점 정리가 없는 강의
+            if not entry["guide"] and entry["times"]:
                 target += 1
                 done += entry["toc_tried"]
         found = {"total": len(videos), "analyzed": len(videos) - len(unanalyzed), **counts,

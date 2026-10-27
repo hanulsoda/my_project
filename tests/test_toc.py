@@ -67,7 +67,7 @@ def lectures(tmp_path):
     return video_dir, data_dir, ids
 
 
-def test_adds_a_toc_only_to_lectures_without_any_summary(tmp_path):
+def test_adds_a_toc_to_every_lecture_without_a_claude_guide(tmp_path):
     video_dir, data_dir, ids = lectures(tmp_path)
     asked = []
 
@@ -79,10 +79,23 @@ def test_adds_a_toc_only_to_lectures_without_any_summary(tmp_path):
 
     toc = lambda name: (load_analysis(data_dir, ids[name]) or {}).get("toc")
     assert toc("1강") == {"model": MODEL, "chapters": [{"start": 5.0, "title": "도입"}, {"start": 300.0, "title": "전개"}]}
-    assert toc("6강")["chapters"] and toc("3강")["chapters"]  # 50분짜리 3강도 만듭니다
-    assert [toc(n) for n in ["2강", "제망매가"]] == [None, None]  # Claude 요점 정리·학원 정리가 있음
-    # 1강·6강 한 번씩, 3강은 20분 조각 중 대본이 있는 첫 조각만 묻고, 이미 해 본 5강은 다시 묻지 않습니다.
-    assert len(asked) == 3
+    # 50분짜리 3강도, 학원 정리가 있는 제망매가도 만듭니다(학원 정리에는 챕터가 없어서).
+    assert toc("6강")["chapters"] and toc("3강")["chapters"] and toc("제망매가")["chapters"]
+    assert toc("2강") is None  # Claude 요점 정리에는 챕터가 있음
+    # 1강·6강·제망매가 한 번씩, 3강은 20분 조각 중 대본이 있는 첫 조각만 묻고, 이미 해 본 5강은 다시 묻지 않습니다.
+    assert len(asked) == 4
+
+
+def test_lectures_without_an_academy_summary_come_first(tmp_path):
+    video_dir, data_dir, ids = lectures(tmp_path)
+    clock = iter([datetime(2026, 10, 22, 1, 0)] + [datetime(2026, 10, 22, 2, 0)] * 3 + [datetime(2026, 10, 22, 7, 1)])
+
+    add_tocs(video_dir, data_dir, answer(("00:05", "도입"), ("05:00", "전개")),
+             has_summary=lambda title: title == "1강", until="07:00", now=lambda: next(clock))
+
+    toc = lambda name: (load_analysis(data_dir, ids[name]) or {}).get("toc")
+    # 학원 정리가 없는 3강·6강·제망매가를 먼저 하고, 학원 정리가 있는 1강은 맨 뒤라 아침이 되어 남았습니다.
+    assert [bool(toc(n)) for n in ["3강", "6강", "제망매가", "1강"]] == [True, True, True, False]
 
 
 def test_stops_starting_lectures_at_the_morning_time(tmp_path):

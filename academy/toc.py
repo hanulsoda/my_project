@@ -90,7 +90,9 @@ def ollama_ask(prompt, schema):
 
 
 def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now) -> tuple[int, bool]:
-    """요점 정리·학원 정리가 없는 강의에 목차를 붙입니다. (실패 수, 끝까지 했는지)를 돌려줍니다.
+    """Claude 요점 정리가 없는 강의에 목차를 붙입니다. (실패 수, 끝까지 했는지)를 돌려줍니다.
+
+    학원 정리에는 챕터가 없어 학원 정리가 있는 강의도 만들되, 아무것도 없는 강의를 먼저 합니다.
 
     until("07:00")을 주면 처음 부른 때 다음에 오는 그 시각부터는 새 강의를 시작하지 않습니다.
     """
@@ -101,9 +103,9 @@ def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now
         deadline = began.replace(hour=hour, minute=minute, second=0, microsecond=0)
         deadline += timedelta(days=1) if deadline <= began else timedelta()
     failures = 0
-    for video in find_videos(video_dir):
+    for video in sorted(find_videos(video_dir), key=lambda v: has_summary(v["title"])):  # False(정리 없음) 먼저
         data = load_analysis(data_dir, video["id"])
-        if not data or not data.get("segments") or data.get("guide") or "toc" in data or has_summary(video["title"]):
+        if not data or not data.get("segments") or data.get("guide") or "toc" in data:
             continue
         if deadline and now() >= deadline:
             print(f"{until}이 지나 멈춥니다. 다음에 실행하면 이어서 합니다.", flush=True)

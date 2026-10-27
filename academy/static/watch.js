@@ -49,16 +49,18 @@ function render({ title, analysis, references = [] }) {
   }
   renderPages(analysis.pages || []);
   setupAsk();
+  // 로컬 AI가 대본으로 만든 목차: 챕터 제목·시간만 있고 핵심 내용·퀴즈는 없습니다.
+  const toc = (analysis.toc?.chapters || []).map((c) => ({ ...c, points: [] }));
+  const tocNotice = () => notice("강의 대본으로 자동으로 만든 목차입니다. 틀릴 수 있습니다. 시간을 누르면 그 장면으로 이동합니다.");
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);
     renderQuiz(analysis.guide.quiz);
   } else if (references.length) {
     renderReferences(references);
     renderQuiz(references.flatMap((r) => r.quiz));
-  } else if (analysis.toc?.chapters.length) {
-    // 로컬 AI가 대본으로 만든 목차: 챕터 제목·시간만 있고 핵심 내용·퀴즈는 없습니다.
-    renderGuide({ chapters: analysis.toc.chapters.map((c) => ({ ...c, points: [] })) }, analysis.duration);
-    $("tab-guide").prepend(notice("강의 대본으로 자동으로 만든 목차입니다. 틀릴 수 있습니다. 시간을 누르면 그 장면으로 이동합니다."));
+    if (toc.length) $("tab-guide").prepend(tocNotice(), ...renderChapters(toc, analysis.duration));  // 학원 정리에는 챕터가 없어 위에 목차
+  } else if (toc.length) {
+    $("tab-guide").replaceChildren(tocNotice(), ...renderChapters(toc, analysis.duration));
     renderQuiz([]);
   } else {
     const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지는 사용할 수 있습니다.";
@@ -72,14 +74,18 @@ function renderGuide(guide, duration) {
   const box = $("tab-guide");
   box.replaceChildren(...(guide.summary ? [el("p", { class: "summary" }, guide.summary)] : []));
   if (guide.overview?.length || guide.glossary?.length) box.append(overviewCard(guide));
+  box.append(...renderChapters(guide.chapters, duration));
+}
+
+// 영상 아래 챕터 막대와 이전·다음 챕터 버튼을 준비하고, 요점 정리 탭에 넣을 챕터 카드들을 돌려줍니다.
+function renderChapters(list, duration) {
   const bar = $("chapter-bar");
-  bar.hidden = guide.chapters.length === 0;
-  chapters = guide.chapters.map((c, i) => {
+  bar.hidden = $("chapter-nav").hidden = list.length === 0;
+  chapters = list.map((c, i) => {
     const card = el("article", { class: "chapter" },
       el("h3", {}, timeButton(c.start), " ", c.title),
       el("ul", {}, ...c.points.map((p) => el("li", {}, p))));
-    box.append(card);
-    const end = i + 1 < guide.chapters.length ? guide.chapters[i + 1].start : duration;
+    const end = i + 1 < list.length ? list[i + 1].start : duration;
     const segment = el("button", {
       title: `${fmt(c.start)} ${c.title}`,
       "aria-label": `${fmt(c.start)} ${c.title}로 이동`,
@@ -89,7 +95,18 @@ function renderGuide(guide, duration) {
     bar.append(segment);
     return { start: c.start, title: c.title, card, bar: segment };
   });
+  return chapters.map((c) => c.card);
 }
+
+// 이전·다음 챕터: 챕터에 들어온 지 3초가 넘었으면 '이전'은 그 챕터 처음으로 갑니다(음악 앱처럼).
+function jumpChapter(step) {
+  const now = video.currentTime;
+  const i = chapters.findLastIndex((c) => c.start <= now + 0.25);
+  const target = step > 0 ? i + 1 : i >= 0 && now - chapters[i].start > 3 ? i : i - 1;
+  if (chapters[target]) seek(chapters[target].start);
+}
+$("prev-chapter").onclick = () => jumpChapter(-1);
+$("next-chapter").onclick = () => jumpChapter(1);
 
 // 학원 요점 정리를 바탕으로 만든 강의의 작품 개요(갈래·주제 등)와 핵심 어휘
 function overviewCard({ overview = [], glossary = [], sources = [] }) {
@@ -285,6 +302,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === " ") video.paused ? video.play().catch(() => {}) : video.pause();
   else if (e.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);
   else if (e.key === "ArrowRight") video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+  else if (e.key === "[") jumpChapter(-1);
+  else if (e.key === "]") jumpChapter(1);
   else return;
   e.preventDefault();  // 스페이스·화살표로 화면이 움직이지 않게
 });

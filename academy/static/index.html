@@ -83,30 +83,45 @@
         return;
       }
       status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개, 학원 정리·목차 ${found.notes.length}개 찾음`;
-      const results = (list) => el("ul", { class: "found-list" }, ...list.map((r) => el("li", {},
+      // 묶음마다 30개씩 보여 주고 '더 보기'로 이어서 보여 줍니다.
+      const paged = (list, item) => {
+        const ul = el("ul", { class: "found-list" }), more = el("button", { type: "button", class: "more" });
+        let shown = 0;
+        const step = () => {
+          ul.append(...list.slice(shown, shown + 30).map(item));
+          shown += 30;
+          more.hidden = shown >= list.length;
+          more.textContent = `더 보기 (남은 강의 ${list.length - shown}개)`;
+        };
+        more.onclick = step;
+        step();
+        return [ul, more];
+      };
+      const spoken = (r) => el("li", {},
         el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
         ...r.times.flatMap((t, i) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` },
           fmt(t), ...(r.chapters[i] ? [` · ${r.chapters[i]}`] : [])), " "]),
         el("span", { class: "meta" }, `${r.count}번`),
         ...(r.heard_as ? [el("p", { class: "also" }, `받아 적힌 말: ${r.heard_as.map((w) => `‘${w}’`).join(", ")}`)] : []),
-        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []))));
+        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []));
+      const noted = (r) => el("li", {},
+        el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+        ...r.matches.flatMap((m) => m.time == null
+          ? [el("p", { class: "also" }, m.text)]
+          : [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(m.time)}` }, `${fmt(m.time)} · ${m.text}`), " "]),
+        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []));
       box.replaceChildren(
         el("h2", {}, `‘${q}’ 내용 검색: 강의 ${found.exact.length}개 (많이 말한 순)`),
         el("p", { class: "notice" }, "선생님 말을 받아 적은 글에서 찾습니다. 시각을 누르면 그 장면부터 봅니다."),
-        results(found.exact),
+        ...paged(found.exact, spoken),
         ...(found.similar.length ? [
           el("h2", {}, `비슷한 말로 받아 적힌 강의 ${found.similar.length}개`),
           el("p", { class: "notice" }, "받아쓰기가 소리 하나를 다르게 적은 곳입니다. 다른 낱말일 수도 있으니 적힌 말을 확인하세요."),
-          results(found.similar)] : []),
+          ...paged(found.similar, spoken)] : []),
         ...(found.notes.length ? [
           el("h2", {}, `학원 정리·목차에 나오는 강의 ${found.notes.length}개`),
           el("p", { class: "notice" }, "선생님 말에서는 찾지 못했지만 학원 요점 정리나 목차에 적혀 있는 강의입니다."),
-          el("ul", { class: "found-list" }, ...found.notes.map((r) => el("li", {},
-            el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
-            ...r.matches.flatMap((m) => m.time == null
-              ? [el("p", { class: "also" }, m.text)]
-              : [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(m.time)}` }, `${fmt(m.time)} · ${m.text}`), " "]),
-            ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []))))] : []));
+          ...paged(found.notes, noted)] : []));
     };
 
     fetch("/api/videos").then((r) => r.json()).then((videos) => {
