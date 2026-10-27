@@ -14,7 +14,7 @@ function seek(t) {
 }
 
 function timeButton(t) {
-  return el("button", { class: "time", onclick: () => seek(t) }, fmt(t));
+  return el("button", { class: "time", "aria-label": `${fmt(t)}로 이동`, onclick: () => seek(t) }, fmt(t));
 }
 
 function notice(text) {
@@ -24,7 +24,10 @@ function notice(text) {
 // ---- 탭 ----
 for (const tab of document.querySelectorAll(".tabs button")) {
   tab.onclick = () => {
-    for (const other of document.querySelectorAll(".tabs button")) other.classList.toggle("active", other === tab);
+    for (const other of document.querySelectorAll(".tabs button")) {
+      other.classList.toggle("active", other === tab);
+      other.setAttribute("aria-selected", String(other === tab));  // 화면 읽기 프로그램에 열린 탭을 알립니다
+    }
     for (const body of document.querySelectorAll(".tab-body")) body.hidden = body.id !== `tab-${tab.dataset.tab}`;
   };
 }
@@ -38,6 +41,7 @@ fetch(`/api/videos/${id}`)
 function render({ title, analysis, references = [] }) {
   document.title = title;
   $("title").textContent = title;
+  video.setAttribute("aria-label", title);
   if (!analysis) {
     const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·페이지·퀴즈가 생깁니다.";
     for (const tab of ["guide", "pages", "quiz", "ask"]) $(`tab-${tab}`).replaceChildren(notice(msg));
@@ -140,13 +144,13 @@ function renderQuiz(quiz) {
   if (!quiz.length) { box.replaceChildren(notice("이 강의에는 퀴즈가 없습니다.")); return; }
   const choiceCount = quiz.filter((q) => q.choices).length;
   let answered = 0, correct = 0;
-  const score = el("p", { class: "score" });
+  const score = el("p", { class: "score", "aria-live": "polite" });
   const updateScore = () => { score.textContent = `${choiceCount}문제 중 ${answered}문제 풀이 · ${correct}개 정답`; };
   updateScore();
   score.hidden = choiceCount === 0;
   const cards = quiz.map((q, n) => {
     if (q.parts) return blankCard(q, n);
-    const feedback = el("div", { class: "feedback", hidden: "" });
+    const feedback = el("div", { class: "feedback", hidden: "", "aria-live": "polite" });
     const choices = q.choices.map((choice, i) => el("button", {
       class: "choice",
       onclick: () => {
@@ -248,6 +252,7 @@ function renderNotes() {
     el("span", { class: "note-text" }, n.text || "🔖 북마크"),
     el("button", {
       class: "delete",
+      "aria-label": `${fmt(n.t)} 메모 삭제`,
       onclick: () => { notes.splice(i, 1); store.set(notesKey, notes); renderNotes(); },
     }, "삭제"))));
   if (!notes.length) $("notes").append(el("li", { class: "notice" }, "아직 메모가 없습니다. 영상을 보다가 기억할 장면에서 추가하세요."));

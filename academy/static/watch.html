@@ -17,31 +17,31 @@
       <div id="chapter-bar" class="chapter-bar" hidden></div>
       <div id="speed" class="speed" role="group" aria-label="재생 속도"></div>
       <p id="now" class="now"></p>
-      <p id="status" class="status"></p>
+      <p id="status" class="status" aria-live="polite"></p>
     </section>
 
     <section class="panel">
-      <nav class="tabs">
-        <button data-tab="guide" class="active">요점 정리</button>
-        <button data-tab="pages">페이지</button>
-        <button data-tab="quiz">퀴즈</button>
+      <nav class="tabs" role="tablist" aria-label="학습 도구">
+        <button data-tab="guide" class="active" role="tab" id="tab-btn-guide" aria-controls="tab-guide" aria-selected="true">요점 정리</button>
+        <button data-tab="pages" role="tab" id="tab-btn-pages" aria-controls="tab-pages" aria-selected="false">페이지</button>
+        <button data-tab="quiz" role="tab" id="tab-btn-quiz" aria-controls="tab-quiz" aria-selected="false">퀴즈</button>
         <!-- Claude API 크레딧을 쓰지 않으려고 숨겨 둡니다. 다시 쓰려면 hidden을 지웁니다. -->
-        <button data-tab="ask" hidden>질문하기</button>
-        <button data-tab="notes">메모</button>
+        <button data-tab="ask" hidden role="tab" id="tab-btn-ask" aria-controls="tab-ask" aria-selected="false">질문하기</button>
+        <button data-tab="notes" role="tab" id="tab-btn-notes" aria-controls="tab-notes" aria-selected="false">메모</button>
       </nav>
 
-      <div class="tab-body" id="tab-guide"></div>
+      <div class="tab-body" id="tab-guide" role="tabpanel" aria-labelledby="tab-btn-guide"></div>
 
-      <div class="tab-body" id="tab-pages" hidden></div>
+      <div class="tab-body" id="tab-pages" role="tabpanel" aria-labelledby="tab-btn-pages" hidden></div>
 
-      <div class="tab-body" id="tab-quiz" hidden></div>
+      <div class="tab-body" id="tab-quiz" role="tabpanel" aria-labelledby="tab-btn-quiz" hidden></div>
 
-      <div class="tab-body" id="tab-ask" hidden>
+      <div class="tab-body" id="tab-ask" role="tabpanel" aria-labelledby="tab-btn-ask" hidden>
         <div id="chat" class="chat">
           <p class="notice">강의 내용에서 궁금한 점을 물어보세요. 답변 속 시간을 누르면 그 장면으로 이동합니다.</p>
         </div>
         <form id="ask-form" class="ask-form">
-          <textarea id="question" rows="3" maxlength="2000"
+          <textarea id="question" rows="3" maxlength="2000" aria-label="질문"
                     placeholder="예: 근의 공식에서 판별식이 왜 중요한가요?"></textarea>
           <div class="row">
             <label><input type="checkbox" id="use-time" checked> 지금 보는 장면 기준으로 질문</label>
@@ -50,9 +50,9 @@
         </form>
       </div>
 
-      <div class="tab-body" id="tab-notes" hidden>
+      <div class="tab-body" id="tab-notes" role="tabpanel" aria-labelledby="tab-btn-notes" hidden>
         <form id="note-form" class="note-form">
-          <input id="note-text" placeholder="지금 장면에 메모 (비워 두면 북마크)">
+          <input id="note-text" aria-label="메모" placeholder="지금 장면에 메모 (비워 두면 북마크)">
           <button type="submit">추가</button>
         </form>
         <ul id="notes" class="notes"></ul>

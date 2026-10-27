@@ -14,6 +14,7 @@
       <button type="submit">내용에서 찾기</button>
       <label><input type="checkbox" id="guide-only"> 요점 정리 있는 것만</label>
     </form>
+    <p id="found-status" class="sr-only" aria-live="polite"></p>
     <section id="found" hidden></section>
     <section id="recent" hidden><h2>이어 보기</h2><ul id="recent-list" class="video-list"></ul></section>
     <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
@@ -72,9 +73,16 @@
       const q = search.value.trim(), box = document.getElementById("found");
       box.hidden = false;
       box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
+      const status = document.getElementById("found-status");  // 결과 전체 대신 수만 화면 읽기 프로그램에 알립니다
+      status.textContent = "찾는 중";
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const found = await res.json().catch(() => ({}));
-      if (!res.ok) { box.replaceChildren(el("p", { class: "notice" }, found.detail || "찾지 못했습니다.")); return; }
+      if (!res.ok) {
+        box.replaceChildren(el("p", { class: "notice" }, found.detail || "찾지 못했습니다."));
+        status.textContent = found.detail || "찾지 못했습니다.";
+        return;
+      }
+      status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개 찾음`;
       const results = (list) => el("ul", { class: "found-list" }, ...list.map((r) => el("li", {},
         el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
         ...r.times.flatMap((t, i) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` },

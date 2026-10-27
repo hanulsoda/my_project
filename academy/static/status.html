@@ -13,7 +13,7 @@
     <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
     <h2>자동 목차 진행</h2>
     <p id="toc" class="notice"></p>
-    <progress id="toc-bar" max="1" value="0"></progress>
+    <progress id="toc-bar" max="1" value="0" aria-label="자동 목차 진행률"></progress>
     <h2>분석되지 않은 강의</h2>
     <ul id="unanalyzed" class="plain"></ul>
   </main>
@@ -25,7 +25,7 @@
       document.getElementById("counts").replaceChildren(...rows.flatMap(([name, n]) => [el("dt", {}, name), el("dd", {}, n.toLocaleString())]));
       // 쓸 수 없는 답이 나와 빈 목차로 남긴 강의도 처리한 것으로 셉니다.
       const { target, done } = s.toc_progress;
-      document.getElementById("toc").textContent = `대상(40분 이하, 요점 정리·학원 정리 없음) ${target.toLocaleString()}개 중 `
+      document.getElementById("toc").textContent = `대상(요점 정리·학원 정리가 없는 강의) ${target.toLocaleString()}개 중 `
         + `${done.toLocaleString()}개 처리 (${target ? Math.floor(done / target * 100) : 100}%), 남은 강의 ${(target - done).toLocaleString()}개`;
       const bar = document.getElementById("toc-bar");
       bar.max = target || 1;
