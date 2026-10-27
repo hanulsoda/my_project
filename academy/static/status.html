@@ -14,6 +14,10 @@
     <h2>자동 목차 진행</h2>
     <p id="toc" class="notice"></p>
     <progress id="toc-bar" max="1" value="0" aria-label="자동 목차 진행률"></progress>
+    <section id="ops" hidden>
+      <h2>운영 기록</h2>
+      <dl id="ops-lines" class="stats"></dl>
+    </section>
     <h2>분석되지 않은 강의</h2>
     <ul id="unanalyzed" class="plain"></ul>
   </main>
@@ -30,6 +34,11 @@
       const bar = document.getElementById("toc-bar");
       bar.max = target || 1;
       bar.value = done;
+      if (s.ops) {  // 서버에 로그 폴더(LOG_DIR)를 알려 준 경우에만 옵니다
+        const lines = [["마지막 백업", s.ops.backup], ["밤 작업", s.ops.night], ["새 강의 분석", s.ops.new_videos]];
+        document.getElementById("ops-lines").replaceChildren(...lines.flatMap(([name, line]) => [el("dt", {}, name), el("dd", {}, line || "기록 없음")]));
+        document.getElementById("ops").hidden = false;
+      }
       document.getElementById("unanalyzed").replaceChildren(...(s.unanalyzed.length
         ? s.unanalyzed.map((title) => el("li", {}, title)) : [el("li", { class: "notice" }, "없습니다.")]));
     });

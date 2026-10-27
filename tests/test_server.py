@@ -179,7 +179,7 @@ def test_finds_lectures_where_a_word_is_spoken_most_first(tmp_path):
         {"id": ids["2강"], "title": "2강", "count": 4, "times": [95.0, 300.0, 400.0],
          "chapters": ["구개음화의 조건", "정리", "정리"], "also": []},
         {"id": ids["1강"], "title": "1강", "count": 3, "times": [10.0, 200.0], "chapters": [None, None], "also": ["4강"]},
-    ], "similar": []}
+    ], "similar": [], "notes": []}
     assert client.get("/api/search", params={"q": "음"}).status_code == 400  # 한 글자는 너무 많이 걸립니다
 
 
@@ -206,6 +206,49 @@ def test_also_finds_lectures_where_the_word_was_transcribed_one_sound_off(tmp_pa
     # '군주로(서)'처럼 마지막 음절의 받침만 다른 말은 조사가 붙은 다른 말일 때가 많아 빼고, 두 글자 낱말은 비슷한 말을 찾지 않습니다.
     assert [r["title"] for r in search("군주론")["similar"]] == ["군지론"]
     assert search("백성")["similar"] == []
+
+
+def test_also_finds_lectures_whose_summary_or_chapters_mention_the_word(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["홍계월전", "목차", "말함"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    lines = lambda text: [{"start": 0.0, "end": 3.0, "text": text}]  # 서로 다른 녹화(같으면 같은 녹화로 합쳐짐)
+    save_analysis(data_dir, ids["홍계월전"], {"title": "홍계월전", "duration": 600.0, "segments": lines("고전 소설을 봅니다")})
+    save_analysis(data_dir, ids["목차"], {"title": "목차", "duration": 600.0, "segments": lines("현대 소설을 봅니다"),
+                                         "toc": {"model": "m", "chapters": [{"start": 0.0, "title": "도입"},
+                                                                            {"start": 310.0, "title": "전지적 작가 시점의 효과"}]}})
+    save_analysis(data_dir, ids["말함"], {"title": "말함", "duration": 600.0,
+                                         "segments": [{"start": 5.0, "end": 8.0, "text": "전지적 작가 시점이야"}]})
+    refs = [{"title": "홍계월전", "grade": "고1", "meta": {"시점": "전지적 작가 시점"}}]
+    client = TestClient(create_app(video_dir, data_dir, None, refs))
+
+    found = client.get("/api/search", params={"q": "전지적 작가 시점"}).json()
+
+    # 선생님이 말하지 않았어도 학원 정리나 목차·챕터 제목에 있으면 따로 찾고, 걸린 줄(챕터면 시각도)을 함께 보냅니다.
+    assert [r["title"] for r in found["exact"]] == ["말함"]
+    assert sorted(found["notes"], key=lambda r: r["title"]) == [
+        {"id": ids["목차"], "title": "목차", "matches": [{"text": "전지적 작가 시점의 효과", "time": 310.0}], "also": []},
+        {"id": ids["홍계월전"], "title": "홍계월전", "matches": [{"text": "시점: 전지적 작가 시점", "time": None}], "also": []},
+    ]
+
+
+def test_status_shows_the_latest_ops_log_lines_when_given_a_log_folder(tmp_path):
+    video_dir, logs = tmp_path / "videos", tmp_path / "logs"
+    video_dir.mkdir()
+    logs.mkdir()
+    (logs / "backup.log").write_text("2026-10-27 14:58:46 백업 완료: 첫날\n2026-10-28 08:30:05 백업 완료: 둘째 날\n", encoding="utf-8")
+    (logs / "toc.log").write_text("목차: 1강\n2026-10-28 07:00:31 7시가 되어 멈춤. 다음 밤에 이어서 합니다\n목차: 2강\n", encoding="utf-8")
+    (logs / "new-videos.log").write_text("[1/2] 1강\n  이미 분석됨, 건너뜀\n9개 영상 분석 실패.\n\n", encoding="utf-8")
+
+    status = TestClient(create_app(video_dir, tmp_path / "data", None, log_dir=logs)).get("/api/status").json()
+
+    # 밤 작업은 강의마다 남기는 '목차:' 줄 말고 날짜로 시작하는 마지막 줄을 보여 줍니다.
+    assert status["ops"] == {"backup": "2026-10-28 08:30:05 백업 완료: 둘째 날",
+                             "night": "2026-10-28 07:00:31 7시가 되어 멈춤. 다음 밤에 이어서 합니다",
+                             "new_videos": "9개 영상 분석 실패."}
+    assert "ops" not in TestClient(create_app(video_dir, tmp_path / "data", None)).get("/api/status").json()
 
 
 def test_status_counts_what_students_get_for_each_lecture(tmp_path):

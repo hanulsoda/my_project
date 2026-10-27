@@ -51,7 +51,8 @@ class AskRequest(BaseModel):
     current_time: float | None = None
 
 
-def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAPI:
+def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None) -> FastAPI:
+    """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다."""
     @asynccontextmanager
     async def lifespan(app):
         # NAS를 훑고 분석 상태를 읽고 학원 정리를 짝짓는 데 30초쯤 걸려, 첫 학생이 기다리지 않게 켜자마자 해 둡니다.
@@ -140,7 +141,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
         if len(word) < 2:
             raise HTTPException(400, "두 글자 이상 넣어 주세요")
         near = _near(word)
-        exact, similar = [], []
+        exact, similar, notes = [], [], []
         for v in current_library()["videos"]:
             entry = analysis_entry(v["id"])
             if not entry:
@@ -152,7 +153,17 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
                 result, recording = found_at(v, entry, [m.start() for m in matches])
                 result["heard_as"] = [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
                 similar.append((result, recording))
-        return {"exact": merge_copies(exact), "similar": merge_copies(similar)}
+            elif lines := noted(v, entry, word):
+                notes.append(({"id": v["id"], "title": v["title"], "matches": lines[:3], "also": []},
+                              (round(entry["duration"]), entry["text"][:150])))
+        return {"exact": merge_copies(exact), "similar": merge_copies(similar), "notes": merge_copies(notes)}
+
+    def noted(v, entry, word):
+        """말하지는 않았어도 목차·챕터 제목이나 학원 정리 항목에 낱말이 든 줄 [{"text", "time"}]"""
+        lines = [(title, start) for start, title in entry["chapters"]]
+        if not entry["guide"]:  # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니 챕터만 봅니다
+            lines += [(item, None) for r in academy_summaries(v) for s in r["sections"] for item in s["items"]]
+        return [{"text": text, "time": t} for text, t in lines if word in _norm(text)]
 
     def found_at(v, entry, positions):
         spots = [entry["times"][bisect_right(entry["offsets"], at) - 1] for at in positions]
@@ -168,7 +179,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
 
     def merge_copies(found):
         merged, first = [], {}
-        for result, recording in sorted(found, key=lambda f: -f[0]["count"]):
+        for result, recording in sorted(found, key=lambda f: -f[0].get("count", 0)):  # notes는 횟수가 없어 강의 순서대로
             if recording in first:
                 first[recording]["also"].append(result["title"])
             else:
@@ -194,8 +205,14 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
             if not entry["guide"] and not summary and entry["times"]:
                 target += 1
                 done += entry["toc_tried"]
-        return {"total": len(videos), "analyzed": len(videos) - len(unanalyzed), **counts,
-                "toc_progress": {"target": target, "done": done}, "unanalyzed": unanalyzed}
+        found = {"total": len(videos), "analyzed": len(videos) - len(unanalyzed), **counts,
+                 "toc_progress": {"target": target, "done": done}, "unanalyzed": unanalyzed}
+        if log_dir:
+            # 밤 작업 로그에는 강의마다 '목차:' 줄이 쌓여서 날짜로 시작하는 상태 줄만 봅니다.
+            found["ops"] = {"backup": _last_line(Path(log_dir) / "backup.log", dated=True),
+                            "night": _last_line(Path(log_dir) / "toc.log", dated=True),
+                            "new_videos": _last_line(Path(log_dir) / "new-videos.log")}
+        return found
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
@@ -244,6 +261,15 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=()) -> FastAP
     return app
 
 
+def _last_line(path, dated=False):
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    lines = [line for line in lines if line.strip() and (not dated or re.match(r"\d{4}-\d\d-\d\d ", line))]
+    return lines[-1] if lines else None
+
+
 def _norm(text):
     return re.sub(r"[^가-힣a-z0-9]", "", text.lower())
 
@@ -281,4 +307,5 @@ def _claude_answer():
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
                  None,  # 질문하기는 Claude API 크레딧을 써서 막아 둡니다. 다시 열려면 _claude_answer()를 넘깁니다.
-                 load_references(os.environ.get("REFERENCES_FILE")))
+                 load_references(os.environ.get("REFERENCES_FILE")),
+                 os.environ.get("LOG_DIR"))

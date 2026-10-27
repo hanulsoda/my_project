@@ -82,7 +82,7 @@
         status.textContent = found.detail || "찾지 못했습니다.";
         return;
       }
-      status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개 찾음`;
+      status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개, 학원 정리·목차 ${found.notes.length}개 찾음`;
       const results = (list) => el("ul", { class: "found-list" }, ...list.map((r) => el("li", {},
         el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
         ...r.times.flatMap((t, i) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` },
@@ -97,7 +97,16 @@
         ...(found.similar.length ? [
           el("h2", {}, `비슷한 말로 받아 적힌 강의 ${found.similar.length}개`),
           el("p", { class: "notice" }, "받아쓰기가 소리 하나를 다르게 적은 곳입니다. 다른 낱말일 수도 있으니 적힌 말을 확인하세요."),
-          results(found.similar)] : []));
+          results(found.similar)] : []),
+        ...(found.notes.length ? [
+          el("h2", {}, `학원 정리·목차에 나오는 강의 ${found.notes.length}개`),
+          el("p", { class: "notice" }, "선생님 말에서는 찾지 못했지만 학원 요점 정리나 목차에 적혀 있는 강의입니다."),
+          el("ul", { class: "found-list" }, ...found.notes.map((r) => el("li", {},
+            el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+            ...r.matches.flatMap((m) => m.time == null
+              ? [el("p", { class: "also" }, m.text)]
+              : [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(m.time)}` }, `${fmt(m.time)} · ${m.text}`), " "]),
+            ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []))))] : []));
     };
 
     fetch("/api/videos").then((r) => r.json()).then((videos) => {
@@ -116,8 +125,11 @@
       }
       folders = [...byFolder].map(([name, list]) => {
         const count = el("span", { class: "count" });
+        // 이 브라우저에서 보기 시작한 강의 수(시청 위치가 저장된 강의)
+        const seen = list.filter(({ v }) => (store.get(`pos:${v.id}`)?.t || 0) > 5).length;
         const ul = el("ul", { class: "video-list" });
-        const box = el("details", { class: "folder" }, el("summary", {}, name, count), ul);
+        const box = el("details", { class: "folder" },
+          el("summary", {}, name, count, ...(seen ? [el("span", { class: "count" }, `· ${seen}개 봄`)] : [])), ul);
         box.ontoggle = () => {
           if (search.value.trim()) return;  // 찾는 중에 자동으로 펼친 것은 기억하지 않습니다
           if (box.open) opened.add(name); else opened.delete(name);
