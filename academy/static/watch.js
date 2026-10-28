@@ -183,8 +183,9 @@ function renderQuiz(quiz, only = null) {
   const box = $("tab-quiz");
   if (!quiz.length) { box.replaceChildren(notice("이 강의에는 퀴즈가 없습니다.")); return; }
   const keys = new Set(quiz.map(quizKey));
-  const savedWrong = () => (store.get(`wrong:${id}`) || []).filter((k) => keys.has(k));
-  store.set(`wrong:${id}`, savedWrong());  // 다시 분석해서 없어진 문제는 기록에서 정리합니다
+  // 틀린 문제 기록 중 이 퀴즈에 있는 문제 글(언제 복습할지와 상관없이 여기서는 언제든 다시 풀 수 있습니다)
+  const savedWrong = () => wrongItems(id).filter((w) => keys.has(w.k)).map((w) => w.k);
+  store.set(`wrong:${id}`, wrongItems(id).filter((w) => keys.has(w.k)));  // 다시 분석해서 없어진 문제는 기록에서 정리합니다
   if (!only) printQuiz(quiz);
   const shown = only ? quiz.filter((q) => only.includes(quizKey(q))) : quiz;
   const choiceCount = shown.filter((q) => q.choices).length;

@@ -19,16 +19,39 @@
   </div>
   <script src="common.js"></script>
   <script>
-    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((videos) => fillSidebar(videos, { here: "review.html" }));
-    // 모든 강의 퀴즈에서 틀리거나 '몰랐어요'를 누른 문제를 모아 다시 풉니다. 맞히거나 '알았어요'를 누르면 기록에서 빠집니다.
+    // 간격 복습: 오늘 다시 풀 때가 된 틀린 문제만 냅니다. 틀리면 내일, 맞히면 3일 뒤·7일 뒤 다시 나오고, 세 번 이어서 맞히면 빠집니다.
     const box = document.getElementById("review");
-    const say = (text) => box.replaceChildren(el("p", { class: "notice" }, text));
-    (async () => {
+    const say = (...nodes) => box.replaceChildren(...nodes);
+    let videos = [], all = false;  // all: '기다리지 않고 지금 풀기'
+    const sidebar = () => fillSidebar(videos, { here: "review.html" });
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => { videos = list; sidebar(); });
+
+    // 앞으로의 복습: "내일 2개 · 3일 뒤 1개"
+    function schedule(items) {
+      const byDay = new Map();
+      for (const w of items) {
+        const days = Math.max(1, Math.ceil((w.due - Date.now()) / DAY_MS));
+        byDay.set(days, (byDay.get(days) || 0) + 1);
+      }
+      return [...byDay].sort((a, b) => a[0] - b[0]).map(([d, n]) => `${d === 1 ? "내일" : `${d}일 뒤`} ${n}개`).join(" · ");
+    }
+
+    async function render() {
       const lists = wrongLists();
-      if (!lists.length) return say("복습할 틀린 문제가 없습니다. 강의 퀴즈에서 틀리거나 '몰랐어요'를 누른 문제가 여기에 모입니다.");
+      const later = lists.flatMap((l) => l.items).filter((w) => !isDue(w));
+      const todo = lists.map((l) => ({ id: l.id, keys: l.items.filter((w) => all || isDue(w)).map((w) => w.k) })).filter((l) => l.keys.length);
+      const dueNow = lists.reduce((n, l) => n + l.items.filter(isDue).length, 0);
+      document.getElementById("view-sub").textContent = `오늘 복습할 문제 ${dueNow}개${later.length ? ` · 앞으로 ${later.length}개` : ""}`;
+      const rule = el("p", { class: "notice" }, "틀린 문제는 내일, 맞히면 3일 뒤와 7일 뒤에 다시 나오고, 세 번 이어서 맞히면 목록에서 빠집니다. 문제 번호는 강의 퀴즈의 번호입니다.");
+      if (!lists.length) return say(el("p", { class: "notice" }, "복습할 틀린 문제가 없습니다. 강의 퀴즈에서 틀리거나 '몰랐어요'를 누른 문제가 여기에 모입니다."));
+      if (!todo.length) {
+        return say(el("p", { class: "notice" }, `오늘 복습할 문제가 없습니다. 다음 복습: ${schedule(later)}.`), rule,
+          el("button", { type: "button", id: "review-all", class: "retry", onclick: () => { all = true; render(); } }, `기다리지 않고 지금 풀기 (${later.length}개)`));
+      }
+      say(el("p", { class: "notice" }, "불러오는 중…"));
       const sections = [];
       let failed = false;
-      for (const w of lists) {
+      for (const w of todo) {
         const res = await fetch(`/api/videos/${w.id}`);
         if (!res.ok) { failed = true; continue; }  // 지워진 강의이거나 서버 오류: 기록은 두고 이번엔 건너뜁니다
         const lecture = await res.json();
@@ -39,13 +62,13 @@
           : el("a", { class: "link", href: `watch.html?id=${w.id}&t=${Math.floor(q.time)}` }, `▶ ${fmt(q.time)} 설명 다시 보기`);
         sections.push(el("section", { class: "review-lecture" },
           el("h2", {}, el("a", { href: `watch.html?id=${w.id}` }, lecture.title)),
-          ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => markWrong(w.id, quizKey(q), !right), replay))));
+          ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => { markWrong(w.id, quizKey(q), !right); sidebar(); }, replay))));
       }
       const trouble = "일부 강의를 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요.";
-      if (!sections.length) return say(failed ? trouble : "복습할 틀린 문제가 없습니다.");
-      box.replaceChildren(...(failed ? [el("p", { class: "notice" }, trouble)] : []),
-        el("p", { class: "notice" }, "다시 맞히거나 '알았어요'를 누르면 목록에서 빠집니다. 문제 번호는 강의 퀴즈의 번호입니다."), ...sections);
-    })();
+      if (!sections.length) return say(el("p", { class: "notice" }, failed ? trouble : "복습할 틀린 문제가 없습니다."));
+      say(...(failed ? [el("p", { class: "notice" }, trouble)] : []), rule, ...sections);
+    }
+    render();
   </script>
 </body>
 </html>

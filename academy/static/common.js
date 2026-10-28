@@ -91,7 +91,7 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
       link(`${prefix}#v/recent`, "clock", "이어 보기", recentVideos(videos).length),
       link(`${prefix}#v/new`, "new", "새로 올라온 강의", freshVideos(videos).length),
       link("notes.html", "note", "내 메모", total("notes:")),
-      link("review.html", "repeat", "틀린 문제 복습", total("wrong:")),  // 퀴즈에서 틀리거나 '몰랐어요'를 누른 문제
+      link("review.html", "repeat", "틀린 문제 복습", dueCount()),  // 오늘 복습할 문제 수
     ].map((a) => el("li", {}, a))),
     el("h2", {}, "폴더"),
     el("ul", {}, ...[...folders.values()].map((a) => el("li", {}, a))));
@@ -102,10 +102,27 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
 // 틀린 문제는 강의마다 wrong:<영상 번호>에 문제 글로 기억합니다. 빈칸 문제는 답 문장이 같은 것이 있어 지문까지 붙입니다.
 const quizKey = (q) => q.question || [q.context, ...q.parts].join(" ");
 
+// 간격 복습: 틀린 문제는 내일 다시, 맞히면 3일 뒤·7일 뒤 다시 내고, 세 번 이어서 맞히면 목록에서 뺍니다.
+// 기록은 [{k: 문제 글, stage: 이어서 맞힌 횟수, due: 다시 낼 시각(ms)}]. 예전 기록(문제 글만)은 오늘 낼 문제로 읽습니다.
+const DAY_MS = 86400e3;
+const isDue = (w) => w.due <= Date.now();
+
+function wrongItems(videoId) {
+  return (store.get(`wrong:${videoId}`) || []).map((w) => (typeof w === "string" ? { k: w, stage: 0, due: 0 } : w));
+}
+
 function markWrong(videoId, key, wrong) {
-  const keys = new Set(store.get(`wrong:${videoId}`) || []);
-  if (wrong) keys.add(key); else keys.delete(key);
-  store.set(`wrong:${videoId}`, [...keys]);
+  let items = wrongItems(videoId);
+  const item = items.find((w) => w.k === key);
+  if (wrong) {
+    if (item) Object.assign(item, { stage: 0, due: Date.now() + DAY_MS });
+    else items.push({ k: key, stage: 0, due: Date.now() + DAY_MS });
+  } else if (item && isDue(item)) {  // 아직 때가 안 된 문제를 미리 맞힌 것(강의 퀴즈에서 다시 풀 때 등)은 세지 않습니다
+    item.stage += 1;
+    if (item.stage >= 3) items = items.filter((w) => w !== item);
+    else item.due = Date.now() + [0, 3, 7][item.stage] * DAY_MS;
+  }
+  store.set(`wrong:${videoId}`, items);
 }
 
 // 강의마다 <prefix><영상 번호>에 저장한 목록(틀린 문제 wrong:, 메모 notes:)을 [{id, items}]로 모읍니다. 빈 목록은 뺍니다.
@@ -115,7 +132,8 @@ function savedLists(prefix) {
   return names.map((k) => ({ id: k.slice(prefix.length), items: store.get(k) || [] })).filter((l) => l.items.length);
 }
 
-const wrongLists = () => savedLists("wrong:").map(({ id, items }) => ({ id, keys: items }));
+const wrongLists = () => savedLists("wrong:").map(({ id }) => ({ id, items: wrongItems(id) }));
+const dueCount = () => wrongLists().reduce((n, l) => n + l.items.filter(isDue).length, 0);
 
 // q는 4지선다({question, choices, answer, explanation, time?})나 빈칸 문제({context, parts: 글·빈칸 번갈아}).
 // onResult(맞았는지)는 보기를 고르거나 '알았어요·몰랐어요'를 누를 때 부르고, replay(q)는 '설명 다시 보기' 요소(없으면 null).
