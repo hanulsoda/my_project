@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top"><h1>강의 목록</h1></header>
+  <header class="top"><h1>강의 목록</h1><a id="review-link" class="back" href="review.html" hidden></a></header>
   <main class="list-page">
     <form id="tools" class="list-tools">
       <input id="search" type="search" placeholder="강의 찾기 (예: 제망매가, 고2 미래엔)" aria-label="강의 찾기">
@@ -53,6 +53,13 @@
       empty.textContent = folders.length ? "제목으로 찾은 강의가 없습니다." : "아직 올라온 강의가 없습니다.";
       empty.hidden = total > 0;
       save();
+    }
+    // 퀴즈에서 틀리거나 '몰랐어요'를 누른 문제가 있으면 '틀린 문제 복습'으로 가는 링크를 보여 줍니다.
+    const wrongCount = wrongLists().reduce((n, w) => n + w.keys.length, 0);
+    if (wrongCount) {
+      const link = document.getElementById("review-link");
+      link.textContent = `틀린 문제 복습 (${wrongCount})`;
+      link.hidden = false;
     }
     search.oninput = apply;
     guideOnly.onchange = apply;

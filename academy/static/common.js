@@ -26,3 +26,56 @@ const store = {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
   },
 };
+
+// ---- 퀴즈 카드: 플레이어와 '틀린 문제 복습'이 함께 씁니다 ----
+// 틀린 문제는 강의마다 wrong:<영상 번호>에 문제 글로 기억합니다. 빈칸 문제는 답 문장이 같은 것이 있어 지문까지 붙입니다.
+const quizKey = (q) => q.question || [q.context, ...q.parts].join(" ");
+
+function markWrong(videoId, key, wrong) {
+  const keys = new Set(store.get(`wrong:${videoId}`) || []);
+  if (wrong) keys.add(key); else keys.delete(key);
+  store.set(`wrong:${videoId}`, [...keys]);
+}
+
+function wrongLists() {
+  let names = [];
+  try { names = Object.keys(localStorage).filter((k) => k.startsWith("wrong:")); } catch {}
+  return names.map((k) => ({ id: k.slice(6), keys: store.get(k) || [] })).filter((w) => w.keys.length);
+}
+
+// q는 4지선다({question, choices, answer, explanation, time?})나 빈칸 문제({context, parts: 글·빈칸 번갈아}).
+// onResult(맞았는지)는 보기를 고르거나 '알았어요·몰랐어요'를 누를 때 부르고, replay(q)는 '설명 다시 보기' 요소(없으면 null).
+function quizCard(q, n, onResult, replay) {
+  if (q.parts) {
+    const line = el("p", { class: "blank-line" });
+    const show = (open) => line.replaceChildren(...q.parts.flatMap((part, i) =>
+      [i ? " " : "", i % 2 ? el("strong", { class: "blank" }, open ? part : "(          )") : part]));
+    show(false);
+    const judge = el("div", { class: "judge", hidden: "", "aria-live": "polite" });
+    const decide = (knew) => {
+      judge.replaceChildren(el("p", { class: "feedback" }, knew ? "좋아요!" : "‘틀린 문제 복습’에 넣었어요."));
+      onResult(knew);
+    };
+    judge.append(el("button", { class: "choice", onclick: () => decide(true) }, "알았어요"),
+                 el("button", { class: "choice", onclick: () => decide(false) }, "몰랐어요"));
+    const reveal = el("button", { class: "choice", onclick: () => { show(true); reveal.hidden = true; judge.hidden = false; } }, "답 보기");
+    return el("article", { class: "question" }, el("h3", {}, `Q${n}. 빈칸에 들어갈 말은?`),
+      ...(q.context ? [el("blockquote", {}, q.context)] : []), line, reveal, judge);
+  }
+  const feedback = el("div", { class: "feedback", hidden: "", "aria-live": "polite" });
+  const choices = q.choices.map((choice, i) => el("button", {
+    class: "choice",
+    onclick: () => {
+      choices.forEach((b, k) => {
+        b.disabled = true;
+        if (k === q.answer) b.classList.add("right");
+        else if (k === i) b.classList.add("wrong");
+      });
+      const link = replay(q);
+      feedback.replaceChildren(el("strong", {}, i === q.answer ? "정답입니다! " : "아쉬워요. "), q.explanation, ...(link ? [" ", link] : []));
+      feedback.hidden = false;
+      onResult(i === q.answer);
+    },
+  }, `${i + 1}. ${choice}`));
+  return el("article", { class: "question" }, el("h3", {}, `Q${n}. ${q.question}`), ...choices, feedback);
+}

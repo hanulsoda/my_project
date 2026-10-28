@@ -156,50 +156,40 @@ function renderPages(list) {
 }
 
 // ---- 복습 퀴즈 ----
-function renderQuiz(quiz) {
+// only를 주면 그 문제(quizKey)만 다시 풉니다. 문제 번호는 전체 퀴즈의 번호 그대로입니다.
+function renderQuiz(quiz, only = null) {
   const box = $("tab-quiz");
   if (!quiz.length) { box.replaceChildren(notice("이 강의에는 퀴즈가 없습니다.")); return; }
-  const choiceCount = quiz.filter((q) => q.choices).length;
+  const keys = new Set(quiz.map(quizKey));
+  const savedWrong = () => (store.get(`wrong:${id}`) || []).filter((k) => keys.has(k));
+  store.set(`wrong:${id}`, savedWrong());  // 다시 분석해서 없어진 문제는 기록에서 정리합니다
+  const shown = only ? quiz.filter((q) => only.includes(quizKey(q))) : quiz;
+  const choiceCount = shown.filter((q) => q.choices).length;
   let answered = 0, correct = 0;
   const score = el("p", { class: "score", "aria-live": "polite" });
   const updateScore = () => { score.textContent = `${choiceCount}문제 중 ${answered}문제 풀이 · ${correct}개 정답`; };
+  const retryWrong = el("button", { class: "retry", onclick: () => renderQuiz(quiz, savedWrong()) });
+  const updateRetry = () => {
+    const n = savedWrong().length;
+    retryWrong.hidden = n === 0;
+    retryWrong.textContent = `틀린 문제만 다시 풀기 (${n}개)`;
+  };
+  // 학원 정리로 만든 문제는 영상 시간이 없을 수 있습니다.
+  const replay = (q) => q.time == null ? null : el("button", { class: "link", onclick: () => seek(q.time) }, `▶ ${fmt(q.time)} 설명 다시 보기`);
+  const cards = shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => {
+    if (q.choices) {
+      answered++;
+      if (right) correct++;
+      updateScore();
+    }
+    markWrong(id, quizKey(q), !right);
+    updateRetry();
+  }, replay));
   updateScore();
   score.hidden = choiceCount === 0;
-  const cards = quiz.map((q, n) => {
-    if (q.parts) return blankCard(q, n);
-    const feedback = el("div", { class: "feedback", hidden: "", "aria-live": "polite" });
-    const choices = q.choices.map((choice, i) => el("button", {
-      class: "choice",
-      onclick: () => {
-        answered++;
-        if (i === q.answer) correct++;
-        updateScore();
-        choices.forEach((b, k) => {
-          b.disabled = true;
-          if (k === q.answer) b.classList.add("right");
-          else if (k === i) b.classList.add("wrong");
-        });
-        feedback.replaceChildren(
-          el("strong", {}, i === q.answer ? "정답입니다! " : "아쉬워요. "), q.explanation,
-          // 학원 정리로 만든 문제는 영상 시간이 없습니다.
-          ...(q.time == null ? [] : [" ", el("button", { class: "link", onclick: () => seek(q.time) }, `▶ ${fmt(q.time)} 설명 다시 보기`)]));
-        feedback.hidden = false;
-      },
-    }, `${i + 1}. ${choice}`));
-    return el("article", { class: "question" }, el("h3", {}, `Q${n + 1}. ${q.question}`), ...choices, feedback);
-  });
-  box.replaceChildren(score, ...cards, el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, "다시 풀기"));
-}
-
-// 학원 정리의 빈칸 문제: parts는 글과 빈칸이 번갈아 옵니다. 떠올려 본 뒤 답을 확인합니다.
-function blankCard(q, n) {
-  const line = el("p", { class: "blank-line" });
-  const show = (open) => line.replaceChildren(...q.parts.flatMap((part, i) =>
-    [i ? " " : "", i % 2 ? el("strong", { class: "blank" }, open ? part : "(          )") : part]));
-  show(false);
-  const reveal = el("button", { class: "choice", onclick: () => { show(true); reveal.hidden = true; } }, "답 보기");
-  return el("article", { class: "question" }, el("h3", {}, `Q${n + 1}. 빈칸에 들어갈 말은?`),
-    ...(q.context ? [el("blockquote", {}, q.context)] : []), line, reveal);
+  updateRetry();
+  box.replaceChildren(score, ...cards, el("div", { class: "quiz-actions" },
+    el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, only ? "전체 문제 풀기" : "다시 풀기"), retryWrong));
 }
 
 // ---- AI에게 질문하기 ----
@@ -296,17 +286,29 @@ $("speed").replaceChildren(...[0.8, 1, 1.25, 1.5, 2].map((rate) =>
   el("button", { "data-rate": rate, onclick: () => setSpeed(rate) }, `${rate}×`)));
 setSpeed(store.get("speed") || 1);
 
+// 글을 쓰는 중이면 단축키를 쓰지 않습니다. 키보드(Tab)로 버튼에 간 학생의 스페이스는 그 버튼을 누릅니다(퀴즈 보기 고르기 등).
+// 영상 자체 단축키보다 먼저 받아(true) 한 번만 움직이게 합니다.
 document.addEventListener("keydown", (e) => {
-  // 글을 쓰는 중이거나 버튼·링크·영상에 초점이 있으면 그쪽 동작에 맡깁니다(영상 자체 단축키와 두 번 실행되지 않게).
-  if (e.target.closest("input, textarea, select, button, a, video") || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.key === " ") video.paused ? video.play().catch(() => {}) : video.pause();
-  else if (e.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);
+  if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.closest("input, textarea, select")) return;
+  if (e.key === " " && e.target.closest("button")) return;
+  if (e.key === " ") {
+    if (!e.repeat) video.paused ? video.play().catch(() => {}) : video.pause();  // 꾹 누르고 있어도 반복하지 않게
+  } else if (e.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);
   else if (e.key === "ArrowRight") video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
   else if (e.key === "[") jumpChapter(-1);
   else if (e.key === "]") jumpChapter(1);
   else return;
   e.preventDefault();  // 스페이스·화살표로 화면이 움직이지 않게
+}, true);
+
+// 마우스로 누른 버튼·링크에는 초점이 남지 않게 해서, 누른 뒤의 스페이스가 영상 재생·멈춤이 되게 합니다.
+// 메모 칸에 쓰다가 버튼을 눌렀으면 그 칸에서도 초점을 빼야 스페이스가 칸에 써지지 않습니다.
+document.addEventListener("mousedown", (e) => {
+  if (!e.target.closest("button, a")) return;
+  e.preventDefault();
+  if (document.activeElement?.matches("input, textarea")) document.activeElement.blur();
 });
+video.addEventListener("contextmenu", (e) => e.preventDefault());  // 우클릭 '동영상 저장' 메뉴를 숨깁니다
 
 // ---- 이어보기 + 지금 위치 표시 ----
 const posKey = `pos:${id}`;

@@ -72,6 +72,13 @@ def test_fill_in_questions_hide_the_blanks_marked_by_double_spaces():
     ]
 
 
+def test_fill_in_questions_repeated_in_the_summary_are_asked_once():
+    same = {"no": "Q1", "passage": "평국은 규중에 홀로 있었다.", "answer_line": "평국은   여성  이다."}
+    ref = {"title": "홍계월전", "grade": "고1", "fillins": [same, {**same, "no": "Q5"}]}  # PDF에서 뽑다가 두 번 들어감
+
+    assert len(reference_quiz(ref)) == 1
+
+
 def test_word_questions_ask_for_the_meaning_among_other_words_of_the_same_work():
     ref = {"title": "노새 두 마리", "grade": "고1",
            "words": [{"w": f"낱말{i}", "pos": "명사", "def": f"뜻{i}"} for i in range(5)]}

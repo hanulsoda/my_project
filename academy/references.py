@@ -70,8 +70,11 @@ def reference_quiz(ref) -> list[dict]:
     """빈칸 문제는 {"context", "parts": [글, 빈칸, 글, …]}, 어휘는 뜻을 고르는 4지선다로 만듭니다."""
     ref = _tidy(ref)
     quiz = []
+    seen = set()
     for fill in ref.get("fillins") or []:
-        if fill.get("answer_line"):
+        asked = (fill.get("passage", ""), fill.get("answer_line"))
+        if fill.get("answer_line") and asked not in seen:  # PDF에서 뽑다가 같은 문제가 두 번 들어간 것은 한 번만
+            seen.add(asked)
             # 교재에서 빈칸에 들어갈 말은 앞뒤를 두 칸 이상 띄워 둡니다.
             parts = [p.strip() for p in re.split(r" {2,}(\S(?:.*?\S)?) {2,}", fill["answer_line"])]
             quiz.append({"context": fill.get("passage", ""), "parts": parts if len(parts) > 1 else ["", parts[0], ""]})
