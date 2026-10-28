@@ -109,6 +109,31 @@ def test_prepares_the_list_in_the_background_when_the_server_starts(tmp_path, mo
     assert len(scans) == 1 and len(matched) == 1
 
 
+def test_a_restarted_server_reuses_its_saved_index_and_rereads_only_changed_analyses(tmp_path, monkeypatch):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for name in ["1강", "2강"]:
+        save_analysis(data_dir, ids[name], {"title": name, "duration": 60.0, "segments": SEGMENTS})
+    with TestClient(create_app(video_dir, data_dir, None)):  # 켜자마자 목록을 준비하고 요약을 저장합니다
+        deadline = time.monotonic() + 5
+        while not (data_dir / ".server-index.cache").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    reads, real = [], server.load_analysis
+    monkeypatch.setattr(server, "load_analysis", lambda d, video_id: reads.append(video_id) or real(d, video_id))
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "duration": 60.0,
+                                          "segments": [{"start": 0.0, "end": 2.0, "text": "구개음화"}]})
+
+    client = TestClient(create_app(video_dir, data_dir, None))  # 다시 켠 서버
+
+    # 분석 결과 3,900개를 처음부터 다시 읽느라 몇 분 걸리던 것을, 바뀐 파일만 다시 읽어 줄입니다.
+    assert [r["title"] for r in client.get("/api/search", params={"q": "안녕하세요"}).json()["exact"]] == ["1강"]
+    assert [r["title"] for r in client.get("/api/search", params={"q": "구개음화"}).json()["exact"]] == ["2강"]
+    assert reads == [ids["2강"]]
+
+
 def test_lists_when_each_lecture_file_was_put_on_the_nas(tmp_path):
     video_dir = tmp_path / "videos"
     video_dir.mkdir()

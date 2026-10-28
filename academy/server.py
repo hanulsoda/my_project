@@ -3,6 +3,7 @@
 실행: uvicorn academy.server:app --host 0.0.0.0 --port 8000
 """
 
+import json
 import logging
 import os
 import re
@@ -29,6 +30,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
 REFRESH_SECONDS = 300  # 이보다 오래된 목록은 뒤에서 다시 훑습니다
 MISS_SECONDS = 30  # 모르는 id가 와도 이 안에 훑었으면 다시 훑지 않습니다
+INDEX_VERSION = 1  # 저장해 두는 서버 요약(.server-index.cache)에 넣는 항목을 바꾸면 올립니다
 
 
 class Turn(BaseModel):
@@ -55,8 +57,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다."""
     @asynccontextmanager
     async def lifespan(app):
-        # NAS를 훑고 분석 상태를 읽고 학원 정리를 짝짓는 데 30초쯤 걸려, 첫 학생이 기다리지 않게 켜자마자 해 둡니다.
-        Thread(target=list_videos, daemon=True).start()
+        # NAS를 훑고 분석 상태를 읽고 학원 정리를 짝짓는 데 시간이 걸려, 첫 학생이 기다리지 않게 켜자마자 해 두고 요약을 저장합니다.
+        Thread(target=lambda: (list_videos(), save_index()), daemon=True).start()
         yield
 
     app = FastAPI(title="학원 학습 플레이어", lifespan=lifespan)
@@ -94,6 +96,26 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # 영상 id → (파일 수정 시각·크기, 상태). 목록을 열 때마다 큰 JSON을 다시 읽지 않습니다.
     # 상태에는 내용 검색용으로 띄어쓰기·기호를 뺀 대본과, 각 말이 그 글에서 시작하는 자리·시각도 둡니다.
     status_cache = {}
+    # 다시 켤 때 분석 결과 3,900개(수백 MB)를 처음부터 읽느라 몇 분 걸리지 않게, 이 상태들을 저장해 두고 바뀐 파일만 다시 읽습니다.
+    # 분석 결과 JSON을 하나씩 읽는 스크립트가 섞어 읽지 않도록 확장자를 .json으로 하지 않습니다.
+    index_path = Path(data_dir) / ".server-index.cache"
+    try:
+        saved = json.loads(index_path.read_text(encoding="utf-8"))
+        if saved.get("version") == INDEX_VERSION:
+            status_cache.update({video_id: (tuple(stamp), entry) for video_id, (stamp, entry) in saved["entries"].items()})
+    except (OSError, ValueError, TypeError, AttributeError, KeyError):
+        pass  # 없거나 망가졌거나 예전 형식이면 처음부터 읽습니다
+
+    def save_index():
+        if not Path(data_dir).is_dir():
+            return
+        tmp = index_path.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps({"version": INDEX_VERSION, "entries": dict(status_cache)}, ensure_ascii=False),
+                           encoding="utf-8")
+            tmp.replace(index_path)
+        except OSError:
+            logging.exception("서버 요약 저장 실패(다음에 켤 때 분석 결과를 처음부터 읽습니다)")
 
     def analysis_entry(video_id):
         path = Path(data_dir) / f"{video_id}.json"
