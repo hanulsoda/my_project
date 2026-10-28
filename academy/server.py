@@ -61,7 +61,16 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         Thread(target=lambda: (list_videos(), save_index()), daemon=True).start()
         yield
 
-    app = FastAPI(title="학원 학습 플레이어", lifespan=lifespan)
+    # 서버가 자동으로 만드는 API 설명서(/docs 등)는 바깥에 보일 필요가 없어 끕니다.
+    app = FastAPI(title="학원 학습 플레이어", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"  # 브라우저가 파일 종류를 멋대로 짐작하지 않게
+        response.headers["X-Frame-Options"] = "DENY"  # 다른 사이트가 플레이어를 자기 화면 안에 몰래 띄우지 못하게
+        response.headers["Referrer-Policy"] = "same-origin"  # 강의 주소가 바깥 사이트로 새지 않게
+        return response
 
     library = {"at": None, "videos": [], "by_id": {}}
     scan_lock = Lock()
@@ -117,13 +126,24 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         except OSError:
             logging.exception("서버 요약 저장 실패(다음에 켤 때 분석 결과를 처음부터 읽습니다)")
 
+    def read_analysis(video_id):
+        """손으로 고치다 형식이 깨진 분석 파일은 그 강의만 '분석 전'으로 보고, 목록·검색·현황은 계속 돌게 합니다."""
+        try:
+            return load_analysis(data_dir, video_id)
+        except ValueError:  # JSON 형식 오류(JSONDecodeError)·글자 깨짐
+            logging.warning("분석 파일 형식 오류로 건너뜀: %s.json", video_id)
+            return None
+
     def analysis_entry(video_id):
         path = Path(data_dir) / f"{video_id}.json"
         if not path.exists():
             return None
         stamp = (path.stat().st_mtime_ns, path.stat().st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
-            data = load_analysis(data_dir, video_id)
+            data = read_analysis(video_id)
+            if data is None:  # 파일이 다시 바뀔(고쳐질) 때까지 '분석 전'
+                status_cache[video_id] = (stamp, None)
+                return None
             spoken = [(_norm(s["text"]), s["start"]) for s in data.get("segments") or []]
             chapters = ((data.get("guide") or {}).get("chapters") or (data.get("toc") or {}).get("chapters") or [])
             status_cache[video_id] = (stamp, {
@@ -246,7 +266,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str):
         video = get_video(video_id)
-        analysis = load_analysis(data_dir, video_id)
+        analysis = read_analysis(video_id)
         # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 대본에서 찾은 시간과 함께 보냅니다.
         summaries = (link_times(academy_summaries(video), analysis.get("segments") or [])
                      if analysis and not analysis.get("guide") else [])
@@ -278,7 +298,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if answer is None:
             raise HTTPException(403, "질문하기는 지금 쓰지 않습니다")
         get_video(video_id)
-        data = load_analysis(data_dir, video_id)
+        data = read_analysis(video_id)
         if not data or not data["segments"]:
             raise HTTPException(409, "아직 분석되지 않은 영상이라 질문할 수 없습니다")
         try:

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -15,9 +16,16 @@ def _lecture_order(path: Path):
 
 
 def find_videos(video_dir: Path) -> list[dict]:
+    found = []
+    for folder, dirs, files in os.walk(video_dir):
+        # NAS 휴지통·스냅숏(#recycle, #snapshot)·시스템 폴더(@eaDir 썸네일 등)와 숨김 폴더·파일(.으로 시작)은 강의가 아닙니다.
+        # 썸네일 폴더는 영상마다 있어서 아예 들어가지 않아야 빨리 훑습니다.
+        # '#지구 #소통'처럼 #으로 시작하는 진짜 강의도 있어 #은 그 두 폴더만 뺍니다.
+        dirs[:] = [d for d in dirs if d[0] not in ".@" and d not in ("#recycle", "#snapshot")]
+        found += [Path(folder) / name for name in files if not name.startswith(".")]
     videos = []
-    for path in sorted(Path(video_dir).rglob("*"), key=_lecture_order):
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTS:
+    for path in sorted(found, key=_lecture_order):
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTS:  # is_file: 원본이 지워진 바로가기는 뺍니다
             rel = path.relative_to(video_dir).as_posix()
             videos.append({
                 "id": hashlib.sha1(rel.encode()).hexdigest()[:12],

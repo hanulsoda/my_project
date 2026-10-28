@@ -34,6 +34,18 @@ def test_video_ids_are_stable_and_url_safe(tmp_path):
     assert all(i.isalnum() and i.isascii() for i in first)
 
 
+def test_skips_nas_recycle_bin_thumbnail_and_hidden_folders_and_files(tmp_path):
+    touch(tmp_path / "1강.mp4")
+    touch(tmp_path / "#recycle" / "지운 강의.mp4")  # 시놀로지 휴지통
+    touch(tmp_path / "@eaDir" / "1강.mp4" / "SYNOVIDEO_VIDEO_SCREENSHOT.mp4")  # 시놀로지 썸네일
+    touch(tmp_path / ".숨김" / "3강.mp4")
+    touch(tmp_path / "수학" / "._4강.mp4")  # 맥이 남기는 숨김 파일
+    touch(tmp_path / "수학" / "4강.mp4")
+    touch(tmp_path / "창비" / "#지구 #소통.mp4")  # 이름이 #으로 시작하는 진짜 강의(NAS에 실제로 있음)
+
+    assert [v["title"] for v in find_videos(tmp_path)] == ["1강", "수학/4강", "창비/#지구 #소통"]
+
+
 def test_missing_video_dir_gives_empty_list(tmp_path):
     assert find_videos(tmp_path / "없음") == []
 

@@ -134,6 +134,35 @@ def test_a_restarted_server_reuses_its_saved_index_and_rereads_only_changed_anal
     assert reads == [ids["2강"]]
 
 
+def test_a_damaged_analysis_file_only_takes_that_lecture_out(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 60.0, "segments": SEGMENTS})
+    (data_dir / f"{ids['2강']}.json").write_text('{"title": "2강", "segments": [', encoding="utf-8")  # 손으로 고치다 깨짐
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    # 깨진 파일 하나 때문에 목록·검색·현황 전체가 오류가 나지 않고, 그 강의만 '분석 전'으로 보입니다.
+    assert [(v["title"], v["analyzed"]) for v in client.get("/api/videos").json()] == [("1강", True), ("2강", False)]
+    assert client.get(f"/api/videos/{ids['2강']}").json()["analysis"] is None
+    assert [r["title"] for r in client.get("/api/search", params={"q": "안녕하세요"}).json()["exact"]] == ["1강"]
+    assert client.get("/api/status").json()["unanalyzed"] == ["2강"]
+
+
+def test_hides_api_docs_and_sends_security_headers(setup):
+    client, ids, _ = setup
+
+    for path in ["/docs", "/redoc", "/openapi.json"]:
+        assert client.get(path).status_code == 404  # 서버가 자동으로 만드는 API 설명서를 바깥에 보이지 않습니다
+    for path in ["/", f"/api/videos/{ids['1강']}"]:
+        headers = client.get(path).headers
+        assert headers["x-frame-options"] == "DENY"
+        assert headers["x-content-type-options"] == "nosniff"
+        assert headers["referrer-policy"] == "same-origin"
+
+
 def test_lists_when_each_lecture_file_was_put_on_the_nas(tmp_path):
     video_dir = tmp_path / "videos"
     video_dir.mkdir()
