@@ -37,6 +37,9 @@
   --i-chev-left: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 6l-6 6 6 6'/%3E%3C/svg%3E");
   --i-chev-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E");
   --i-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M8 12l3 3 5-6'/%3E%3C/svg%3E");
+  --i-skip-back: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 5v14'/%3E%3Cpath d='M19 6l-9 6 9 6z'/%3E%3C/svg%3E");
+  --i-skip-forward: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 5v14'/%3E%3Cpath d='M5 6l9 6-9 6z'/%3E%3C/svg%3E");
+  --i-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 5l11 7-11 7z'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: dark) {
@@ -152,6 +155,8 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .i-printer { --i: var(--i-printer); }
 .i-chev-left { --i: var(--i-chev-left); }
 .i-chev-right { --i: var(--i-chev-right); }
+.i-skip-back { --i: var(--i-skip-back); }
+.i-skip-forward { --i: var(--i-skip-forward); }
 
 /* ---- 머리글(맥 도구 막대): 왼쪽 돌아가기 버튼, 제목, 오른쪽 아이콘 버튼. 위에 붙는 반투명 막대 ---- */
 .top {
@@ -190,6 +195,11 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .tool { display: flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: none; cursor: pointer; }
 .tool:hover { background: var(--fill); }
 .tool .icon { width: 18px; height: 18px; background: var(--text); }
+@media (max-width: 600px) {  /* 휴대폰: 버튼이 많아 작품 이름·위치는 둘째 줄로 */
+  .top { flex-wrap: wrap; row-gap: 6px; }
+  .top .heading { order: 3; flex-basis: 100%; }
+  .toolbar { margin-left: auto; }
+}
 
 /* ---- 다른 화면(틀린 문제 복습·내 메모·현황)의 본문 ---- */
 .list-page { max-width: 760px; margin: 0 auto; padding: 16px; }
@@ -380,6 +390,28 @@ a.time { display: inline-block; text-decoration: none; }
   gap: 16px;
   padding: 16px;
 }
+/* 영상이 끝나면 오른쪽 위에 '다음 강의' 카드 */
+.video-wrap { position: relative; }
+.next-card {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(340px, 75%);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.next-card > span { min-width: 0; }
+.next-card .label { display: block; color: var(--muted); font-size: 12px; }
+.next-card strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-card::after { content: ""; flex: none; width: 22px; height: 22px; background: var(--accent); -webkit-mask: var(--i-play) center / contain no-repeat; mask: var(--i-play) center / contain no-repeat; }
 .player video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; box-shadow: var(--shadow); }
 
 .chapter-bar { display: flex; gap: 2px; height: 12px; margin-top: 10px; }

@@ -300,7 +300,14 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             if (analysis.get("toc") or {}).get("chapters"):
                 analysis["toc"]["chapters"] = [{**c, "title": _respell(c["title"], video["title"])}
                                                for c in analysis["toc"]["chapters"]]
-        return {"id": video_id, "title": video["title"], "analysis": analysis, "references": summaries}
+        # 같은 폴더의 앞뒤 강의(목록은 이미 '2강 < 10강' 순서): 플레이어의 이전·다음 강의 버튼과 끝난 뒤 '다음 강의' 카드
+        folder = video["title"].rpartition("/")[0]
+        siblings = [v for v in current_library()["videos"] if v["title"].rpartition("/")[0] == folder]
+        ids = [v["id"] for v in siblings]
+        at = ids.index(video_id) if video_id in ids else len(siblings) + 1  # 목록을 막 다시 훑은 순간이면 앞뒤 없음
+        near = lambda i: {"id": siblings[i]["id"], "title": siblings[i]["title"]} if 0 <= i < len(siblings) else None
+        return {"id": video_id, "title": video["title"], "analysis": analysis, "references": summaries,
+                "prev": near(at - 1), "next": near(at + 1)}
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")
     def page_thumbnail(video_id: str, n: int):

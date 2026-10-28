@@ -16,13 +16,18 @@
     <a class="back" id="back" href="./">강의 목록</a>
     <div class="heading"><h1 id="title"></h1><p id="path" class="path"></p></div>
     <div class="toolbar">
+      <a id="prev-lecture" class="tool" href="#" aria-label="이전 강의" hidden><span class="icon i-skip-back" aria-hidden="true"></span></a>
+      <a id="next-lecture" class="tool" href="#" aria-label="다음 강의" hidden><span class="icon i-skip-forward" aria-hidden="true"></span></a>
       <button type="button" id="bookmark-btn" class="tool" aria-label="지금 장면 북마크" title="지금 장면 북마크"><span class="icon i-bookmark" aria-hidden="true"></span></button>
       <button type="button" id="print-btn" class="tool" aria-label="요점 정리 인쇄" title="요점 정리 인쇄" hidden><span class="icon i-printer" aria-hidden="true"></span></button>
     </div>
   </header>
   <main class="watch">
     <section class="player">
-      <video id="video" controls controlslist="nodownload" preload="metadata"></video>
+      <div class="video-wrap">
+        <video id="video" controls controlslist="nodownload" preload="metadata"></video>
+        <a id="next-card" class="next-card" href="#" hidden><span><span class="label">다음 강의</span><strong id="next-title"></strong></span></a>
+      </div>
       <div id="chapter-bar" class="chapter-bar" hidden></div>
       <div class="controls">
         <div id="chapter-nav" class="chapter-nav" role="group" aria-label="챕터 이동" hidden>

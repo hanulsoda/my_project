@@ -38,7 +38,7 @@ fetch(`/api/videos/${id}`)
   .then(render)
   .catch(() => { $("title").textContent = "영상을 찾을 수 없습니다"; });
 
-function render({ title, analysis, references = [] }) {
+function render({ title, analysis, references = [], prev = null, next = null }) {
   document.title = title;
   // 머리글: 작품 이름과 그 위치(2022개정 · 고1 · 모의고사) 두 줄, 왼쪽 위 버튼은 그 폴더로 돌아갑니다.
   const parts = title.split("/");
@@ -47,6 +47,21 @@ function render({ title, analysis, references = [] }) {
   const folder = parts[0] || "기타";
   $("back").setAttribute("href", `./#f/${folder}`);
   $("back").textContent = folder;
+  // 같은 폴더의 앞뒤 강의: 머리글 버튼, 그리고 영상이 끝나면 '다음 강의' 카드
+  for (const [key, lecture, label] of [["prev", prev, "이전 강의"], ["next", next, "다음 강의"]]) {
+    const link = $(`${key}-lecture`);
+    link.hidden = !lecture;
+    if (!lecture) continue;
+    link.setAttribute("href", `watch.html?id=${lecture.id}`);
+    link.setAttribute("aria-label", `${label}: ${lecture.title.split("/").pop()}`);
+    link.title = link.getAttribute("aria-label");
+  }
+  if (next) {
+    $("next-card").setAttribute("href", `watch.html?id=${next.id}`);
+    $("next-title").textContent = next.title.split("/").pop();
+    video.addEventListener("ended", () => { $("next-card").hidden = false; });
+    video.addEventListener("play", () => { $("next-card").hidden = true; });
+  }
   video.setAttribute("aria-label", title);
   if (!analysis) {
     const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·페이지·퀴즈가 생깁니다.";
