@@ -296,6 +296,17 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .sidebar .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .sidebar a[aria-current="page"] .n { color: inherit; }
+/* 이번 주 공부: 요일별 막대(오늘은 굵게), 합계, 며칠째 이어서 공부하는지 */
+.week { margin: 0 4px 6px; padding: 10px 12px; border-radius: 10px; background: rgba(127, 127, 127, 0.1); }
+.week-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.week-head strong { color: var(--text); font-size: 13px; }
+.bars { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.day { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.day .bar { display: flex; align-items: flex-end; width: 100%; height: 40px; border-radius: 4px; background: var(--fill); overflow: hidden; }
+.day .bar span { width: 100%; background: var(--accent); }
+.day .label { color: var(--muted); font-size: 11px; }
+.day.today .label { color: var(--text); font-weight: 700; }
+.streak { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
 
 .content-body { grid-area: body; min-width: 0; padding: 8px 28px 40px; }
 .content-body > section > h2 { margin: 18px 12px 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
@@ -366,6 +377,8 @@ a.time { display: inline-block; text-decoration: none; }
   .switch-label { font-size: 14px; }
   .sidebar { position: static; height: auto; overflow: visible; padding: 0 16px 24px; border: 0; background: none; }
   .app-name { display: none; }
+  .week { margin: 0 0 8px; padding: 12px 14px; border-radius: 12px; background: var(--surface); }
+  .day .bar { height: 48px; }
   .sidebar h2 { margin: 18px 16px 6px; font-size: 13px; font-weight: 400; }
   .sidebar ul { border-radius: 12px; background: var(--surface); overflow: hidden; }
   .sidebar a { min-height: 44px; padding: 0 14px; gap: 12px; border-radius: 0; font-size: 16px; }

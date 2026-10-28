@@ -330,6 +330,22 @@ $("bookmark-btn").onclick = () => {
 };
 renderNotes();
 
+// ---- 공부 기록: 재생 중에 흐른 시간을 모아 두었다가 멈출 때·15초마다·화면을 떠날 때 저장합니다(사이드바 '이번 주 공부') ----
+let studyTick = null, studyUnsaved = 0;
+const saveStudy = () => {
+  if (studyUnsaved < 1) return;
+  addStudy(studyUnsaved);
+  studyUnsaved = 0;
+};
+video.addEventListener("timeupdate", () => {
+  const now = performance.now();
+  if (!video.paused && studyTick !== null) studyUnsaved += Math.min((now - studyTick) / 1000, 2);  // 탭이 잠들었던 틈은 2초까지만
+  studyTick = video.paused ? null : now;
+  if (studyUnsaved >= 15) saveStudy();
+});
+video.addEventListener("pause", () => { studyTick = null; saveStudy(); });
+addEventListener("pagehide", saveStudy);
+
 // ---- 이 강의에서 찾기: 선생님이 그 낱말을 말한 시각과 챕터(서버는 대본 글을 보내지 않음) ----
 $("find-form").onsubmit = async (e) => {
   e.preventDefault();
