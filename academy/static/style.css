@@ -92,8 +92,8 @@ button[type="submit"], .retry {
 button:disabled { cursor: default; }
 button[type="submit"]:disabled { opacity: 0.6; }
 
-/* 흰 맥 버튼: 더 보기·이전/다음 챕터·지우기 */
-.more, .chapter-nav button, .delete {
+/* 흰 맥 버튼: 더 보기·이전/다음 챕터·지우기·인쇄 */
+.more, .chapter-nav button, .delete, .print-btn {
   padding: 4px 12px;
   border: 1px solid var(--control);
   border-radius: 7px;
@@ -103,7 +103,8 @@ button[type="submit"]:disabled { opacity: 0.6; }
   box-shadow: var(--raised);
   cursor: pointer;
 }
-.more:hover, .chapter-nav button:hover, .delete:hover { background: var(--hover); }
+.more:hover, .chapter-nav button:hover, .delete:hover, .print-btn:hover { background: var(--hover); }
+.print-only { display: none; }
 
 /* 세그먼트 컨트롤: 회색 틀 안에서 고른 칸만 떠오릅니다(탭·재생 속도) */
 .tabs, .speed { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--fill); }
@@ -143,7 +144,9 @@ button[type="submit"]:disabled { opacity: 0.6; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .top { background: var(--surface); } }
 .top h1 { grid-column: 2; grid-row: 1; margin: 0; font-size: 15px; font-weight: 600; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .back { grid-column: 1; grid-row: 1; justify-self: start; color: var(--accent); text-decoration: none; white-space: nowrap; }
-.top h1 + .back { grid-column: 3; justify-self: end; }  /* 목록 화면의 '틀린 문제 복습'은 오른쪽 */
+.top h1 ~ * { grid-column: 3; grid-row: 1; justify-self: end; }  /* 제목 뒤에 오는 링크·버튼은 오른쪽 */
+.top-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 16px; }
+.top-links a { text-decoration: none; white-space: nowrap; }
 
 /* ---- 강의 목록 ---- */
 .list-page { max-width: 760px; margin: 0 auto; padding: 16px; }
@@ -308,6 +311,7 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .chapter.active { border-left-color: var(--accent); background: var(--highlight); }
 .chapter h3 { margin: 0 0 6px; font-size: 16px; }
 .chapter ul { margin: 0; padding-left: 20px; line-height: 1.7; }
+.chapter ul:empty { display: none; }  /* 자동 목차는 제목만 있습니다 */
 
 /* 페이지 */
 .pages { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
@@ -381,6 +385,8 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .notes { list-style: none; margin: 0; padding: 0; }
 .notes li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .note-text { flex: 1; overflow-wrap: anywhere; }
+.list-page .notes { padding: 0 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }  /* 내 메모 화면: 묶음 목록 */
+.list-page .notes li:last-child { border-bottom: 0; }
 .delete { padding: 2px 8px; box-shadow: none; }
 
 /* 좁은 화면(휴대폰): 영상은 위에 고정, 아래에서 공부 */
@@ -391,4 +397,27 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
   .player { position: sticky; top: 0; z-index: 1; padding: 8px 16px; background: var(--bg); }
   .player video { border-radius: 10px; }
   .panel { height: 65vh; margin: 8px 16px 16px; }
+}
+
+/* 인쇄: 제목·요점 정리 탭·퀴즈 문제, 마지막 장에 정답. 어두운 모드여도 흰 종이에 검은 글자로 찍습니다. */
+@media print {
+  :root { color-scheme: light; --bg: #fff; --surface: #fff; --text: #000; --muted: #444; --accent: #000; --border: #bbb;
+          --accent-soft: transparent; --highlight: transparent; }
+  .watch-page, .watch { display: block; height: auto; padding: 0; }
+  .top { position: static; display: block; padding: 0 0 8pt; background: none; backdrop-filter: none; }
+  .top h1 { font-size: 16pt; text-align: left; white-space: normal; }
+  .top .back, .print-btn, .player, .tabs, .tab-body, .tab-body .notice { display: none !important; }
+  .panel { display: block; height: auto; margin: 0; border: 0; box-shadow: none; overflow: visible; }  /* 좁은 종이에서 휴대폰용 65vh 높이를 풉니다 */
+  #tab-guide { display: block !important; overflow: visible; padding: 0; }
+  .print-only { display: block; }
+  body { font-size: 11pt; }
+  .summary { border: 1px solid var(--border); }
+  button.time { padding: 0; font-size: inherit; }
+  .chapter { margin: 0; padding: 3pt 0; border: 0; }
+  .chapter h3 { margin: 0 0 2pt; font-size: 11.5pt; }
+  .chapter, .overview, .print-question { break-inside: avoid; }
+  .print-question h3 { margin: 10pt 0 4pt; font-size: 11pt; }
+  .print-question ol { margin: 0; }
+  .answers { break-before: page; }
+  .answers p { margin: 3pt 0; }
 }

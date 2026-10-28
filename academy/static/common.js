@@ -37,11 +37,14 @@ function markWrong(videoId, key, wrong) {
   store.set(`wrong:${videoId}`, [...keys]);
 }
 
-function wrongLists() {
+// 강의마다 <prefix><영상 번호>에 저장한 목록(틀린 문제 wrong:, 메모 notes:)을 [{id, items}]로 모읍니다. 빈 목록은 뺍니다.
+function savedLists(prefix) {
   let names = [];
-  try { names = Object.keys(localStorage).filter((k) => k.startsWith("wrong:")); } catch {}
-  return names.map((k) => ({ id: k.slice(6), keys: store.get(k) || [] })).filter((w) => w.keys.length);
+  try { names = Object.keys(localStorage).filter((k) => k.startsWith(prefix)); } catch {}
+  return names.map((k) => ({ id: k.slice(prefix.length), items: store.get(k) || [] })).filter((l) => l.items.length);
 }
+
+const wrongLists = () => savedLists("wrong:").map(({ id, items }) => ({ id, keys: items }));
 
 // q는 4지선다({question, choices, answer, explanation, time?})나 빈칸 문제({context, parts: 글·빈칸 번갈아}).
 // onResult(맞았는지)는 보기를 고르거나 '알았어요·몰랐어요'를 누를 때 부르고, replay(q)는 '설명 다시 보기' 요소(없으면 null).

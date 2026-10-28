@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top"><h1>강의 목록</h1><a id="review-link" class="back" href="review.html" hidden></a></header>
+  <header class="top"><h1>강의 목록</h1><nav class="top-links" aria-label="내 기록"><a id="notes-link" href="notes.html" hidden></a><a id="review-link" href="review.html" hidden></a></nav></header>
   <main class="list-page">
     <form id="tools" class="list-tools">
       <input id="search" type="search" placeholder="강의 찾기 (예: 제망매가, 고2 미래엔)" aria-label="강의 찾기">
@@ -55,11 +55,12 @@
       save();
     }
     // 퀴즈에서 틀리거나 '몰랐어요'를 누른 문제가 있으면 '틀린 문제 복습'으로 가는 링크를 보여 줍니다.
-    const wrongCount = wrongLists().reduce((n, w) => n + w.keys.length, 0);
-    if (wrongCount) {
-      const link = document.getElementById("review-link");
-      link.textContent = `틀린 문제 복습 (${wrongCount})`;
-      link.hidden = false;
+    // 메모·북마크가 있으면 '내 메모'로 가는 링크도 보여 줍니다.
+    for (const [linkId, prefix, name] of [["review-link", "wrong:", "틀린 문제 복습"], ["notes-link", "notes:", "내 메모"]]) {
+      const count = savedLists(prefix).reduce((n, l) => n + l.items.length, 0);
+      const link = document.getElementById(linkId);
+      link.textContent = `${name} (${count})`;
+      link.hidden = !count;
     }
     search.oninput = apply;
     guideOnly.onchange = apply;
@@ -67,12 +68,13 @@
     function lectureLink(v, label) {
       const pos = store.get(`pos:${v.id}`);
       const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
+      const score = store.get(`score:${v.id}`);  // 퀴즈 4지선다를 끝까지 푼 마지막 점수
       return el("a", { href: `watch.html?id=${v.id}` },
         el("span", { class: "video-title" }, label),
         el("span", { class: "meta" },
           el("span", { class: v.analyzed ? "badge ready" : "badge" },
             v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "페이지" : "분석 전"),
-          watched));
+          ...(score ? [`퀴즈 ${score.right}/${score.total}`] : []), watched));
     }
 
     // 내용에서 찾기: 선생님이 그 낱말을 말한 강의와 시각(받아쓰기 대본에서 찾음)

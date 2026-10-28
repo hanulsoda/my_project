@@ -52,6 +52,7 @@ function render({ title, analysis, references = [] }) {
   // 로컬 AI가 대본으로 만든 목차: 챕터 제목·시간만 있고 핵심 내용·퀴즈는 없습니다.
   const toc = (analysis.toc?.chapters || []).map((c) => ({ ...c, points: [] }));
   const tocNotice = () => notice("강의 대본으로 자동으로 만든 목차입니다. 틀릴 수 있습니다. 시간을 누르면 그 장면으로 이동합니다.");
+  $("print-btn").hidden = !(analysis.guide || references.length || toc.length);
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);
     renderQuiz(analysis.guide.quiz);
@@ -163,9 +164,13 @@ function renderQuiz(quiz, only = null) {
   const keys = new Set(quiz.map(quizKey));
   const savedWrong = () => (store.get(`wrong:${id}`) || []).filter((k) => keys.has(k));
   store.set(`wrong:${id}`, savedWrong());  // 다시 분석해서 없어진 문제는 기록에서 정리합니다
+  if (!only) printQuiz(quiz);
   const shown = only ? quiz.filter((q) => only.includes(quizKey(q))) : quiz;
   const choiceCount = shown.filter((q) => q.choices).length;
   let answered = 0, correct = 0;
+  const last = store.get(`score:${id}`);
+  const lastScore = !only && last ? [el("p", { class: "notice" },
+    `지난번 ${last.right}/${last.total} (${new Date(last.at).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })})`)] : [];
   const score = el("p", { class: "score", "aria-live": "polite" });
   const updateScore = () => { score.textContent = `${choiceCount}문제 중 ${answered}문제 풀이 · ${correct}개 정답`; };
   const retryWrong = el("button", { class: "retry", onclick: () => renderQuiz(quiz, savedWrong()) });
@@ -181,6 +186,8 @@ function renderQuiz(quiz, only = null) {
       answered++;
       if (right) correct++;
       updateScore();
+      // 전체 풀기에서 4지선다를 끝까지 풀면 점수를 기억해 목록에 보여 줍니다('틀린 문제만'은 빼고).
+      if (!only && answered === choiceCount) store.set(`score:${id}`, { right: correct, total: choiceCount, at: Date.now() });
     }
     markWrong(id, quizKey(q), !right);
     updateRetry();
@@ -188,9 +195,27 @@ function renderQuiz(quiz, only = null) {
   updateScore();
   score.hidden = choiceCount === 0;
   updateRetry();
-  box.replaceChildren(score, ...cards, el("div", { class: "quiz-actions" },
+  box.replaceChildren(...lastScore, score, ...cards, el("div", { class: "quiz-actions" },
     el("button", { class: "retry", onclick: () => renderQuiz(quiz) }, only ? "전체 문제 풀기" : "다시 풀기"), retryWrong));
 }
+
+// ---- 인쇄: 요점 정리 탭은 그대로 찍고, 퀴즈는 문제만 찍은 뒤 마지막 장에 정답(먼저 풀고 맞춰 보게) ----
+// 브라우저 메뉴(Ctrl+P)로 찍어도 같도록 인쇄용 퀴즈는 미리 만들어 두고 화면에서만 숨깁니다.
+function printQuiz(quiz) {
+  const blank = (q) => q.parts.map((part, i) => (i % 2 ? "________" : part)).join(" ");
+  const answer = (q) => q.choices
+    ? `${q.answer + 1}번 — ${q.explanation || q.choices[q.answer]}`  // 어휘 문제 해설에 이미 뜻이 들어 있어 보기 글은 해설이 없을 때만
+    : q.parts.filter((_, i) => i % 2).join(", ");
+  $("print-quiz").replaceChildren(...(quiz.length ? [
+    el("h2", {}, "복습 퀴즈"),
+    ...quiz.map((q, n) => el("section", { class: "print-question" },
+      el("h3", {}, `${n + 1}. ${q.question || "빈칸에 들어갈 말은?"}`),
+      ...(q.choices ? [el("ol", {}, ...q.choices.map((c) => el("li", {}, c)))]
+        : [...(q.context ? [el("blockquote", {}, q.context)] : []), el("p", {}, blank(q))]))),
+    el("section", { class: "answers" }, el("h2", {}, "정답"), ...quiz.map((q, n) => el("p", {}, `${n + 1}. ${answer(q)}`))),
+  ] : []));
+}
+$("print-btn").onclick = () => window.print();
 
 // ---- AI에게 질문하기 ----
 function linkify(text) {
