@@ -11,9 +11,11 @@
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 </head>
-<body>
-  <header class="top"><a class="back" href="./">강의 목록</a><h1>강의 현황</h1></header>
-  <main class="list-page">
+<body class="library" data-view="page">
+  <div class="app">
+    <header class="content-head"><a class="back" href="./">강의</a><div class="heading"><h1>강의 현황</h1><p id="view-sub" class="sub"></p></div></header>
+    <nav class="sidebar" aria-label="보관함과 폴더"></nav>
+    <main class="content-body"><div class="list-page">
     <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 페이지만 순서로 하나에만 셉니다.</p>
     <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
     <h2>자동 목차 진행</h2>
@@ -25,9 +27,11 @@
     </section>
     <h2>분석되지 않은 강의</h2>
     <ul id="unanalyzed" class="plain"></ul>
-  </main>
+    </div></main>
+  </div>
   <script src="common.js"></script>
   <script>
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((videos) => fillSidebar(videos, { here: "" }));
     fetch("/api/status").then((r) => r.json()).then((s) => {
       const rows = [["전체 강의", s.total], ["분석 끝남", s.analyzed], ["Claude 요점 정리", s.guide], ["학원 정리", s.summary],
                     ["자동 목차", s.toc], ["페이지만", s.pages], ["분석 안 됨", s.total - s.analyzed]];

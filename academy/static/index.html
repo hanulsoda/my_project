@@ -25,18 +25,7 @@
         <label class="switch-label"><input type="checkbox" id="guide-only" class="switch" role="switch"> 요점 정리만</label>
       </form>
     </header>
-    <nav class="sidebar" aria-label="보관함과 폴더">
-      <p class="app-name"><img src="icon-180.png" alt="" width="22" height="22">학습 플레이어</p>
-      <h2>보관함</h2>
-      <ul>
-        <li><a href="#v/recent"><span class="icon i-clock" aria-hidden="true"></span><span class="name">이어 보기</span><span class="n" id="recent-count"></span></a></li>
-        <li><a href="#v/new"><span class="icon i-new" aria-hidden="true"></span><span class="name">새로 올라온 강의</span><span class="n" id="new-count"></span></a></li>
-        <li><a href="notes.html" id="notes-link"><span class="icon i-note" aria-hidden="true"></span><span class="name">내 메모</span><span class="n" id="notes-count"></span></a></li>
-        <li><a href="review.html" id="review-link"><span class="icon i-repeat" aria-hidden="true"></span><span class="name">틀린 문제 복습</span><span class="n" id="review-count"></span></a></li>
-      </ul>
-      <h2>폴더</h2>
-      <ul id="folder-nav"></ul>
-    </nav>
+    <nav class="sidebar" aria-label="보관함과 폴더"></nav>
     <main class="content-body">
       <p id="found-status" class="sr-only" aria-live="polite"></p>
       <section id="found" hidden></section>
@@ -162,12 +151,6 @@
     window.onhashchange = () => { render(); scrollTo(0, 0); };
     setScope(scope);
 
-    // 사이드바의 '내 메모'·'틀린 문제 복습' 옆에 개수(퀴즈에서 틀리거나 '몰랐어요'를 누른 문제)
-    for (const [countId, prefix] of [["review-count", "wrong:"], ["notes-count", "notes:"]]) {
-      const count = savedLists(prefix).reduce((n, l) => n + l.items.length, 0);
-      $(countId).textContent = count || "";
-    }
-
     // 선생님 말에서 찾기: 선생님이 그 낱말을 말한 강의와 시각(받아쓰기 대본에서 찾음)
     $("tools").onsubmit = async (e) => {
       e.preventDefault();
@@ -229,18 +212,11 @@
 
     fetch("/api/videos").then((r) => r.json()).then((videos) => {
       total = videos.length;
-      // 이어 보기: 다 보지 않은 강의를 최근에 본 순서로 5개
-      const recent = videos.map((v) => ({ v, pos: store.get(`pos:${v.id}`) }))
-        .filter(({ pos }) => pos && pos.t > 5 && pos.t < pos.d - 5)
-        .sort((a, b) => (b.pos.at || 0) - (a.pos.at || 0)).slice(0, 5);
-      $("recent-list").replaceChildren(...recent.map(({ v }) => el("li", {}, lectureLink(v))));
-      $("recent-count").textContent = recent.length || "";
-      // 새로 올라온 강의: 최근 14일 안에 NAS에 올라온 강의를 최신순으로 10개
-      const fresh = videos.filter((v) => v.added > Date.now() / 1000 - 14 * 86400).sort((a, b) => b.added - a.added).slice(0, 10);
+      const side = fillSidebar(videos, { prefix: "" });
+      $("recent-list").replaceChildren(...recentVideos(videos).map((v) => el("li", {}, lectureLink(v))));
       const day = (seconds) => new Date(seconds * 1000).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
-      $("new-list").replaceChildren(...fresh.map((v) => el("li", {},
+      $("new-list").replaceChildren(...freshVideos(videos).map((v) => el("li", {},
         lectureLink(v, `${v.title.split("/").slice(0, -1).join(" · ")} · ${day(v.added)} 올라옴`))));
-      $("new-count").textContent = fresh.length || "";
       const byFolder = new Map();
       for (const v of videos) {
         const cut = v.title.indexOf("/");
@@ -268,9 +244,7 @@
         const head = el("h2", { class: "folder-name" }, name);
         const box = el("section", { class: "folder", "aria-label": name }, head, ...groups.map((g) => g.box));
         $("folders").append(box);
-        const link = el("a", { href: `#f/${name}` }, el("span", { class: "icon i-folder", "aria-hidden": "true" }),
-          el("span", { class: "name" }, name), el("span", { class: "n" }, list.length.toLocaleString()));
-        $("folder-nav").append(el("li", {}, link));
+        const link = side.folders.get(name);
         // 이 브라우저에서 보기 시작한 강의 수(시청 위치가 저장된 강의)
         const seen = list.filter(({ v }) => (store.get(`pos:${v.id}`)?.t || 0) > 5).length;
         return { name, box, head, link, groups, size: list.length, seen };

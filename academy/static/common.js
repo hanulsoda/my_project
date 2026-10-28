@@ -27,6 +27,45 @@ const store = {
   },
 };
 
+// ---- 왼쪽 사이드바(보관함·폴더): 강의 목록·내 메모·틀린 문제 복습·현황이 함께 씁니다 ----
+const folderOf = (title) => (title.includes("/") ? title.slice(0, title.indexOf("/")) : "기타");
+
+// 이어 보기: 다 보지 않은 강의를 최근에 본 순서로 5개
+function recentVideos(videos) {
+  return videos.map((v) => ({ v, pos: store.get(`pos:${v.id}`) }))
+    .filter(({ pos }) => pos && pos.t > 5 && pos.t < pos.d - 5)
+    .sort((a, b) => (b.pos.at || 0) - (a.pos.at || 0)).slice(0, 5).map(({ v }) => v);
+}
+
+// 새로 올라온 강의: 최근 14일 안에 NAS에 올라온 강의를 최신순으로 10개
+function freshVideos(videos) {
+  return videos.filter((v) => v.added > Date.now() / 1000 - 14 * 86400).sort((a, b) => b.added - a.added).slice(0, 10);
+}
+
+// prefix: 강의 목록 화면 안이면 "", 다른 화면이면 "./"(강의 목록으로 가서 그 화면을 엽니다). here: 지금 화면의 링크 주소.
+// 돌려주는 값 {folders: Map(폴더 이름 → 링크)}는 강의 목록이 고른 폴더를 표시할 때 씁니다.
+function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
+  const total = (key) => savedLists(key).reduce((n, l) => n + l.items.length, 0);
+  const link = (href, icon, name, n) => el("a", { href, ...(href === here ? { "aria-current": "page" } : {}) },
+    el("span", { class: `icon i-${icon}`, "aria-hidden": "true" }), el("span", { class: "name" }, name),
+    el("span", { class: "n" }, n ? n.toLocaleString() : ""));
+  const counts = new Map();
+  for (const v of videos) counts.set(folderOf(v.title), (counts.get(folderOf(v.title)) || 0) + 1);
+  const folders = new Map([...counts].map(([name, n]) => [name, link(`${prefix}#f/${name}`, "folder", name, n)]));
+  document.querySelector(".sidebar").replaceChildren(
+    el("p", { class: "app-name" }, el("img", { src: "icon-180.png", alt: "", width: "22", height: "22" }), "학습 플레이어"),
+    el("h2", {}, "보관함"),
+    el("ul", {}, ...[
+      link(`${prefix}#v/recent`, "clock", "이어 보기", recentVideos(videos).length),
+      link(`${prefix}#v/new`, "new", "새로 올라온 강의", freshVideos(videos).length),
+      link("notes.html", "note", "내 메모", total("notes:")),
+      link("review.html", "repeat", "틀린 문제 복습", total("wrong:")),  // 퀴즈에서 틀리거나 '몰랐어요'를 누른 문제
+    ].map((a) => el("li", {}, a))),
+    el("h2", {}, "폴더"),
+    el("ul", {}, ...[...folders.values()].map((a) => el("li", {}, a))));
+  return { folders };
+}
+
 // ---- 퀴즈 카드: 플레이어와 '틀린 문제 복습'이 함께 씁니다 ----
 // 틀린 문제는 강의마다 wrong:<영상 번호>에 문제 글로 기억합니다. 빈칸 문제는 답 문장이 같은 것이 있어 지문까지 붙입니다.
 const quizKey = (q) => q.question || [q.context, ...q.parts].join(" ");
