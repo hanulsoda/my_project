@@ -20,6 +20,7 @@ TEXT = [("text", bg) for bg in ("bg", "surface", "hover", "fill", "segment", "hi
                                 "right-soft", "wrong-soft")]
 TEXT += [("muted", bg) for bg in ("bg", "surface", "hover", "fill")]
 TEXT += [("accent", "bg"), ("accent", "surface"), ("accent", "accent-soft"), ("on-accent", "accent")]
+TEXT += [("text", "sidebar"), ("muted", "sidebar"), ("accent", "sidebar"), ("on-selected", "selected")]  # 강의 목록 사이드바
 LINES = [("control", "bg"), ("control", "surface"), ("right", "surface"), ("wrong", "surface")]
 
 

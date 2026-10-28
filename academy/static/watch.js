@@ -40,7 +40,13 @@ fetch(`/api/videos/${id}`)
 
 function render({ title, analysis, references = [] }) {
   document.title = title;
-  $("title").textContent = title;
+  // 머리글: 작품 이름과 그 위치(2022개정 · 고1 · 모의고사) 두 줄, 왼쪽 위 버튼은 그 폴더로 돌아갑니다.
+  const parts = title.split("/");
+  $("title").textContent = parts.pop();
+  $("path").textContent = parts.join(" · ");
+  const folder = parts[0] || "기타";
+  $("back").setAttribute("href", `./#f/${folder}`);
+  $("back").textContent = folder;
   video.setAttribute("aria-label", title);
   if (!analysis) {
     const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·페이지·퀴즈가 생깁니다.";
@@ -290,14 +296,22 @@ function renderNotes() {
   if (!notes.length) $("notes").append(el("li", { class: "notice" }, "아직 메모가 없습니다. 영상을 보다가 기억할 장면에서 추가하세요."));
 }
 
-$("note-form").onsubmit = (e) => {
-  e.preventDefault();
+function addNote(text) {  // 지금 장면에 메모(글이 없으면 북마크)
   const notes = store.get(notesKey) || [];
-  notes.push({ t: video.currentTime, text: $("note-text").value.trim() });
+  notes.push({ t: video.currentTime, text });
   notes.sort((a, b) => a.t - b.t);
   store.set(notesKey, notes);
-  $("note-text").value = "";
   renderNotes();
+}
+
+$("note-form").onsubmit = (e) => {
+  e.preventDefault();
+  addNote($("note-text").value.trim());
+  $("note-text").value = "";
+};
+$("bookmark-btn").onclick = () => {
+  addNote("");
+  $("status").textContent = `${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`;
 };
 renderNotes();
 
@@ -404,7 +418,8 @@ function showCurrent(t) {
     activeChapter?.bar.classList.remove("active");
     chapter?.card.classList.add("active");
     chapter?.bar.classList.add("active");
-    $("now").textContent = chapter ? `지금: ${chapter.title}` : "";
+    $("now").replaceChildren(...(chapter ? [el("span", { class: "count" }, `${chapters.indexOf(chapter) + 1} / ${chapters.length}`),
+                                            " ", el("strong", {}, chapter.title)] : []));
     activeChapter = chapter;
   }
   // 학원 정리 항목은 시간을 찾을 때 본 3분 구간 동안만 강조합니다.
