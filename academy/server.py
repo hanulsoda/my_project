@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from itertools import accumulate
 from pathlib import Path
 from threading import Lock, Thread
-from time import monotonic
+from time import monotonic, time as wall_clock
 from typing import Literal
 
 import anthropic
@@ -68,6 +68,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         with scan_lock:  # 한 번에 하나만 훑고, 기다리는 사이 다른 요청이 훑었으면 그 결과를 씁니다.
             if library["at"] is None or monotonic() - library["at"] > max_age:
                 videos = find_videos(video_dir)
+                for v in videos:  # '새로 올라온 강의'를 고를 파일 날짜(NAS 3,900개에 3초쯤 더 걸림)
+                    try:
+                        v["added"] = int(v["path"].stat().st_mtime)
+                    except OSError:
+                        v["added"] = 0
                 library.update(at=monotonic(), videos=videos, by_id={v["id"]: v for v in videos})
 
     def current_library():
@@ -101,7 +106,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             chapters = ((data.get("guide") or {}).get("chapters") or (data.get("toc") or {}).get("chapters") or [])
             status_cache[video_id] = (stamp, {
                 "guide": bool(data.get("guide")), "toc": bool((data.get("toc") or {}).get("chapters")),
-                "toc_tried": "toc" in data, "duration": data.get("duration") or 0,
+                "toc_tried": "toc" in data, "duration": data.get("duration") or 0, "modified": stamp[0] / 1e9,
                 "chapters": sorted((c["start"], c["title"]) for c in chapters),
                 "text": "".join(t for t, _ in spoken), "offsets": list(accumulate((len(t) for t, _ in spoken), initial=0))[:-1],
                 "times": [start for _, start in spoken]})
@@ -128,7 +133,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             status = analysis_status(v["id"])
             # Claude 요점 정리가 없어도 학원 요점 정리를 보여 줄 수 있으면 요점 정리가 있는 강의입니다.
             status["guide"] = status["guide"] or (status["analyzed"] and bool(academy_summaries(v)))
-            listed.append({"id": v["id"], "title": v["title"], **status})
+            listed.append({"id": v["id"], "title": v["title"], "added": v.get("added", 0), **status})
         return listed
 
     @app.get("/api/search")
@@ -191,7 +196,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def status():
         """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 페이지만)과 자동 목차 진행률"""
         counts = {"guide": 0, "summary": 0, "toc": 0, "pages": 0}
-        target = done = 0
+        target = done = recent = 0
+        since = wall_clock() - 3 * 86400
         unanalyzed = []
         videos = current_library()["videos"]
         for v in videos:
@@ -205,8 +211,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             if not entry["guide"] and entry["times"]:
                 target += 1
                 done += entry["toc_tried"]
+                recent += entry["toc_tried"] and entry["modified"] >= since
         found = {"total": len(videos), "analyzed": len(videos) - len(unanalyzed), **counts,
-                 "toc_progress": {"target": target, "done": done}, "unanalyzed": unanalyzed}
+                 "toc_progress": {"target": target, "done": done, "last_3_days": recent}, "unanalyzed": unanalyzed}
         if log_dir:
             # 밤 작업 로그에는 강의마다 '목차:' 줄이 쌓여서 날짜로 시작하는 상태 줄만 봅니다.
             found["ops"] = {"backup": _last_line(Path(log_dir) / "backup.log", dated=True),
@@ -227,6 +234,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             analysis["pages"] = [{k: v for k, v in p.items() if k != "text"} for p in analysis.get("pages", [])]
             if analysis.get("guide"):
                 analysis["guide"].pop("edits", None)  # 학원 정리에서 고친 내역은 선생님 확인용
+            if (analysis.get("toc") or {}).get("chapters"):
+                analysis["toc"]["chapters"] = [{**c, "title": _respell(c["title"], video["title"])}
+                                               for c in analysis["toc"]["chapters"]]
         return {"id": video_id, "title": video["title"], "analysis": analysis, "references": summaries}
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")
@@ -274,8 +284,12 @@ def _norm(text):
     return re.sub(r"[^가-힣a-z0-9]", "", text.lower())
 
 
-def _near(word):
-    """받아쓰기가 한 음절의 자음이나 모음 하나만 다르게 적은 말('제망매가'→'제막매가')을 찾는 정규식. 세 글자 이상만."""
+def _near(word, spaced=False):
+    """받아쓰기가 한 음절의 자음이나 모음 하나만 다르게 적은 말('제망매가'→'제막매가')을 찾는 정규식. 세 글자 이상만.
+
+    spaced면 음절 사이 띄어쓰기도 허용합니다('성의 꽃').
+    """
+    sep = r"\s?" if spaced else ""
     branches = []
     for i, ch in enumerate(word):
         code = ord(ch) - 0xAC00
@@ -286,8 +300,19 @@ def _near(word):
         if i < len(word) - 1:  # 마지막 음절의 받침만 다른 말은 조사가 붙은 다른 말일 때가 많습니다('군주로서')
             near += [(first, middle, x) for x in range(28) if x != last]
         syllables = "".join(chr(0xAC00 + a * 588 + b * 28 + c) for a, b, c in near)
-        branches.append(f"{re.escape(word[:i])}[{syllables}]{re.escape(word[i + 1:])}")
+        parts = [re.escape(c) for c in word]
+        parts[i] = f"[{syllables}]"
+        branches.append(sep.join(parts))
     return re.compile("|".join(branches)) if branches else None
+
+
+def _respell(text, lecture_title):
+    """자동 목차 제목의 받아쓰기 오류 중, 파일 이름의 작품명과 소리 하나 다른 말을 작품명으로 바로잡습니다('성의 꽃'→'성에꽃')."""
+    for part in re.split(r"[,_()\[\]·\-~]|\d+", lecture_title.rsplit("/", 1)[-1]):
+        name = re.sub(r"[^가-힣]", "", part)
+        if len(name) >= 3 and (pattern := _near(name, spaced=True)):
+            text = pattern.sub(name, text)
+    return text
 
 
 def _claude_answer():

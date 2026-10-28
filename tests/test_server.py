@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 
@@ -108,6 +109,53 @@ def test_prepares_the_list_in_the_background_when_the_server_starts(tmp_path, mo
     assert len(scans) == 1 and len(matched) == 1
 
 
+def test_lists_when_each_lecture_file_was_put_on_the_nas(tmp_path):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+    for name, stamp in [("1강", 1_700_000_000), ("2강", 1_760_000_000)]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+        os.utime(video_dir / f"{name}.mp4", (stamp, stamp))
+    client = TestClient(create_app(video_dir, tmp_path / "data", None))
+
+    # 목록 화면이 '새로 올라온 강의'를 고를 수 있게 파일 날짜(초)를 함께 보냅니다.
+    assert [(v["title"], v["added"]) for v in client.get("/api/videos").json()] == [("1강", 1_700_000_000), ("2강", 1_760_000_000)]
+
+
+def test_status_counts_tables_of_contents_made_in_the_last_three_days(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    toc = {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}]}
+    for name, days_ago in [("어제", 1), ("그제", 2), ("열흘 전", 10), ("아직", None)]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for name, days_ago in [("어제", 1), ("그제", 2), ("열흘 전", 10), ("아직", None)]:
+        save_analysis(data_dir, ids[name], {"title": name, "segments": SEGMENTS, **({"toc": toc} if days_ago else {})})
+        if days_ago:
+            stamp = time.time() - days_ago * 86400
+            os.utime(data_dir / f"{ids[name]}.json", (stamp, stamp))
+
+    progress = TestClient(create_app(video_dir, data_dir, None)).get("/api/status").json()["toc_progress"]
+
+    # 현황 페이지가 최근 속도로 남은 날을 짐작할 수 있게 최근 3일 동안 만든 목차 수를 보냅니다.
+    assert progress == {"target": 4, "done": 3, "last_3_days": 2}
+
+
+def test_auto_toc_titles_take_the_spelling_of_the_work_in_the_file_name(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "ebs").mkdir(parents=True)
+    (video_dir / "ebs" / "성에꽃.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    chapters = [{"start": 0.0, "title": "성의 꽃 배경 이해"}, {"start": 60.0, "title": "성의꽃과 시대"},
+                {"start": 120.0, "title": "성에서 본 풍경"}]
+    save_analysis(data_dir, video_id, {"title": "ebs/성에꽃", "segments": SEGMENTS, "toc": {"model": "m", "chapters": chapters}})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    sent = client.get(f"/api/videos/{video_id}").json()["analysis"]["toc"]["chapters"]
+
+    # 받아쓰기가 '성에꽃'을 '성의꽃'으로 적어 목차 제목에도 옮겨 오므로, 보낼 때 파일 이름의 철자로 바로잡습니다.
+    assert [c["title"] for c in sent] == ["성에꽃 배경 이해", "성에꽃과 시대", "성에서 본 풍경"]
+
+
 def test_lists_videos_with_analysis_and_guide_status(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
@@ -119,7 +167,8 @@ def test_lists_videos_with_analysis_and_guide_status(tmp_path):
                                           "toc": {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}]}})
     client = TestClient(create_app(video_dir, data_dir, None))
 
-    assert client.get("/api/videos").json() == [
+    listed = [{k: v for k, v in item.items() if k != "added"} for item in client.get("/api/videos").json()]
+    assert listed == [
         {"id": ids["1강"], "title": "1강", "analyzed": True, "guide": True, "toc": False},
         {"id": ids["2강"], "title": "2강", "analyzed": True, "guide": False, "toc": True},  # 로컬 AI 자동 목차
         {"id": ids["3강"], "title": "3강", "analyzed": False, "guide": False, "toc": False},
@@ -271,7 +320,7 @@ def test_status_counts_what_students_get_for_each_lecture(tmp_path):
     # 자동 목차 대상: 대본이 있고 Claude 요점 정리가 없는 강의(제망매가, 목차, 짧은 강의, 긴 강의)
     assert client.get("/api/status").json() == {
         "total": 7, "analyzed": 6, "guide": 1, "summary": 1, "toc": 1, "pages": 3,
-        "toc_progress": {"target": 4, "done": 1}, "unanalyzed": ["망가진 파일"]}
+        "toc_progress": {"target": 4, "done": 1, "last_3_days": 1}, "unanalyzed": ["망가진 파일"]}
 
 
 def test_serves_page_thumbnails(setup, tmp_path):

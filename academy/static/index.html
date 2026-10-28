@@ -17,6 +17,7 @@
     <p id="found-status" class="sr-only" aria-live="polite"></p>
     <section id="found" hidden></section>
     <section id="recent" hidden><h2>이어 보기</h2><ul id="recent-list" class="video-list"></ul></section>
+    <section id="new" hidden><h2>새로 올라온 강의</h2><ul id="new-list" class="video-list"></ul></section>
     <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
     <div id="folders"></div>
   </main>
@@ -131,6 +132,11 @@
         .sort((a, b) => (b.pos.at || 0) - (a.pos.at || 0)).slice(0, 5);
       document.getElementById("recent-list").replaceChildren(...recent.map(({ v }) => el("li", {}, lectureLink(v, v.title))));
       document.getElementById("recent").hidden = !recent.length;
+      // 새로 올라온 강의: 최근 14일 안에 NAS에 올라온 강의를 최신순으로 10개
+      const fresh = videos.filter((v) => v.added > Date.now() / 1000 - 14 * 86400).sort((a, b) => b.added - a.added).slice(0, 10);
+      const day = (seconds) => new Date(seconds * 1000).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+      document.getElementById("new-list").replaceChildren(...fresh.map((v) => el("li", {}, lectureLink(v, `${v.title} · ${day(v.added)}`))));
+      document.getElementById("new").hidden = !fresh.length;
       const byFolder = new Map();
       for (const v of videos) {
         const cut = v.title.indexOf("/");

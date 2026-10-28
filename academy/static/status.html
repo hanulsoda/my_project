@@ -28,9 +28,14 @@
                     ["자동 목차", s.toc], ["페이지만", s.pages], ["분석 안 됨", s.total - s.analyzed]];
       document.getElementById("counts").replaceChildren(...rows.flatMap(([name, n]) => [el("dt", {}, name), el("dd", {}, n.toLocaleString())]));
       // 쓸 수 없는 답이 나와 빈 목차로 남긴 강의도 처리한 것으로 셉니다.
-      const { target, done } = s.toc_progress;
-      document.getElementById("toc").textContent = `대상(요점 정리·학원 정리가 없는 강의) ${target.toLocaleString()}개 중 `
-        + `${done.toLocaleString()}개 처리 (${target ? Math.floor(done / target * 100) : 100}%), 남은 강의 ${(target - done).toLocaleString()}개`;
+      const { target, done, last_3_days: recent } = s.toc_progress;
+      // 최근 3일 속도로 남은 날을 어림합니다. 밤 작업 마지막 기록이 '…멈춥니다'(팬·NAS 문제로 멈춤)면 어림하지 않습니다.
+      // 매일 아침의 정상 종료 기록은 '멈춤'이라 여기에 걸리지 않습니다.
+      const pace = s.ops?.night?.includes("멈춥니다") ? "지금은 밤 작업이 멈춰 있습니다(아래 운영 기록 참고)."
+        : recent ? `최근 3일 동안 ${recent.toLocaleString()}개(하루 약 ${Math.round(recent / 3)}개) 만들어, 이대로면 약 ${Math.ceil((target - done) / (recent / 3))}일 더 걸립니다.`
+        : "최근 3일 동안 만든 목차가 없습니다(밤 작업이 멈춰 있을 수 있습니다).";
+      document.getElementById("toc").textContent = `대상(Claude 요점 정리가 없는 강의) ${target.toLocaleString()}개 중 `
+        + `${done.toLocaleString()}개 처리 (${target ? Math.floor(done / target * 100) : 100}%), 남은 강의 ${(target - done).toLocaleString()}개. ${pace}`;
       const bar = document.getElementById("toc-bar");
       bar.max = target || 1;
       bar.value = done;
