@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>강의 목록</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-title" content="학습 플레이어">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 </head>
 <body>
   <header class="top"><h1>강의 목록</h1><nav class="top-links" aria-label="내 기록"><a id="notes-link" href="notes.html" hidden></a><a id="review-link" href="review.html" hidden></a></nav></header>
@@ -69,7 +74,11 @@
       const pos = store.get(`pos:${v.id}`);
       const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
       const score = store.get(`score:${v.id}`);  // 퀴즈 4지선다를 끝까지 푼 마지막 점수
-      return el("a", { href: `watch.html?id=${v.id}` },
+      // 첫 교재 화면을 작게(폴더를 펼쳐 화면에 보일 때만 불러옴). 그림이 없으면 같은 크기의 빈 칸으로 줄을 맞춥니다.
+      const blank = () => el("span", { class: "thumb" });
+      const thumb = v.analyzed ? el("img", { class: "thumb", src: `/api/videos/${v.id}/pages/0.jpg`, alt: "", loading: "lazy",
+                                             onerror: (e) => e.target.replaceWith(blank()) }) : blank();
+      return el("a", { href: `watch.html?id=${v.id}` }, thumb,
         el("span", { class: "video-title" }, label),
         el("span", { class: "meta" },
           el("span", { class: v.analyzed ? "badge ready" : "badge" },

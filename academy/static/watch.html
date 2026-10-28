@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>학습 플레이어</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-title" content="학습 플레이어">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 </head>
 <body class="watch-page">
   <header class="top">
@@ -35,6 +40,7 @@
         <!-- Claude API 크레딧을 쓰지 않으려고 숨겨 둡니다. 다시 쓰려면 hidden을 지웁니다. -->
         <button data-tab="ask" hidden role="tab" id="tab-btn-ask" aria-controls="tab-ask" aria-selected="false">질문하기</button>
         <button data-tab="notes" role="tab" id="tab-btn-notes" aria-controls="tab-notes" aria-selected="false">메모</button>
+        <button data-tab="find" role="tab" id="tab-btn-find" aria-controls="tab-find" aria-selected="false">찾기</button>
       </nav>
 
       <div class="tab-body" id="tab-guide" role="tabpanel" aria-labelledby="tab-btn-guide"></div>
@@ -63,6 +69,15 @@
           <button type="submit">추가</button>
         </form>
         <ul id="notes" class="notes"></ul>
+      </div>
+
+      <div class="tab-body" id="tab-find" role="tabpanel" aria-labelledby="tab-btn-find" hidden>
+        <form id="find-form" class="note-form" role="search">
+          <input id="find-text" type="search" aria-label="이 강의에서 찾을 낱말" placeholder="선생님이 말한 낱말 (예: 반어법)">
+          <button type="submit">찾기</button>
+        </form>
+        <p id="find-status" class="notice" aria-live="polite">선생님이 이 강의에서 그 낱말을 말한 곳을 찾습니다. 시각을 누르면 그 장면으로 갑니다.</p>
+        <ul id="find-results" class="notes"></ul>
       </div>
     </section>
   </main>

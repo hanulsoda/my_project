@@ -286,6 +286,37 @@ def test_finds_lectures_where_a_word_is_spoken_most_first(tmp_path):
     assert client.get("/api/search", params={"q": "음"}).status_code == 400  # 한 글자는 너무 많이 걸립니다
 
 
+def test_finds_every_time_a_word_is_spoken_in_one_lecture(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    said = [(10.0, "오늘은 반어법을 볼게"), (30.0, "반어 법 예시"), (100.0, "다시 반어법"), (200.0, "반어법"),
+            (300.0, "반어법"), (400.0, "반어법"), (500.0, "반어법 마무리")]
+    toc = {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}, {"start": 150.0, "title": "반어와 역설 정리"}]}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 600.0, "toc": toc,
+                                          "segments": [{"start": s, "end": s + 3, "text": t} for s, t in said]})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "duration": 600.0,
+                                          "segments": [{"start": 50.0, "end": 53.0, "text": "번어법이 나온다"}]})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    found = client.get(f"/api/videos/{ids['1강']}/search", params={"q": "반어법"})
+
+    # 강의 하나에서는 5개로 자르지 않고 모두, 1분 안에 다시 말한 것은 한 번. 대본 글은 보내지 않습니다.
+    assert found.json() == {"times": [10.0, 100.0, 200.0, 300.0, 400.0, 500.0],
+                            "chapters": ["도입", "도입", "반어와 역설 정리", "반어와 역설 정리", "반어와 역설 정리", "반어와 역설 정리"],
+                            "heard_as": [], "notes": []}
+    assert "마무리" not in found.text
+    # 목차 제목에만 있는 말, 받아쓰기가 한 소리 다르게 적은 말
+    assert client.get(f"/api/videos/{ids['1강']}/search", params={"q": "역설"}).json()["notes"] == [
+        {"text": "반어와 역설 정리", "time": 150.0}]
+    near = client.get(f"/api/videos/{ids['2강']}/search", params={"q": "반어법"}).json()
+    assert near["times"] == [50.0] and near["heard_as"] == ["번어법"]
+    assert client.get(f"/api/videos/{ids['1강']}/search", params={"q": "반"}).status_code == 400
+    assert client.get("/api/videos/nope/search", params={"q": "반어법"}).status_code == 404
+
+
 def test_also_finds_lectures_where_the_word_was_transcribed_one_sound_off(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
@@ -464,6 +495,33 @@ def test_serves_student_pages(setup):
 
     assert "<html" in client.get("/").text
     assert client.get("/watch.html").status_code == 200
+
+
+def test_text_is_compressed_but_video_is_sent_as_is(setup):
+    client, ids, _ = setup
+    gzip = {"Accept-Encoding": "gzip"}
+
+    assert client.get("/watch.js", headers=gzip).headers.get("content-encoding") == "gzip"
+    whole = client.get(f"/media/{ids['1강']}", headers=gzip)
+    part = client.get(f"/media/{ids['1강']}", headers={**gzip, "Range": "bytes=100-199"})
+    assert "content-encoding" not in whole.headers and whole.content == bytes(range(256)) * 4
+    assert "content-encoding" not in part.headers and part.content == (bytes(range(256)) * 4)[100:200]
+
+
+def test_pages_can_be_added_to_the_home_screen(setup):
+    client, _, _ = setup
+
+    manifest = client.get("/manifest.json").json()
+
+    assert manifest["display"] == "standalone" and manifest["start_url"] == "./"
+    for icon in manifest["icons"]:
+        png = client.get(f"/{icon['src']}")
+        assert png.headers["content-type"] == icon["type"] == "image/png"
+        width, height = int.from_bytes(png.content[16:20], "big"), int.from_bytes(png.content[20:24], "big")
+        assert icon["sizes"] == f"{width}x{height}"  # PNG 머리(IHDR)의 실제 크기
+    for page in ["/", "/watch.html", "/review.html", "/notes.html", "/status.html"]:
+        html = client.get(page).text
+        assert 'rel="manifest" href="manifest.json"' in html and 'rel="apple-touch-icon"' in html
 
 
 def test_student_pages_are_revalidated_so_updates_reach_browsers(setup):

@@ -18,6 +18,7 @@ from typing import Literal
 
 import anthropic
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -71,6 +72,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         response.headers["X-Frame-Options"] = "DENY"  # 다른 사이트가 플레이어를 자기 화면 안에 몰래 띄우지 못하게
         response.headers["Referrer-Policy"] = "same-origin"  # 강의 주소가 바깥 사이트로 새지 않게
         return response
+
+    # 강의 목록(약 550KB)·화면 파일을 압축해 휴대폰에 빨리 보냅니다. 영상·사진·영상 탐색(206)은 그대로 둡니다(Starlette 기본값).
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     library = {"at": None, "videos": [], "by_id": {}}
     scan_lock = Lock()
@@ -212,17 +216,34 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             lines += [(item, None) for r in academy_summaries(v) for s in r["sections"] for item in s["items"]]
         return [{"text": text, "time": t} for text, t in lines if word in _norm(text)]
 
-    def found_at(v, entry, positions):
+    def found_at(v, entry, positions, limit=5):
         spots = [entry["times"][bisect_right(entry["offsets"], at) - 1] for at in positions]
         times = []
         for t in spots:
             if not times or t - times[-1] >= 60:  # 1분 안에 다시 말한 것은 한 번으로 봅니다
                 times.append(t)
         starts = [start for start, _ in entry["chapters"]]
-        chapters = [entry["chapters"][i - 1][1] if (i := bisect_right(starts, t)) else None for t in times[:5]]
+        chapters = [entry["chapters"][i - 1][1] if (i := bisect_right(starts, t)) else None for t in times[:limit]]
         # 같은 녹화를 여러 폴더에 넣어 둔 경우: 길이와 대본 앞부분이 같으면 같은 녹화로 봅니다.
-        return ({"id": v["id"], "title": v["title"], "count": len(spots), "times": times[:5], "chapters": chapters, "also": []},
+        return ({"id": v["id"], "title": v["title"], "count": len(spots), "times": times[:limit], "chapters": chapters, "also": []},
                 (round(entry["duration"]), entry["text"][:150]))
+
+    @app.get("/api/videos/{video_id}/search")
+    def search_lecture(video_id: str, q: str = ""):
+        """이 강의에서 낱말을 말한 시각 모두와 그때의 챕터(대본 글은 보내지 않음). 그대로 말한 곳이 없으면
+        받아쓰기가 한 소리 다르게 적은 곳(heard_as: 적힌 말), 목차·챕터 제목·학원 정리에 나오는 줄(notes)도 줍니다."""
+        video, word = get_video(video_id), _norm(q)
+        if len(word) < 2:
+            raise HTTPException(400, "두 글자 이상 넣어 주세요")
+        entry = analysis_entry(video["id"])
+        if not entry:
+            return {"times": [], "chapters": [], "heard_as": [], "notes": []}
+        at, heard = [m.start() for m in re.finditer(re.escape(word), entry["text"])], []
+        if not at and (near := _near(word)):
+            matches = list(near.finditer(entry["text"]))
+            at, heard = [m.start() for m in matches], [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
+        found, _ = found_at(video, entry, at, limit=None)
+        return {"times": found["times"], "chapters": found["chapters"], "heard_as": heard, "notes": noted(video, entry, word)}
 
     def merge_copies(found):
         merged, first = [], {}

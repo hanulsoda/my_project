@@ -301,6 +301,26 @@ $("note-form").onsubmit = (e) => {
 };
 renderNotes();
 
+// ---- 이 강의에서 찾기: 선생님이 그 낱말을 말한 시각과 챕터(서버는 대본 글을 보내지 않음) ----
+$("find-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const q = $("find-text").value.trim(), status = $("find-status"), list = $("find-results");
+  status.textContent = "찾는 중…";
+  const res = await fetch(`/api/videos/${id}/search?q=${encodeURIComponent(q)}`);
+  const found = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    status.textContent = found.detail || "찾지 못했습니다.";
+    list.replaceChildren();
+    return;
+  }
+  const heard = found.heard_as.length ? ` · 받아 적힌 말: ${found.heard_as.map((w) => `‘${w}’`).join(", ")}` : "";
+  status.textContent = found.times.length ? `‘${q}’: 선생님이 말한 곳 ${found.times.length}군데${heard}` : `‘${q}’: 선생님 말에서는 찾지 못했습니다.`;
+  list.replaceChildren(
+    ...found.times.map((t, i) => el("li", {}, timeButton(t), el("span", { class: "note-text" }, found.chapters[i] || ""))),
+    ...(found.notes.length ? [el("li", { class: "notice" }, "요점 정리·목차에 나오는 곳")] : []),
+    ...found.notes.map((n) => el("li", {}, ...(n.time == null ? [] : [timeButton(n.time)]), el("span", { class: "note-text" }, n.text))));
+};
+
 // ---- 재생 속도(브라우저에 기억해 다른 강의에도 씀)와 단축키 ----
 function setSpeed(rate) {
   video.playbackRate = video.defaultPlaybackRate = rate;  // 영상을 불러올 때 기본 속도로 되돌아가지 않게 둘 다 바꿉니다
