@@ -21,6 +21,14 @@
     <h2>자동 목차 진행</h2>
     <p id="toc" class="notice"></p>
     <progress id="toc-bar" max="1" value="0" aria-label="자동 목차 진행률"></progress>
+    <section id="usage" hidden>
+      <h2>이용 통계 (최근 30일)</h2>
+      <p id="usage-summary" class="notice"></p>
+      <ol id="usage-top" class="plain"></ol>
+      <h3 class="usage-week-title">요일별 강의 열기 (최근 4주)</h3>
+      <div id="usage-week" class="bars usage-bars"></div>
+      <p class="notice">학생 이름과 기기 주소는 남기지 않습니다. 플레이어에서 강의를 연 시각과, 기기를 알아볼 수 없게 바꾼 번호만 셉니다.</p>
+    </section>
     <section id="ops" hidden>
       <h2>운영 기록</h2>
       <dl id="ops-lines" class="stats"></dl>
@@ -52,6 +60,20 @@
         const lines = [["마지막 백업", s.ops.backup], ["밤 작업", s.ops.night], ["새 강의 분석", s.ops.new_videos]];
         document.getElementById("ops-lines").replaceChildren(...lines.flatMap(([name, line]) => [el("dt", {}, name), el("dd", {}, line || "기록 없음")]));
         document.getElementById("ops").hidden = false;
+      }
+      if (s.usage) {  // 이용 통계: 많이 연 강의 10개(기기 수 순)와 요일별 열기
+        const u = s.usage, day = (iso) => new Date(`${iso}T00:00`).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+        document.getElementById("usage-summary").textContent = u.since
+          ? `강의를 연 횟수 ${u.opens.toLocaleString()}번 · 기기 ${u.devices.toLocaleString()}대 · ${day(u.since)}부터 기록`
+          : "아직 기록이 없습니다. 학생이 플레이어에서 강의를 열면 그때부터 셉니다.";
+        document.getElementById("usage-top").replaceChildren(...u.top.map((t) => el("li", {},
+          el("a", { href: `watch.html?id=${t.id}` }, t.title), ` · 기기 ${t.devices}대 · ${t.opens}번`)));
+        const top = Math.max(1, ...u.weekdays);
+        document.getElementById("usage-week").replaceChildren(...u.weekdays.map((n, i) => el("span", { class: "day" },
+          el("span", { class: "bar", "aria-hidden": "true" }, el("span", { style: `height: ${Math.round((n / top) * 100)}%` })),
+          el("span", { class: "label", "aria-hidden": "true" }, "월화수목금토일"[i]),
+          el("span", { class: "sr-only" }, `${"월화수목금토일"[i]}요일 ${n}번`))));
+        document.getElementById("usage").hidden = false;
       }
       document.getElementById("unanalyzed").replaceChildren(...(s.unanalyzed.length
         ? s.unanalyzed.map((title) => el("li", {}, title)) : [el("li", { class: "notice" }, "없습니다.")]));

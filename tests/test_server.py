@@ -385,6 +385,29 @@ def test_status_shows_the_latest_ops_log_lines_when_given_a_log_folder(tmp_path)
     assert "ops" not in TestClient(create_app(video_dir, tmp_path / "data", None)).get("/api/status").json()
 
 
+def test_status_counts_lecture_opens_for_teachers_without_device_addresses(tmp_path):
+    video_dir, data_dir, log_dir = tmp_path / "videos", tmp_path / "data", tmp_path / "logs"
+    video_dir.mkdir()
+    log_dir.mkdir()
+    for name in ["1강", "2강", "3강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    app = create_app(video_dir, data_dir, None, log_dir=log_dir, usage_ignore=("10.0.0.9",))
+    a, b, me = (TestClient(app, client=(host, 5000)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.9"))
+
+    for client, name in [(a, "1강"), (a, "1강"), (b, "1강"), (a, "2강"), (me, "3강")]:
+        client.get(f"/api/videos/{ids[name]}", params={"view": 1})  # 플레이어에서 강의를 엶
+    a.get(f"/api/videos/{ids['3강']}")  # 복습 화면이 문제를 불러오려고 읽는 것은 세지 않습니다
+
+    usage = a.get("/api/status").json()["usage"]
+    assert usage["top"] == [{"id": ids["1강"], "title": "1강", "opens": 3, "devices": 2},
+                            {"id": ids["2강"], "title": "2강", "opens": 1, "devices": 1}]
+    assert (usage["opens"], usage["devices"], sum(usage["weekdays"])) == (4, 2, 4)  # 원장님 PC(10.0.0.9)는 빼고
+    assert usage["since"] is not None
+    log = (log_dir / "usage.log").read_text(encoding="utf-8")
+    assert len(log.splitlines()) == 4 and "10.0.0." not in log  # 기기 주소는 남기지 않습니다
+
+
 def test_status_counts_what_students_get_for_each_lecture(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()

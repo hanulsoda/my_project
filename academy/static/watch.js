@@ -33,7 +33,7 @@ for (const tab of document.querySelectorAll(".tabs button")) {
 }
 
 // ---- 데이터 불러오기 ----
-fetch(`/api/videos/${id}`)
+fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(선생님용 이용 통계)
   .then((r) => (r.ok ? r.json() : Promise.reject()))
   .then(render)
   .catch(() => { $("title").textContent = "영상을 찾을 수 없습니다"; });

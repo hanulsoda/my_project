@@ -3,13 +3,16 @@
 실행: uvicorn academy.server:app --host 0.0.0.0 --port 8000
 """
 
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 from bisect import bisect_right
 from collections import Counter
 from contextlib import asynccontextmanager
+from datetime import datetime
 from itertools import accumulate
 from pathlib import Path
 from threading import Lock, Thread
@@ -17,7 +20,7 @@ from time import monotonic, time as wall_clock
 from typing import Literal
 
 import anthropic
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -54,7 +57,7 @@ class AskRequest(BaseModel):
     current_time: float | None = None
 
 
-def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None) -> FastAPI:
+def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=()) -> FastAPI:
     """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다."""
     @asynccontextmanager
     async def lifespan(app):
@@ -255,6 +258,49 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 merged.append(result)
         return merged[:300]  # 화면은 30개씩 '더 보기'
 
+    # ---- 선생님용 이용 통계: 플레이어에서 강의를 연 시각·강의·기기 번호만 log_dir/usage.log에 한 줄씩 ----
+    # 기기 번호는 서버만 아는 비밀값(.usage-salt)을 섞어 바꾼 짧은 글자라 기기 주소로 되돌릴 수 없습니다.
+    # usage_ignore(원장님 PC 등)의 접속과, 복습 화면처럼 강의를 열지 않고 정보만 읽는 것(view 없음)은 세지 않습니다.
+    usage_lock = Lock()
+
+    def device(host):
+        salt_path = Path(log_dir) / ".usage-salt"
+        if not salt_path.exists():
+            salt_path.write_text(secrets.token_hex(16), encoding="utf-8")
+        return hashlib.sha256((salt_path.read_text(encoding="utf-8") + host).encode()).hexdigest()[:10]
+
+    def record_open(video_id, host):
+        if not log_dir or host in usage_ignore:
+            return
+        with usage_lock, (Path(log_dir) / "usage.log").open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": int(wall_clock()), "id": video_id, "who": device(host)}) + "\n")
+
+    def usage_summary():
+        rows = []
+        try:
+            for line in (Path(log_dir) / "usage.log").read_text(encoding="utf-8").splitlines():
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    pass  # 쓰다 끊긴 줄은 건너뜁니다
+        except OSError:
+            pass
+        now = wall_clock()
+        month = [r for r in rows if r["t"] >= now - 30 * 86400]
+        opens, devices = Counter(r["id"] for r in month), {}
+        for r in month:
+            devices.setdefault(r["id"], set()).add(r["who"])
+        titles = {v["id"]: v["title"] for v in current_library()["videos"]}
+        top = sorted(opens, key=lambda i: (-len(devices[i]), -opens[i], titles.get(i, "")))[:10]
+        weekdays = [0] * 7  # 월~일, 최근 4주
+        for r in rows:
+            if r["t"] >= now - 28 * 86400:
+                weekdays[datetime.fromtimestamp(r["t"]).weekday()] += 1
+        return {"since": datetime.fromtimestamp(rows[0]["t"]).strftime("%Y-%m-%d") if rows else None,
+                "opens": len(month), "devices": len({r["who"] for r in month}), "weekdays": weekdays,
+                "top": [{"id": i, "title": titles.get(i, "(목록에 없는 강의)"), "opens": opens[i], "devices": len(devices[i])}
+                        for i in top]}
+
     @app.get("/api/status")
     def status():
         """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 페이지만)과 자동 목차 진행률"""
@@ -282,11 +328,14 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             found["ops"] = {"backup": _last_line(Path(log_dir) / "backup.log", dated=True),
                             "night": _last_line(Path(log_dir) / "toc.log", dated=True),
                             "new_videos": _last_line(Path(log_dir) / "new-videos.log")}
+            found["usage"] = usage_summary()
         return found
 
     @app.get("/api/videos/{video_id}")
-    def video_detail(video_id: str):
+    def video_detail(video_id: str, request: Request, view: bool = False):
         video = get_video(video_id)
+        if view:  # 플레이어에서 강의를 열 때만 view=1
+            record_open(video_id, request.client.host if request.client else "")
         analysis = read_analysis(video_id)
         # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 대본에서 찾은 시간과 함께 보냅니다.
         summaries = (link_times(academy_summaries(video), analysis.get("segments") or [])
@@ -403,4 +452,5 @@ app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
                  None,  # 질문하기는 Claude API 크레딧을 써서 막아 둡니다. 다시 열려면 _claude_answer()를 넘깁니다.
                  load_references(os.environ.get("REFERENCES_FILE")),
-                 os.environ.get("LOG_DIR"))
+                 os.environ.get("LOG_DIR"),
+                 tuple(filter(None, os.environ.get("USAGE_IGNORE", "").split(","))))  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
