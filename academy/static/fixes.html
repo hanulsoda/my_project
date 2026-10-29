@@ -78,6 +78,7 @@
       }
       const res = await fetch(`/api/references/${key}/fix`, {
         method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() }, body: JSON.stringify(body) });
+      if (res.status === 429) return say("열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
       if (res.status === 403) {
         localStorage.removeItem("teacher-key");
         $("key-form").hidden = false;

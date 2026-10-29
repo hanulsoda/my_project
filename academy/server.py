@@ -318,10 +318,19 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # 열쇠를 정하지 않은 서버(teacher_key 없음)는 아무도 바꿀 수 없습니다. 분석 결과 폴더에 두어 매일 백업에 들어갑니다.
     picks_path = Path(data_dir) / ".teacher-picks"
 
+    misses = {}  # 기기 주소 → (열쇠를 틀린 횟수, 마지막으로 틀린 시각): 10번 틀리면 10분 동안 막습니다(마구 넣어 보기 막기)
+
     def require_teacher(request):
+        host = request.client.host if request.client else ""
+        count, last = misses.get(host, (0, 0))
+        recent = wall_clock() - last < 600
+        if count >= 10 and recent:
+            raise HTTPException(429, "선생님 열쇠를 여러 번 틀려 10분 동안 막았습니다")
         given = request.headers.get("x-teacher-key", "")
         if not teacher_key or not secrets.compare_digest(given.encode(), teacher_key.encode()):
+            misses[host] = (count + 1 if recent else 1, wall_clock())
             raise HTTPException(403, "선생님 열쇠가 맞지 않습니다")
+        misses.pop(host, None)
 
     @app.get("/api/picks")
     def picks():

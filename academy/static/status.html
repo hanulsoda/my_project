@@ -93,6 +93,7 @@
     $("pick-save").onclick = async () => {
       const res = await fetch("/api/picks", { method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() },
                                               body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value }) });
+      if (res.status === 429) return void ($("pick-status").textContent = "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
       if (res.status === 403) {
         localStorage.removeItem("teacher-key");
         showTeacher();

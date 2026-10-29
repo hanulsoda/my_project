@@ -436,6 +436,24 @@ def test_teacher_picks_need_the_teacher_key_and_are_shown_to_everyone(tmp_path):
     assert TestClient(create_app(video_dir, data_dir, None)).get("/api/picks").json()["lectures"] == picks["lectures"]
 
 
+def test_a_device_that_misses_the_teacher_key_ten_times_waits_ten_minutes(tmp_path, monkeypatch):
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"x")
+    video_id = find_videos(tmp_path / "videos")[0]["id"]
+    clock = [1000.0]
+    monkeypatch.setattr(server, "wall_clock", lambda: clock[0])
+    app = create_app(tmp_path / "videos", tmp_path / "data", None, teacher_key="right")
+    guesser, other = TestClient(app, client=("10.0.0.7", 1)), TestClient(app, client=("10.0.0.8", 1))
+    put = lambda client, key: client.put("/api/picks", json={"ids": [video_id]}, headers={"X-Teacher-Key": key}).status_code
+
+    assert [put(guesser, f"guess{i}") for i in range(10)] == [403] * 10
+    assert put(guesser, "right") == 429  # 맞는 열쇠도 10분 동안은 막힙니다
+    assert put(other, "right") == 200  # 다른 기기는 그대로
+    clock[0] += 601
+    assert put(guesser, "right") == 200
+    assert put(guesser, "wrong") == 403  # 맞힌 뒤에는 틀린 횟수가 처음부터
+
+
 def test_teachers_fix_or_hide_summary_items_without_touching_the_original(tmp_path):
     from academy.references import ref_key
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
