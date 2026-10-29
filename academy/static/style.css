@@ -312,6 +312,9 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .sidebar a[aria-current="page"] .n { color: inherit; }
 /* 선생님이 고른 '이번 주 강의'(사이드바 맨 위)와 현황 화면의 고르기 */
 .picks-note { margin: 0 8px 4px; color: var(--muted); font-size: 12px; }
+.picks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.picks-head select, #pick-list select { padding: 2px 6px; border: 1px solid var(--control); border-radius: 6px; background: var(--surface); font-size: 12px; }
+.picks-head select { margin: 12px 4px 0 0; }
 .picker { display: grid; gap: 8px; max-width: 560px; }
 .picker label { color: var(--muted); font-size: 13px; }
 /* 기기 옮기기: 크게 보이는 6자리 코드 */

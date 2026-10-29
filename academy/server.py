@@ -77,6 +77,8 @@ class TransferRequest(BaseModel):
 class PicksRequest(BaseModel):
     ids: list[str] = Field(max_length=20)
     note: str = Field("", max_length=200)
+    # 강의마다 대상 학년(없으면 모든 학년). 학생은 사이드바에서 자기 학년을 고르면 그 학년 것만 봅니다.
+    grades: dict[str, Literal["", "중1", "중2", "중3", "고1", "고2", "고3"]] = Field(default_factory=dict)
 
 
 def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=(),
@@ -417,7 +419,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             saved = {}
         by_id = current_library()["by_id"]
         return {"note": saved.get("note", ""), "at": saved.get("at"),
-                "lectures": [{"id": i, "title": by_id[i]["title"]} for i in saved.get("ids", []) if i in by_id]}
+                "lectures": [{"id": i, "title": by_id[i]["title"], "grade": saved.get("grades", {}).get(i, "")}
+                             for i in saved.get("ids", []) if i in by_id]}
 
     @app.put("/api/picks")
     def set_picks(req: PicksRequest, request: Request):
@@ -426,7 +429,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             get_video(video_id)  # 없는 강의면 404
         picks_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = picks_path.with_name(picks_path.name + ".tmp")
-        tmp.write_text(json.dumps({"ids": list(dict.fromkeys(req.ids)), "note": req.note.strip(), "at": int(wall_clock())},
+        ids = list(dict.fromkeys(req.ids))
+        grades = {i: g for i, g in req.grades.items() if i in ids and g}
+        tmp.write_text(json.dumps({"ids": ids, "grades": grades, "note": req.note.strip(), "at": int(wall_clock())},
                                   ensure_ascii=False), encoding="utf-8")
         tmp.replace(picks_path)
         return picks()

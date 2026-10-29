@@ -83,7 +83,13 @@
     };
     $("key-forget").onclick = () => { localStorage.removeItem("teacher-key"); showTeacher(); };
     function renderChosen() {
-      $("pick-list").replaceChildren(...chosen.map((l, i) => el("li", {}, el("span", { class: "note-text" }, l.title),
+      const grade = (l) => {  // 대상 학년(없으면 모든 학년)
+        const select = el("select", { "aria-label": `${l.title} 대상 학년`, onchange: () => { l.grade = select.value; } },
+          ...["", "중1", "중2", "중3", "고1", "고2", "고3"].map((g) => el("option", { value: g }, g || "모든 학년")));
+        select.value = l.grade || "";
+        return select;
+      };
+      $("pick-list").replaceChildren(...chosen.map((l, i) => el("li", {}, el("span", { class: "note-text" }, l.title), grade(l),
         el("button", { type: "button", class: "delete", "aria-label": `${l.title} 빼기`,
                        onclick: () => { chosen.splice(i, 1); renderChosen(); } }, "빼기"))));
       if (!chosen.length) $("pick-list").append(el("li", { class: "notice" }, "아직 고른 강의가 없습니다. 아래에서 찾아 더하세요."));
@@ -98,7 +104,8 @@
     };
     $("pick-save").onclick = async () => {
       const res = await fetch("/api/picks", { method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() },
-                                              body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value }) });
+                                              body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value,
+                                                                     grades: Object.fromEntries(chosen.map((l) => [l.id, l.grade || ""])) }) });
       if (res.status === 429) return void ($("pick-status").textContent = "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
       if (res.status === 403) {
         localStorage.removeItem("teacher-key");

@@ -78,9 +78,23 @@ function picksSection() {
   picksLoad ??= fetch("/api/picks").then((r) => (r.ok ? r.json() : null)).catch(() => null);
   picksLoad.then((picks) => {
     if (!picks?.lectures.length) return;
-    box.replaceChildren(el("h2", {}, "이번 주 강의"), ...(picks.note ? [el("p", { class: "picks-note" }, picks.note)] : []),
-      el("ul", {}, ...picks.lectures.map((l) => el("li", {}, el("a", { href: `watch.html?id=${l.id}` },
-        el("span", { class: "icon i-star", "aria-hidden": "true" }), el("span", { class: "name" }, l.title.split("/").pop()))))));
+    // 선생님이 대상 학년을 붙였으면 '내 학년'을 고르게 하고(브라우저에 기억), 그 학년 것과 모든 학년 것만 보여 줍니다.
+    const select = el("select", { class: "my-grade", "aria-label": "내 학년" },
+      ...["", "중1", "중2", "중3", "고1", "고2", "고3"].map((g) => el("option", { value: g }, g || "모든 학년")));
+    select.value = store.get("grade") || "";
+    const list = el("ul");
+    const show = () => {
+      const shown = picks.lectures.filter((l) => !select.value || !l.grade || l.grade === select.value);
+      list.replaceChildren(...shown.map((l) => el("li", {}, el("a", { href: `watch.html?id=${l.id}` },
+        el("span", { class: "icon i-star", "aria-hidden": "true" }), el("span", { class: "name" }, l.title.split("/").pop()),
+        el("span", { class: "n" }, l.grade)))));
+      if (!shown.length) list.append(el("li", { class: "picks-note" }, `${select.value} 강의는 아직 없습니다.`));
+    };
+    select.onchange = () => { store.set("grade", select.value); show(); };
+    box.replaceChildren(el("div", { class: "picks-head" }, el("h2", {}, "이번 주 강의"),
+                                    ...(picks.lectures.some((l) => l.grade) ? [select] : [])),
+      ...(picks.note ? [el("p", { class: "picks-note" }, picks.note)] : []), list);
+    show();
     box.hidden = false;
   });
   return box;

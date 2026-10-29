@@ -428,12 +428,29 @@ def test_teacher_picks_need_the_teacher_key_and_are_shown_to_everyone(tmp_path):
 
     assert saved.status_code == 200
     picks = client.get("/api/picks").json()
-    assert picks["lectures"] == [{"id": ids["2강"], "title": "2강"}, {"id": ids["1강"], "title": "1강"}]  # 고른 순서, 겹친 것은 한 번
+    assert picks["lectures"] == [{"id": ids["2강"], "title": "2강", "grade": ""},  # 고른 순서, 겹친 것은 한 번
+                                 {"id": ids["1강"], "title": "1강", "grade": ""}]
     assert picks["note"] == "기말 대비" and picks["at"]
     assert client.put("/api/picks", json={"ids": ["nope"]}, headers=key).status_code == 404
     assert client.put("/api/picks", json={"ids": [ids["1강"]] * 21}, headers=key).status_code == 422  # 많아야 20개
     # 서버를 다시 켜도 남습니다(분석 결과 폴더에 저장되어 매일 백업에도 들어갑니다)
     assert TestClient(create_app(video_dir, data_dir, None)).get("/api/picks").json()["lectures"] == picks["lectures"]
+
+
+def test_teacher_picks_can_target_a_grade(tmp_path):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+    for name in ["1강", "2강", "3강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    client = TestClient(create_app(video_dir, tmp_path / "data", None, teacher_key="k"))
+    put = lambda grades: client.put("/api/picks", json={"ids": list(ids.values()), "grades": grades}, headers={"X-Teacher-Key": "k"})
+
+    assert put({ids["1강"]: "고1", ids["2강"]: "중2", "nope": "고3"}).status_code == 200
+
+    assert [(l["title"], l["grade"]) for l in client.get("/api/picks").json()["lectures"]] == [
+        ("1강", "고1"), ("2강", "중2"), ("3강", "")]  # 대상이 없으면 모든 학년, 고르지 않은 강의의 대상은 버림
+    assert put({ids["1강"]: "대학"}).status_code == 422
 
 
 def test_a_device_that_misses_the_teacher_key_ten_times_waits_ten_minutes(tmp_path, monkeypatch):
