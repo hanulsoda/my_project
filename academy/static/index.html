@@ -187,6 +187,23 @@
     }
     $("sort").onchange = () => { sortItems(); save(); };
 
+    // 키보드: 찾기 칸에서 ↓로 첫 강의, 목록에서 ↑↓(그림 보기는 ←→ 옆, ↑↓ 한 줄), Enter로 열기
+    const lectureLinks = () => [...document.querySelectorAll(".content-body .video-list a")].filter((a) => a.offsetParent);
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" && !e.isComposing && lectureLinks().length) { e.preventDefault(); lectureLinks()[0].focus(); }
+    });
+    document.querySelector(".content-body").addEventListener("keydown", (e) => {
+      const a = e.target.closest(".video-list a");
+      if (!a || e.altKey || e.ctrlKey || e.metaKey) return;
+      const links = lectureLinks(), i = links.indexOf(a);
+      const row = layout === "grid" ? getComputedStyle(a.closest(".video-list")).gridTemplateColumns.split(" ").length : 1;
+      const step = { ArrowDown: row, ArrowUp: -row, ...(layout === "grid" ? { ArrowRight: 1, ArrowLeft: -1 } : {}) }[e.key];
+      const next = e.key === "Home" ? links[0] : e.key === "End" ? links.at(-1) : step ? links[i + step] : undefined;
+      if (!step && !["Home", "End"].includes(e.key)) return;
+      e.preventDefault();
+      if (next) next.focus(); else if (e.key === "ArrowUp" && i - row < 0) search.focus();  // 맨 위에서 ↑는 찾기 칸으로
+    });
+
     // 선생님 말에서 찾기: 선생님이 그 낱말을 말한 강의와 시각(받아쓰기 대본에서 찾음)
     $("tools").onsubmit = async (e) => {
       e.preventDefault();

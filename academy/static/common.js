@@ -129,6 +129,26 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
     el("h2", {}, "폴더"),
     el("ul", { class: "tree" }, ...top.map(node)));
   for (const path of toggles.keys()) show(path, opened.has(path));
+  // 키보드(Finder처럼): ↑↓ 이동, → 펼치기(펼쳐져 있으면 첫 하위 폴더로), ← 접기(접혀 있으면 위 폴더로), Home/End
+  const nav = document.querySelector(".sidebar");
+  nav.onkeydown = (e) => {
+    const a = e.target.closest("a");
+    if (!a || e.altKey || e.ctrlKey || e.metaKey) return;
+    const links = [...nav.querySelectorAll("a")].filter((x) => x.offsetParent);
+    const i = links.indexOf(a), path = (a.getAttribute("href").match(/#f\/(.*)$/) || [])[1];
+    const t = toggles.get(path);
+    let next = null;
+    if (e.key === "ArrowDown") next = links[i + 1];
+    else if (e.key === "ArrowUp") next = links[i - 1];
+    else if (e.key === "Home") next = links[0];
+    else if (e.key === "End") next = links.at(-1);
+    else if (e.key === "ArrowRight" && t) { if (t.sub.hidden) setOpen(path, true); else next = folders.get(tree.get(path).kids[0]); }
+    else if (e.key === "ArrowLeft" && path) {
+      if (t && !t.sub.hidden) setOpen(path, false); else next = folders.get(path.split("/").slice(0, -1).join("/"));
+    } else return;
+    e.preventDefault();
+    next?.focus();
+  };
   const reveal = (path) => {
     const parts = path.split("/");
     for (let depth = 1; depth < parts.length; depth++) setOpen(parts.slice(0, depth).join("/"), true);
