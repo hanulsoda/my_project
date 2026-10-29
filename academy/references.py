@@ -4,6 +4,7 @@
 {"title", "grade", "meta", "features", "stages", "stanzas", "persons", "fillins", "words"}를 담은 JSON 목록입니다.
 """
 
+import hashlib
 import json
 import random
 import re
@@ -44,8 +45,31 @@ def find_references(title, screen_lines, references) -> list[dict]:
     hits = [hit for work, hit in found.items() if not any(work != other and work in other for other in found)]
     if any(hit[0] for hit in hits):  # 파일 이름으로 찾았으면 화면에 인용만 된 다른 작품은 뺍니다.
         hits = [hit for hit in hits if hit[0]]
-    return [{"source": f"{ref['grade']} 「{_work(ref['title'])}」", "text": reference_text(ref),
+    return [{"source": f"{ref['grade']} 「{_work(ref['title'])}」", "key": ref_key(ref), "text": reference_text(ref),
              "sections": reference_sections(ref), "quiz": reference_quiz(ref)} for _, ref, _ in hits]
+
+
+def ref_key(ref) -> str:
+    """정리마다 바뀌지 않는 짧은 열쇠(학년+제목). 선생님이 고친 내용을 이 열쇠로 기억합니다."""
+    return hashlib.sha1(f"{ref['grade']}|{ref['title']}".encode()).hexdigest()[:10]
+
+
+def suspects(ref) -> dict:
+    """학생에게 보이는 항목 가운데 선생님이 확인할 만한 것 {칸 이름: {항목: 까닭}}.
+    깨진 기호·쪽 머리글 꼬리·같은 칸 중복·빈 단계는 보여 줄 때 이미 자동으로 정리하므로, 그 뒤에도 남는 것만 봅니다."""
+    found = {}
+    for section in reference_sections(ref):
+        for item in section["items"]:
+            if len(item) > 250:
+                found.setdefault(section["name"], {})[item] = f"너무 긴 항목({len(item)}자)"
+    # PDF에서 뽑다가 다른 단계의 내용이 한 단계로 몰린 것: 단계가 셋 이상인데 빈 단계가 있고 한 단계가 70% 이상
+    stages = _tidy(ref).get("stages") or []
+    counts = [len(s.get("bullets") or []) for s in stages]
+    empty = [s.get("label", "") for s in stages if not s.get("bullets")]
+    if len(stages) >= 3 and empty and sum(counts) >= 3 and max(counts) >= 0.7 * sum(counts):
+        crowded = _item("stages", stages[counts.index(max(counts))])
+        found.setdefault("구조", {})[crowded] = f"한 단계에 내용이 몰림(빈 단계: {', '.join(empty)})"
+    return found
 
 
 def _grade_score(grade, title):

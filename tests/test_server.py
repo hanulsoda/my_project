@@ -248,8 +248,9 @@ def test_lectures_without_a_guide_show_the_academy_summary_as_is(tmp_path):
     references = lambda title: client.get(f"/api/videos/{ids[title]}").json()["references"]
 
     # 빈칸 문제는 답이 미리 보이지 않게 요점 정리에서 빼고 퀴즈로 보냅니다. 항목마다 대본에서 찾은 시간이 붙습니다.
+    from academy.references import ref_key
     assert references("고1/제망매가 학습활동") == [
-        {"source": "고1 「제망매가」", "sections": [{"name": "개요", "items": ["갈래: 향가"], "times": [30.0]}],
+        {"source": "고1 「제망매가」", "key": ref_key(refs[0]), "sections": [{"name": "개요", "items": ["갈래: 향가"], "times": [30.0]}],
          "quiz": [{"context": "누이의 죽음", "parts": ["슬픔을", "종교적", "으로 극복함"]}]}]
     assert references("고1/속미인곡 학습활동") == []  # 학원 정리를 바탕으로 만든 Claude 요점 정리가 이미 있습니다
     assert references("고1/1강") == []
@@ -433,6 +434,50 @@ def test_teacher_picks_need_the_teacher_key_and_are_shown_to_everyone(tmp_path):
     assert client.put("/api/picks", json={"ids": [ids["1강"]] * 21}, headers=key).status_code == 422  # 많아야 20개
     # 서버를 다시 켜도 남습니다(분석 결과 폴더에 저장되어 매일 백업에도 들어갑니다)
     assert TestClient(create_app(video_dir, data_dir, None)).get("/api/picks").json()["lectures"] == picks["lectures"]
+
+
+def test_teachers_fix_or_hide_summary_items_without_touching_the_original(tmp_path):
+    from academy.references import ref_key
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "고1").mkdir(parents=True)
+    (video_dir / "고1" / "홍계월전 강의.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    save_analysis(data_dir, video_id, {"title": "고1/홍계월전 강의", "duration": 60.0, "segments": SEGMENTS})
+    ref = {"title": "홍계월전", "grade": "고1", "meta": {"갈래": "영웅 소설", "시점": "전지적 작가 시점"},
+           "features": [{"text": "여성 영웅"}, {"text": "남장 모티프" + "가" * 250}]}
+    key, teacher = ref_key(ref), {"X-Teacher-Key": "k"}
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="k"))
+    shown = lambda: {s["name"]: s["items"] for s in client.get(f"/api/videos/{video_id}").json()["references"][0]["sections"]}
+
+    assert client.get("/api/references").json() == [{"key": key, "title": "홍계월전", "grade": "고1", "suspects": 1}]
+    features = {s["name"]: s["items"] for s in client.get(f"/api/references/{key}").json()["sections"]}["핵심 특징"]
+    assert features[0] == {"original": "여성 영웅", "text": "여성 영웅", "hidden": False, "suspect": None}
+    assert features[1]["suspect"] == "너무 긴 항목(256자)"  # '남장 모티프'(띄어쓰기 포함 6자) + 250자
+
+    fix = {"section": "개요", "original": "시점: 전지적 작가 시점", "text": "시점: 전지적 작가 시점(서술자 개입)"}
+    assert client.put(f"/api/references/{key}/fix", json=fix).status_code == 403  # 고치기는 선생님 열쇠가 있어야
+    assert client.put(f"/api/references/{key}/fix", json=fix, headers=teacher).status_code == 200
+    assert client.put(f"/api/references/{key}/fix", json={"section": "핵심 특징", "original": "여성 영웅", "hidden": True},
+                      headers=teacher).status_code == 200
+
+    assert shown()["개요"] == ["갈래: 영웅 소설", "시점: 전지적 작가 시점(서술자 개입)"]  # 학생 화면에 바로
+    assert "여성 영웅" not in shown()["핵심 특징"]
+    items = {s["name"]: s["items"] for s in client.get(f"/api/references/{key}").json()["sections"]}
+    assert items["개요"][1] == {"original": "시점: 전지적 작가 시점", "text": "시점: 전지적 작가 시점(서술자 개입)",
+                                "hidden": False, "suspect": None}
+    assert items["핵심 특징"][0]["hidden"] is True
+    assert ref["meta"]["시점"] == "전지적 작가 시점"  # 원본 정리는 그대로
+    # 원래대로: 원래 글로 돌리고 숨기지 않으면 고친 기록이 지워집니다
+    client.put(f"/api/references/{key}/fix", json={**fix, "text": fix["original"]}, headers=teacher)
+    client.put(f"/api/references/{key}/fix", json={"section": "핵심 특징", "original": "여성 영웅", "hidden": False}, headers=teacher)
+    assert shown()["개요"][1] == "시점: 전지적 작가 시점" and "여성 영웅" in shown()["핵심 특징"]
+    assert client.put(f"/api/references/{key}/fix", json={**fix, "original": "없는 항목"}, headers=teacher).status_code == 404
+    assert client.put("/api/references/nope/fix", json=fix, headers=teacher).status_code == 404
+    # 고친 내용은 분석 결과 폴더에 남아 다시 켜도 그대로입니다
+    client.put(f"/api/references/{key}/fix", json=fix, headers=teacher)
+    again = TestClient(create_app(video_dir, data_dir, None, [ref]))
+    assert {s["name"]: s["items"] for s in again.get(f"/api/videos/{video_id}").json()["references"][0]["sections"]}["개요"][1] \
+        == fix["text"]
 
 
 def test_status_counts_what_students_get_for_each_lecture(tmp_path):

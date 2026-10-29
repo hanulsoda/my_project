@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>학원 정리 고치기</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-title" content="학습 플레이어">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
+</head>
+<body class="library" data-view="page">
+  <main class="app">
+    <header class="content-head"><a class="back" href="./">강의</a>
+      <div class="heading"><h1>학원 정리 고치기</h1><p id="view-sub" class="sub"></p></div>
+      <form class="tools" role="search" onsubmit="return false">
+        <input id="ref-search" type="search" aria-label="정리 찾기" placeholder="작품 찾기 (예: 홍계월전)">
+        <label class="switch-label"><input type="checkbox" id="suspect-only" class="switch" role="switch" checked> 의심 항목 있는 것만</label>
+      </form>
+    </header>
+    <nav class="sidebar" aria-label="보관함과 폴더"></nav>
+    <div class="content-body"><div class="list-page">
+      <p class="notice">학생이 요점 정리 탭에서 보는 학원 정리를 항목마다 고치거나 숨깁니다. 원본 정리 파일은 그대로 두고 고친 글과 숨긴 항목만 따로 저장해, 학생 화면에 바로 반영합니다. 고치려면 선생님 열쇠가 필요합니다(이 브라우저에 기억).</p>
+      <form id="key-form" class="note-form" hidden>
+        <input id="teacher-key" type="password" autocomplete="off" aria-label="선생님 열쇠" placeholder="선생님 열쇠">
+        <button type="submit">열쇠 넣기</button>
+      </form>
+      <p id="fix-status" class="notice" aria-live="polite"></p>
+      <ul id="ref-list" class="found-list"></ul>
+      <section id="ref-detail" hidden></section>
+    </div></div>
+  </main>
+  <script src="common.js"></script>
+  <script>
+    // 학원 정리 고치기(선생님용, 학생 사이드바에는 없음): 정리를 찾아 항목마다 고치기·숨기기·원래대로.
+    // 의심 항목(너무 긴 항목, 한 단계에 내용이 몰림)은 표시해 둡니다. 저장은 X-Teacher-Key가 맞아야 됩니다.
+    const $ = (elementId) => document.getElementById(elementId);
+    let refs = [];
+    const teacherKey = () => store.get("teacher-key") || "";
+    const say = (text) => { $("fix-status").textContent = text; };
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((videos) => fillSidebar(videos, { here: "" }));
+
+    $("key-form").onsubmit = (e) => {
+      e.preventDefault();
+      if (!$("teacher-key").value.trim()) return;
+      store.set("teacher-key", $("teacher-key").value.trim());
+      $("teacher-key").value = "";
+      $("key-form").hidden = true;
+      say("열쇠를 넣었습니다. 다시 저장해 주세요.");
+    };
+
+    function renderList() {
+      const words = $("ref-search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const shown = refs.filter((r) => (!$("suspect-only").checked || r.suspects)
+                                       && words.every((w) => `${r.grade} ${r.title}`.toLowerCase().includes(w)));
+      const flagged = refs.filter((r) => r.suspects).length;
+      $("view-sub").textContent = `학원 정리 ${refs.length.toLocaleString()}개 · 의심 항목 있는 정리 ${flagged.toLocaleString()}개`;
+      $("ref-list").replaceChildren(...shown.slice(0, 50).map((r) => el("li", {},
+        el("button", { type: "button", class: "link", onclick: () => openRef(r.key) }, `${r.grade} · ${r.title}`),
+        ...(r.suspects ? [" ", el("span", { class: "chip warn" }, `의심 ${r.suspects}`)] : []))));
+      if (!shown.length) $("ref-list").append(el("li", { class: "notice" }, "찾은 정리가 없습니다."));
+    }
+    $("ref-search").oninput = renderList;
+    $("suspect-only").onchange = renderList;
+
+    async function openRef(key) {
+      const res = await fetch(`/api/references/${key}`);
+      if (!res.ok) return say("정리를 불러오지 못했습니다.");
+      renderDetail(await res.json());
+    }
+
+    async function save(key, body) {
+      if (!teacherKey()) {
+        $("key-form").hidden = false;
+        return say("고치려면 선생님 열쇠가 필요합니다. 열쇠를 넣어 주세요.");
+      }
+      const res = await fetch(`/api/references/${key}/fix`, {
+        method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() }, body: JSON.stringify(body) });
+      if (res.status === 403) {
+        localStorage.removeItem("teacher-key");
+        $("key-form").hidden = false;
+        return say("선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.");
+      }
+      if (!res.ok) return say("저장하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      renderDetail(await res.json());
+      say("저장했습니다. 학생 화면에 바로 나옵니다.");
+    }
+
+    function itemCard(key, section, it) {
+      const area = el("textarea", { rows: String(Math.min(8, Math.ceil(it.text.length / 45) + 1)), "aria-label": `${section} 항목 고치기` });
+      area.value = it.text;
+      const changed = it.text !== it.original;
+      return el("article", { class: it.hidden ? "fix-item hidden-item" : "fix-item" },
+        el("p", { class: "fix-flags" }, ...(it.suspect ? [el("span", { class: "chip warn" }, it.suspect)] : []),
+          ...(changed ? [el("span", { class: "chip" }, "고침")] : []), ...(it.hidden ? [el("span", { class: "chip" }, "숨김")] : [])),
+        area,
+        ...(changed ? [el("p", { class: "fix-original" }, `원래 글: ${it.original}`)] : []),
+        el("div", { class: "quiz-actions" },
+          el("button", { type: "button", class: "retry", onclick: () => save(key, { section, original: it.original, text: area.value }) }, "저장"),
+          el("button", { type: "button", class: "more", onclick: () => save(key, { section, original: it.original, hidden: !it.hidden }) },
+            it.hidden ? "다시 보이기" : "숨기기"),
+          ...(changed || it.hidden ? [el("button", { type: "button", class: "more",
+            onclick: () => save(key, { section, original: it.original, text: it.original, hidden: false }) }, "원래대로")] : [])));
+    }
+
+    function renderDetail(ref) {
+      $("ref-list").hidden = true;
+      $("ref-detail").hidden = false;
+      $("ref-detail").replaceChildren(
+        el("button", { type: "button", class: "more", onclick: () => { $("ref-detail").hidden = true; $("ref-list").hidden = false; } }, "‹ 정리 목록"),
+        el("h2", {}, `${ref.grade} 「${ref.title}」`),
+        ...ref.sections.flatMap((s) => [el("h3", {}, s.name), ...s.items.map((it) => itemCard(ref.key, s.name, it))]));
+    }
+
+    fetch("/api/references").then((r) => r.json()).then((list) => { refs = list; renderList(); });
+  </script>
+</body>
+</html>

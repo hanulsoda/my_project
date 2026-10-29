@@ -1,4 +1,4 @@
-from academy.references import find_references, reference_quiz, reference_sections, reference_text
+from academy.references import find_references, ref_key, reference_quiz, reference_sections, reference_text, suspects
 
 POEM = {"title": "1-1.(2)성난 풀잎", "grade": "고2", "meta": {"갈래": "현대 수필", "주제": "자연의 순리"},
         "features": [{"num": "①", "text": "도덕경을 인용함"}],
@@ -117,6 +117,23 @@ def test_school_level_in_the_folder_picks_the_matching_grade_when_no_grade_numbe
     found = find_references("중등부/천재(노)/1단원 동백꽃 정리", [], [high, middle])
 
     assert [r["source"] for r in found] == ["중2 「동백꽃」"]
+
+
+def test_summaries_carry_a_stable_key_and_flag_items_a_teacher_should_check():
+    long = "가" * 260
+    ref = {"title": "1-1.(2)성난 풀잎", "grade": "고2", "meta": {"갈래": "현대 수필"},
+           "features": [{"text": long}, {"text": "짧은 특징"}],
+           "stages": [{"label": "발단", "bullets": []}, {"label": "전개", "bullets": ["가", "나", "다", "라"]},
+                      {"label": "결말", "bullets": []}]}
+
+    found = find_references("고2/성난 풀잎 강의", [], [ref])
+
+    assert found[0]["key"] == ref_key(ref) and len(ref_key(ref)) == 10
+    assert ref_key(ref) != ref_key({**ref, "grade": "고1"})  # 같은 작품도 학년이 다르면 다른 정리
+    # 학생에게 보이는 항목 가운데(깨진 기호·머리글 꼬리·중복·빈 단계는 이미 자동으로 정리) 선생님이 볼 만한 것
+    assert suspects(ref) == {"핵심 특징": {long: "너무 긴 항목(260자)"},
+                             "구조": {"전개: 가 / 나 / 다 / 라": "한 단계에 내용이 몰림(빈 단계: 발단, 결말)"}}
+    assert suspects({**ref, "features": [{"text": "짧은 특징"}], "stages": []}) == {}
 
 
 def test_summaries_with_only_a_title_are_not_used():

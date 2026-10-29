@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from academy.library import find_videos, load_analysis
-from academy.references import find_references, load_references
+from academy.references import find_references, load_references, ref_key, reference_sections, suspects
 from academy.timelink import link_times
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -55,6 +55,13 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     history: list[Turn] = Field(default=[], max_length=20)
     current_time: float | None = None
+
+
+class FixRequest(BaseModel):
+    section: str = Field(max_length=50)
+    original: str = Field(max_length=5000)
+    text: str | None = Field(None, max_length=5000)
+    hidden: bool | None = None
 
 
 class PicksRequest(BaseModel):
@@ -176,7 +183,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def academy_summaries(video):
         if video["id"] not in matched:
             # 빈칸 문제는 퀴즈 탭에서 풀도록 요점 정리에서는 뺍니다.
-            matched[video["id"]] = [{"source": r["source"], "quiz": r["quiz"],
+            matched[video["id"]] = [{"source": r["source"], "key": r["key"], "quiz": r["quiz"],
                                      "sections": [s for s in r["sections"] if s["name"] != "빈칸 문제"]}
                                     for r in find_references(video["title"], [], references)]
         return matched[video["id"]]
@@ -222,7 +229,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """말하지는 않았어도 목차·챕터 제목이나 학원 정리 항목에 낱말이 든 줄 [{"text", "time"}]"""
         lines = [(title, start) for start, title in entry["chapters"]]
         if not entry["guide"]:  # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니 챕터만 봅니다
-            lines += [(item, None) for r in academy_summaries(v) for s in r["sections"] for item in s["items"]]
+            lines += [(item, None) for r in fixed(academy_summaries(v)) for s in r["sections"] for item in s["items"]]
         return [{"text": text, "time": t} for text, t in lines if word in _norm(text)]
 
     def found_at(v, entry, positions, limit=5):
@@ -338,6 +345,79 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         tmp.replace(picks_path)
         return picks()
 
+    # ---- 학원 정리 고치기(선생님): 원본 정리는 그대로 두고, 고친 글·숨긴 항목만 DATA_DIR/.reference-fixes에 ----
+    # {정리 열쇠: {칸 이름: {원래 항목: {"text": 고친 글, "hidden": true}}}} — 학생에게 보낼 때 덮어씁니다.
+    fixes_path, fixes_lock = Path(data_dir) / ".reference-fixes", Lock()
+
+    def read_fixes():
+        try:
+            return json.loads(fixes_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def fixed(summaries):
+        fixes = read_fixes()
+        out = []
+        for r in summaries:
+            sections = []
+            for s in r["sections"]:
+                mine = fixes.get(r.get("key"), {}).get(s["name"], {})
+                items = [mine.get(i, {}).get("text", i) for i in s["items"] if not mine.get(i, {}).get("hidden")]
+                if items := [i for i in items if i]:
+                    sections.append({**s, "items": items})
+            out.append({**r, "sections": sections})
+        return out
+
+    def ref_by_key(key):
+        ref = next((r for r in references if ref_key(r) == key and reference_sections(r)), None)
+        if ref is None:
+            raise HTTPException(404, "학원 정리를 찾을 수 없습니다")
+        return ref
+
+    @app.get("/api/references")
+    def reference_list():
+        return [{"key": ref_key(r), "title": r["title"], "grade": r["grade"], "suspects": sum(len(v) for v in suspects(r).values())}
+                for r in references if reference_sections(r)]
+
+    @app.get("/api/references/{key}")
+    def reference_detail(key: str):
+        ref, fixes = ref_by_key(key), read_fixes().get(key, {})
+        flagged = suspects(ref)
+        return {"key": key, "title": ref["title"], "grade": ref["grade"], "sections": [
+            {"name": s["name"], "items": [{"original": i, "text": fixes.get(s["name"], {}).get(i, {}).get("text", i),
+                                           "hidden": bool(fixes.get(s["name"], {}).get(i, {}).get("hidden")),
+                                           "suspect": flagged.get(s["name"], {}).get(i)} for i in s["items"]]}
+            for s in reference_sections(ref) if s["name"] != "빈칸 문제"]}  # 빈칸 문제는 요점 정리가 아니라 퀴즈로 나갑니다
+
+    @app.put("/api/references/{key}/fix")
+    def fix_reference(key: str, req: FixRequest, request: Request):
+        require_teacher(request)
+        ref = ref_by_key(key)
+        if req.original not in next((s["items"] for s in reference_sections(ref) if s["name"] == req.section), []):
+            raise HTTPException(404, "그 항목을 찾을 수 없습니다")
+        with fixes_lock:
+            fixes = read_fixes()
+            entry = fixes.setdefault(key, {}).setdefault(req.section, {}).setdefault(req.original, {})
+            if req.text is not None:
+                entry["text"] = req.text.strip()
+            if req.hidden is not None:
+                entry["hidden"] = req.hidden
+            if entry.get("text") == req.original:  # 원래 글로 돌리면 고친 기록에서 뺍니다
+                del entry["text"]
+            if not entry.get("hidden"):
+                entry.pop("hidden", None)
+            for path in [(key, req.section, req.original), (key, req.section), (key,)]:  # 빈 칸은 지웁니다
+                node = fixes
+                for part in path[:-1]:
+                    node = node[part]
+                if not node[path[-1]]:
+                    del node[path[-1]]
+            fixes_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = fixes_path.with_name(fixes_path.name + ".tmp")
+            tmp.write_text(json.dumps(fixes, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(fixes_path)
+        return reference_detail(key)
+
     @app.get("/api/status")
     def status():
         """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 페이지만)과 자동 목차 진행률"""
@@ -375,7 +455,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             record_open(video_id, request.client.host if request.client else "")
         analysis = read_analysis(video_id)
         # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 대본에서 찾은 시간과 함께 보냅니다.
-        summaries = (link_times(academy_summaries(video), analysis.get("segments") or [])
+        summaries = (link_times(fixed(academy_summaries(video)), analysis.get("segments") or [])
                      if analysis and not analysis.get("guide") else [])
         if analysis:
             # 받아쓰기 대본과 화면 글자 원문은 틀린 곳이 많아 학생에게 보내지 않고, 질문하기·요점 정리에만 씁니다.

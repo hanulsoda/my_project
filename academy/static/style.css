@@ -312,6 +312,15 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .picks-note { margin: 0 8px 4px; color: var(--muted); font-size: 12px; }
 .picker { display: grid; gap: 8px; max-width: 560px; }
 .picker label { color: var(--muted); font-size: 13px; }
+/* 학원 정리 고치기(선생님): 항목마다 고칠 칸, 의심·고침·숨김 표시 */
+.chip { display: inline-block; margin-right: 6px; padding: 1px 8px; border-radius: 999px; background: var(--fill); color: var(--text); font-size: 12px; }
+.chip.warn { background: var(--highlight); }
+.fix-item { margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.fix-item.hidden-item { border-style: dashed; background: var(--bg); }
+.fix-item textarea { width: 100%; margin: 6px 0; resize: vertical; }
+.fix-flags:empty { display: none; }
+.fix-flags, .fix-original { margin: 0; color: var(--muted); font-size: 13px; }
+#ref-detail h3 { margin: 18px 0 8px; font-size: 14px; color: var(--muted); }
 /* 폴더 나무: 펼침 삼각형(›가 아래로 돌아감), 하위 폴더는 들여 씀 */
 .sidebar .row { display: flex; align-items: center; }
 .sidebar .row > a { flex: 1; min-width: 0; }
@@ -393,7 +402,7 @@ button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .found-list li > a:first-child { color: inherit; font-weight: 600; text-decoration: none; }
 .found-list .also { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 a.time { display: inline-block; text-decoration: none; }
-.more { margin: -8px 0 16px; }
+.found-list + .more { margin: -8px 0 16px; }  /* 찾은 결과 바로 아래 '더 보기' */
 
 /* 휴대폰: 사이드바가 첫 화면(아이폰 설정 앱 같은 묶음 목록), 폴더를 누르면 그 폴더 화면으로 들어갑니다 */
 @media (max-width: 760px) {
