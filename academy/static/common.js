@@ -141,6 +141,7 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
       link(`${prefix}#v/new`, "new", "새로 올라온 강의", freshVideos(videos).length),
       link("notes.html", "note", "내 메모", total("notes:")),
       link("review.html", "repeat", "틀린 문제 복습", dueCount()),  // 오늘 복습할 문제 수
+      link("move.html", "move", "기기 옮기기", 0),
     ].map((a) => el("li", {}, a))),
     el("h2", {}, "폴더"),
     el("ul", { class: "tree" }, ...top.map(node)));
@@ -170,6 +171,52 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
     for (let depth = 1; depth < parts.length; depth++) setOpen(parts.slice(0, depth).join("/"), true);
   };
   return { folders, reveal };
+}
+
+// ---- 기기 옮기기: 보낼 기록 모으기와 받은 기록 합치기 ----
+// 옮기는 것: 이어 보기(pos:), 메모(notes:), 틀린 문제(wrong:), 퀴즈 점수(score:), 공부 기록(study), 재생 속도(speed).
+// 선생님 열쇠와 화면 설정(목록 보기·펼친 폴더 등)은 옮기지 않습니다.
+const MOVABLE = /^(pos|notes|wrong|score):[0-9a-f]{12}$/;
+
+function collectRecords() {
+  let names = [];
+  try { names = Object.keys(localStorage); } catch {}
+  return Object.fromEntries(names.filter((k) => MOVABLE.test(k) || k === "study" || k === "speed").map((k) => [k, store.get(k)]));
+}
+
+// 받은 기록은 다른 기기가 보낸 것이라 모양을 확인하고, 이 기기 기록을 지우지 않고 합칩니다. 합친 개수를 돌려줍니다.
+function mergeRecords(data) {
+  const num = (x) => typeof x === "number" && Number.isFinite(x);
+  const counts = { pos: 0, notes: 0, wrong: 0, score: 0, study: 0 };
+  for (const [key, value] of Object.entries(data || {})) {
+    const kind = key.split(":")[0], mine = store.get(key);
+    if (kind === "pos" || kind === "score") {  // 더 나중에 본 진도·푼 점수
+      const ok = kind === "pos" ? num(value?.t) && num(value?.d) : num(value?.right) && num(value?.total);
+      if (MOVABLE.test(key) && ok && (!mine || (value.at || 0) > (mine.at || 0))) { store.set(key, value); counts[kind]++; }
+    } else if (kind === "notes" && MOVABLE.test(key) && Array.isArray(value)) {  // 메모는 둘 다(같은 시각·글은 한 번)
+      const all = [...(mine || []), ...value.filter((n) => num(n?.t) && typeof (n.text ?? "") === "string")];
+      const merged = [...new Map(all.map((n) => [`${n.t}|${n.text || ""}`, { t: n.t, text: n.text || "" }])).values()].sort((a, b) => a.t - b.t);
+      counts.notes += merged.length - (mine || []).length;
+      store.set(key, merged);
+    } else if (kind === "wrong" && MOVABLE.test(key) && Array.isArray(value)) {  // 틀린 문제는 복습이 더 나간 쪽
+      const items = new Map(wrongItems(key.slice(6)).map((w) => [w.k, w]));
+      for (const w of value.map((v) => (typeof v === "string" ? { k: v, stage: 0, due: 0 } : v))) {
+        if (typeof w?.k !== "string" || !num(w.stage) || !num(w.due)) continue;
+        if (!items.has(w.k)) counts.wrong++;
+        if (!items.has(w.k) || w.stage > items.get(w.k).stage) items.set(w.k, { k: w.k, stage: w.stage, due: w.due });
+      }
+      store.set(key, [...items.values()]);
+    } else if (key === "study" && value && typeof value === "object") {  // 날마다 큰 값: 두 번 받아도 늘지 않게
+      const days = store.get("study") || {};
+      for (const [day, seconds] of Object.entries(value)) {
+        if (/^\d{4}-\d\d-\d\d$/.test(day) && num(seconds) && seconds > (days[day] || 0)) { days[day] = seconds; counts.study++; }
+      }
+      store.set("study", days);
+    } else if (key === "speed" && num(value) && mine == null) {
+      store.set("speed", value);
+    }
+  }
+  return counts;
 }
 
 // ---- 퀴즈 카드: 플레이어와 '틀린 문제 복습'이 함께 씁니다 ----

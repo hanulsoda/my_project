@@ -64,6 +64,10 @@ class FixRequest(BaseModel):
     hidden: bool | None = None
 
 
+class TransferRequest(BaseModel):
+    data: dict
+
+
 class PicksRequest(BaseModel):
     ids: list[str] = Field(max_length=20)
     note: str = Field("", max_length=200)
@@ -318,19 +322,55 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # 열쇠를 정하지 않은 서버(teacher_key 없음)는 아무도 바꿀 수 없습니다. 분석 결과 폴더에 두어 매일 백업에 들어갑니다.
     picks_path = Path(data_dir) / ".teacher-picks"
 
-    misses = {}  # 기기 주소 → (열쇠를 틀린 횟수, 마지막으로 틀린 시각): 10번 틀리면 10분 동안 막습니다(마구 넣어 보기 막기)
+    # 마구 넣어 보기 막기: 기기마다 틀린 횟수를 세어 limit번 틀리면 10분 동안 429
+    misses = {"key": {}, "code": {}}  # 종류 → 기기 주소 → (틀린 횟수, 마지막으로 틀린 시각)
+
+    def guard(kind, request, limit, message):
+        host = request.client.host if request.client else ""
+        count, last = misses[kind].get(host, (0, 0))
+        if count >= limit and wall_clock() - last < 600:
+            raise HTTPException(429, message)
+        return host
+
+    def missed(kind, host):
+        count, last = misses[kind].get(host, (0, 0))
+        misses[kind][host] = (count + 1 if wall_clock() - last < 600 else 1, wall_clock())
 
     def require_teacher(request):
-        host = request.client.host if request.client else ""
-        count, last = misses.get(host, (0, 0))
-        recent = wall_clock() - last < 600
-        if count >= 10 and recent:
-            raise HTTPException(429, "선생님 열쇠를 여러 번 틀려 10분 동안 막았습니다")
+        host = guard("key", request, 10, "선생님 열쇠를 여러 번 틀려 10분 동안 막았습니다")
         given = request.headers.get("x-teacher-key", "")
         if not teacher_key or not secrets.compare_digest(given.encode(), teacher_key.encode()):
-            misses[host] = (count + 1 if recent else 1, wall_clock())
+            missed("key", host)
             raise HTTPException(403, "선생님 열쇠가 맞지 않습니다")
-        misses.pop(host, None)
+        misses["key"].pop(host, None)
+
+    # ---- 기기 옮기기: 학생 기록(메모·진도·틀린 문제 등)을 6자리 코드로 잠깐 맡겼다가 다른 기기가 한 번 찾아 갑니다 ----
+    # 서버 메모리에만 두고(파일에 남기지 않음) 10분이 지나거나 한 번 찾아 가면 지웁니다.
+    transfers = {}  # 코드 → (기록, 사라지는 시각)
+
+    @app.post("/api/transfer")
+    def start_transfer(req: TransferRequest):
+        if len(json.dumps(req.data, ensure_ascii=False).encode()) > 2_000_000:  # 2MB: 강의 3,900개의 진도를 다 담아도 0.3MB쯤
+            raise HTTPException(413, "기록이 너무 큽니다")
+        now = wall_clock()
+        for code in [c for c, (_, until) in transfers.items() if until < now]:
+            del transfers[code]
+        if len(transfers) >= 200:
+            raise HTTPException(503, "잠시 뒤 다시 해 주세요")
+        code = f"{secrets.randbelow(10**6):06d}"
+        while code in transfers:
+            code = f"{secrets.randbelow(10**6):06d}"
+        transfers[code] = (req.data, now + 600)
+        return {"code": code, "expires": int(now + 600)}
+
+    @app.post("/api/transfer/{code}")
+    def claim_transfer(code: str, request: Request):
+        host = guard("code", request, 20, "코드를 여러 번 틀려 10분 동안 막았습니다")
+        data, until = transfers.pop(code, (None, 0))
+        if data is None or until < wall_clock():
+            missed("code", host)
+            raise HTTPException(404, "코드가 없거나 시간이 지났습니다")
+        return {"data": data}
 
     @app.get("/api/picks")
     def picks():

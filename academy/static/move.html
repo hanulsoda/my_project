@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>기기 옮기기</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-title" content="학습 플레이어">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
+</head>
+<body class="library" data-view="page">
+  <main class="app">
+    <header class="content-head"><a class="back" href="./">강의</a>
+      <div class="heading"><h1>기기 옮기기</h1><p class="sub">로그인 없이 6자리 코드로 공부 기록을 다른 기기에 옮깁니다</p></div>
+    </header>
+    <nav class="sidebar" aria-label="보관함과 폴더"></nav>
+    <div class="content-body"><div class="list-page">
+      <section>
+        <h2>이 기기의 기록 보내기</h2>
+        <p id="send-summary" class="notice"></p>
+        <button type="button" id="send" class="retry">코드 만들기</button>
+        <p id="code" class="code" hidden></p>
+        <p id="send-status" class="notice" aria-live="polite"></p>
+      </section>
+      <section>
+        <h2>다른 기기의 기록 받기</h2>
+        <form id="receive-form" class="note-form">
+          <input id="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="7" aria-label="6자리 코드" placeholder="6자리 코드">
+          <button type="submit">받기</button>
+        </form>
+        <p id="receive-status" class="notice" aria-live="polite"></p>
+      </section>
+      <p class="notice">보내는 기기에서 코드를 만들고, 받는 기기에서 10분 안에 그 코드를 넣으세요. 코드는 한 번 쓰면 사라집니다.
+        받은 기록은 이 기기의 기록과 합칩니다(지우지 않음). 선생님 열쇠와 화면 설정은 옮기지 않습니다.</p>
+    </div></div>
+  </main>
+  <script src="common.js"></script>
+  <script>
+    // 기기 옮기기: 보내는 기기는 기록을 서버에 맡기고 6자리 코드를, 받는 기기는 그 코드로 한 번 찾아 와 합칩니다.
+    const $ = (elementId) => document.getElementById(elementId);
+    let videos = [];
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => { videos = list; fillSidebar(videos, { here: "move.html" }); });
+
+    const describe = (data) => {
+      const n = (prefix) => Object.keys(data).filter((k) => k.startsWith(prefix)).length;
+      const notes = Object.entries(data).filter(([k]) => k.startsWith("notes:")).reduce((s, [, v]) => s + (v?.length || 0), 0);
+      const wrong = Object.entries(data).filter(([k]) => k.startsWith("wrong:")).reduce((s, [, v]) => s + (v?.length || 0), 0);
+      return `메모 ${notes}개 · 이어 보기 ${n("pos:")}개 · 틀린 문제 ${wrong}개 · 퀴즈 점수 ${n("score:")}개 · 공부 기록 ${Object.keys(data.study || {}).length}일`;
+    };
+    $("send-summary").textContent = `보낼 기록: ${describe(collectRecords())}`;
+
+    let countdown = null;
+    $("send").onclick = async () => {
+      const res = await fetch("/api/transfer", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                 body: JSON.stringify({ data: collectRecords() }) });
+      if (!res.ok) return void ($("send-status").textContent = "코드를 만들지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      const { code, expires } = await res.json();
+      $("code").textContent = `${code.slice(0, 3)} ${code.slice(3)}`;
+      $("code").hidden = false;
+      clearInterval(countdown);
+      const tick = () => {
+        const left = Math.max(0, Math.round(expires - Date.now() / 1000));
+        $("send-status").textContent = left
+          ? `다른 기기의 '기록 받기'에 이 코드를 넣으세요. 남은 시간 ${fmt(left)}`
+          : "시간이 지나 코드가 사라졌습니다. 다시 만들어 주세요.";
+        if (!left) { clearInterval(countdown); $("code").hidden = true; }
+      };
+      tick();
+      countdown = setInterval(tick, 1000);
+    };
+
+    $("receive-form").onsubmit = async (e) => {
+      e.preventDefault();
+      const code = $("code-input").value.replace(/\D/g, "");
+      if (code.length !== 6) return void ($("receive-status").textContent = "6자리 숫자를 넣어 주세요.");
+      const res = await fetch(`/api/transfer/${code}`, { method: "POST" });
+      if (!res.ok) {
+        $("receive-status").textContent = res.status === 429 ? "코드를 여러 번 틀려 10분 동안 막혔습니다."
+          : "코드가 없거나 시간이 지났습니다. 보내는 기기에서 다시 만들어 주세요.";
+        return;
+      }
+      const got = mergeRecords((await res.json()).data);
+      $("code-input").value = "";
+      $("receive-status").textContent = `받았습니다: 메모 ${got.notes}개 · 이어 보기 ${got.pos}개 · 틀린 문제 ${got.wrong}개 · 퀴즈 점수 ${got.score}개 · 공부 기록 ${got.study}일`;
+      $("send-summary").textContent = `보낼 기록: ${describe(collectRecords())}`;
+      fillSidebar(videos, { here: "move.html" });
+    };
+  </script>
+</body>
+</html>

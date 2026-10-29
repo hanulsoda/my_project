@@ -44,6 +44,7 @@
   --i-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='7' height='7' rx='1.5'/%3E%3Crect x='13' y='4' width='7' height='7' rx='1.5'/%3E%3Crect x='4' y='13' width='7' height='7' rx='1.5'/%3E%3Crect x='13' y='13' width='7' height='7' rx='1.5'/%3E%3C/svg%3E");
   --i-keyboard: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='6' width='18' height='12' rx='2'/%3E%3Cpath d='M7 10h.01M11 10h.01M15 10h.01M7 14h10'/%3E%3C/svg%3E");
   --i-star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3l-5.5 2.9 1-6.2L3 9.6l6.2-.9z'/%3E%3C/svg%3E");
+  --i-move: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8h14l-3-3'/%3E%3Cpath d='M20 16H6l3 3'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: dark) {
@@ -165,6 +166,7 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .i-grid { --i: var(--i-grid); }
 .i-keyboard { --i: var(--i-keyboard); }
 .i-star { --i: var(--i-star); }
+.i-move { --i: var(--i-move); }
 
 /* ---- 머리글(맥 도구 막대): 왼쪽 돌아가기 버튼, 제목, 오른쪽 아이콘 버튼. 위에 붙는 반투명 막대 ---- */
 .top {
@@ -312,6 +314,8 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .picks-note { margin: 0 8px 4px; color: var(--muted); font-size: 12px; }
 .picker { display: grid; gap: 8px; max-width: 560px; }
 .picker label { color: var(--muted); font-size: 13px; }
+/* 기기 옮기기: 크게 보이는 6자리 코드 */
+.code { margin: 12px 0 4px; font: 700 36px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 4px; font-variant-numeric: tabular-nums; }
 /* 학원 정리 고치기(선생님): 항목마다 고칠 칸, 의심·고침·숨김 표시 */
 .chip { display: inline-block; margin-right: 6px; padding: 1px 8px; border-radius: 999px; background: var(--fill); color: var(--text); font-size: 12px; }
 .chip.warn { background: var(--highlight); }
