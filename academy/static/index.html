@@ -23,6 +23,11 @@
           <button type="button" id="scope-spoken" aria-pressed="false">선생님 말</button>
         </div>
         <label class="switch-label"><input type="checkbox" id="guide-only" class="switch" role="switch"> 요점 정리만</label>
+        <div class="seg layout" role="group" aria-label="보기">
+          <button type="button" id="view-list" aria-pressed="true" aria-label="목록 보기" title="목록 보기"><span class="icon i-list" aria-hidden="true"></span></button>
+          <button type="button" id="view-grid" aria-pressed="false" aria-label="그림 보기" title="그림 보기"><span class="icon i-grid" aria-hidden="true"></span></button>
+        </div>
+        <select id="sort" aria-label="정렬"><option value="name">이름순</option><option value="new">최근 올라온 순</option></select>
       </form>
     </header>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
@@ -48,7 +53,9 @@
     search.value = saved.q || "";
     guideOnly.checked = !!saved.guideOnly;
     let scope = saved.scope === "spoken" ? "spoken" : "title";
-    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope });
+    let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
+    $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
+    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value });
     let folders = [], total = 0, loaded = false, showingFound = false;
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
 
@@ -151,6 +158,26 @@
     window.onhashchange = () => { render(); scrollTo(0, 0); };
     setScope(scope);
 
+    function setLayout(next) {
+      layout = next;
+      $("view-list").setAttribute("aria-pressed", String(layout === "list"));
+      $("view-grid").setAttribute("aria-pressed", String(layout === "grid"));
+      document.querySelector(".content-body").classList.toggle("grid", layout === "grid");
+      save();
+    }
+    $("view-list").onclick = () => setLayout("list");
+    $("view-grid").onclick = () => setLayout("grid");
+    setLayout(layout);
+
+    // 정렬: 묶음(고1·고2 등) 안에서 이름순(목록 그대로, '2강 < 10강') 또는 NAS에 최근 올라온 순
+    function sortItems() {
+      const byNew = $("sort").value === "new";
+      for (const group of folders.flatMap((f) => f.groups)) {
+        group.ul.append(...[...group.items].sort((a, b) => (byNew ? b.added - a.added : 0) || a.index - b.index).map((item) => item.li));
+      }
+    }
+    $("sort").onchange = () => { sortItems(); save(); };
+
     // 선생님 말에서 찾기: 선생님이 그 낱말을 말한 강의와 시각(받아쓰기 대본에서 찾음)
     $("tools").onsubmit = async (e) => {
       e.preventDefault();
@@ -234,12 +261,12 @@
         }
         const groups = [...byGroup].map(([group, entries]) => {
           const ul = el("ul", { class: "video-list" });
-          const items = entries.map(({ v, rest }) => {
+          const items = entries.map(({ v, rest }, index) => {
             const li = el("li", {}, lectureLink(v, rest.slice(0, -1).join(" · ")));
             ul.append(li);
-            return { li, key: norm(v.title), guide: v.guide };
+            return { li, key: norm(v.title), guide: v.guide, added: v.added || 0, index };
           });
-          return { box: el("div", { class: "group" }, ...(group ? [el("h3", {}, group)] : []), ul), items };
+          return { box: el("div", { class: "group" }, ...(group ? [el("h3", {}, group)] : []), ul), ul, items };
         });
         const head = el("h2", { class: "folder-name" }, name);
         const box = el("section", { class: "folder", "aria-label": name }, head, ...groups.map((g) => g.box));
@@ -250,6 +277,7 @@
         return { name, box, head, link, groups, size: list.length, seen };
       });
       loaded = true;
+      sortItems();
       render();
     });
   </script>
