@@ -57,7 +57,13 @@ class AskRequest(BaseModel):
     current_time: float | None = None
 
 
-def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=()) -> FastAPI:
+class PicksRequest(BaseModel):
+    ids: list[str] = Field(max_length=20)
+    note: str = Field("", max_length=200)
+
+
+def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=(),
+               teacher_key=None) -> FastAPI:
     """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다."""
     @asynccontextmanager
     async def lifespan(app):
@@ -301,6 +307,37 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 "top": [{"id": i, "title": titles.get(i, "(목록에 없는 강의)"), "opens": opens[i], "devices": len(devices[i])}
                         for i in top]}
 
+    # ---- 선생님이 고른 '이번 주 강의': 누구나 보고, 바꾸는 것은 선생님 열쇠(X-Teacher-Key)가 있어야 합니다 ----
+    # 열쇠를 정하지 않은 서버(teacher_key 없음)는 아무도 바꿀 수 없습니다. 분석 결과 폴더에 두어 매일 백업에 들어갑니다.
+    picks_path = Path(data_dir) / ".teacher-picks"
+
+    def require_teacher(request):
+        given = request.headers.get("x-teacher-key", "")
+        if not teacher_key or not secrets.compare_digest(given.encode(), teacher_key.encode()):
+            raise HTTPException(403, "선생님 열쇠가 맞지 않습니다")
+
+    @app.get("/api/picks")
+    def picks():
+        try:
+            saved = json.loads(picks_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            saved = {}
+        by_id = current_library()["by_id"]
+        return {"note": saved.get("note", ""), "at": saved.get("at"),
+                "lectures": [{"id": i, "title": by_id[i]["title"]} for i in saved.get("ids", []) if i in by_id]}
+
+    @app.put("/api/picks")
+    def set_picks(req: PicksRequest, request: Request):
+        require_teacher(request)
+        for video_id in req.ids:
+            get_video(video_id)  # 없는 강의면 404
+        picks_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = picks_path.with_name(picks_path.name + ".tmp")
+        tmp.write_text(json.dumps({"ids": list(dict.fromkeys(req.ids)), "note": req.note.strip(), "at": int(wall_clock())},
+                                  ensure_ascii=False), encoding="utf-8")
+        tmp.replace(picks_path)
+        return picks()
+
     @app.get("/api/status")
     def status():
         """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 페이지만)과 자동 목차 진행률"""
@@ -448,9 +485,18 @@ def _claude_answer():
     return answer
 
 
+def _teacher_key(path):
+    """선생님 열쇠 파일(TEACHER_KEY_FILE)의 글. 파일이 없거나 비었으면 None: 아무도 '이번 주 강의' 등을 바꿀 수 없습니다."""
+    try:
+        return Path(path).read_text(encoding="utf-8").strip() or None if path else None
+    except OSError:
+        return None
+
+
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
                  None,  # 질문하기는 Claude API 크레딧을 써서 막아 둡니다. 다시 열려면 _claude_answer()를 넘깁니다.
                  load_references(os.environ.get("REFERENCES_FILE")),
                  os.environ.get("LOG_DIR"),
-                 tuple(filter(None, os.environ.get("USAGE_IGNORE", "").split(","))))  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
+                 tuple(filter(None, os.environ.get("USAGE_IGNORE", "").split(","))),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
+                 _teacher_key(os.environ.get("TEACHER_KEY_FILE")))

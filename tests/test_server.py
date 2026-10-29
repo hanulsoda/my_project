@@ -408,6 +408,33 @@ def test_status_counts_lecture_opens_for_teachers_without_device_addresses(tmp_p
     assert len(log.splitlines()) == 4 and "10.0.0." not in log  # 기기 주소는 남기지 않습니다
 
 
+def test_teacher_picks_need_the_teacher_key_and_are_shown_to_everyone(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    key = {"X-Teacher-Key": "s3cret-key"}
+
+    closed = TestClient(create_app(video_dir, data_dir, None))  # 열쇠를 정하지 않은 서버는 아무도 바꿀 수 없습니다
+    assert closed.put("/api/picks", json={"ids": [ids["1강"]]}, headers=key).status_code == 403
+    client = TestClient(create_app(video_dir, data_dir, None, teacher_key="s3cret-key"))
+    assert client.put("/api/picks", json={"ids": [ids["1강"]]}).status_code == 403
+    assert client.put("/api/picks", json={"ids": [ids["1강"]]}, headers={"X-Teacher-Key": "guess"}).status_code == 403
+    assert client.get("/api/picks").json() == {"note": "", "at": None, "lectures": []}
+
+    saved = client.put("/api/picks", json={"ids": [ids["2강"], ids["1강"], ids["2강"]], "note": " 기말 대비 "}, headers=key)
+
+    assert saved.status_code == 200
+    picks = client.get("/api/picks").json()
+    assert picks["lectures"] == [{"id": ids["2강"], "title": "2강"}, {"id": ids["1강"], "title": "1강"}]  # 고른 순서, 겹친 것은 한 번
+    assert picks["note"] == "기말 대비" and picks["at"]
+    assert client.put("/api/picks", json={"ids": ["nope"]}, headers=key).status_code == 404
+    assert client.put("/api/picks", json={"ids": [ids["1강"]] * 21}, headers=key).status_code == 422  # 많아야 20개
+    # 서버를 다시 켜도 남습니다(분석 결과 폴더에 저장되어 매일 백업에도 들어갑니다)
+    assert TestClient(create_app(video_dir, data_dir, None)).get("/api/picks").json()["lectures"] == picks["lectures"]
+
+
 def test_status_counts_what_students_get_for_each_lecture(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()

@@ -71,6 +71,21 @@ function weekCard() {
     el("p", { class: "streak" }, streak ? `${streak}일째 이어서 공부하는 중` : "오늘 강의를 보면 기록이 시작됩니다"));
 }
 
+// 선생님이 고른 '이번 주 강의'(사이드바 맨 위). 한 화면에서 한 번만 불러오고, 선생님이 바꾼 뒤에는 picksLoad = null로 다시.
+let picksLoad = null;
+function picksSection() {
+  const box = el("section", { class: "picks", "aria-label": "이번 주 강의", hidden: "" });
+  picksLoad ??= fetch("/api/picks").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  picksLoad.then((picks) => {
+    if (!picks?.lectures.length) return;
+    box.replaceChildren(el("h2", {}, "이번 주 강의"), ...(picks.note ? [el("p", { class: "picks-note" }, picks.note)] : []),
+      el("ul", {}, ...picks.lectures.map((l) => el("li", {}, el("a", { href: `watch.html?id=${l.id}` },
+        el("span", { class: "icon i-star", "aria-hidden": "true" }), el("span", { class: "name" }, l.title.split("/").pop()))))));
+    box.hidden = false;
+  });
+  return box;
+}
+
 // prefix: 강의 목록 화면 안이면 "", 다른 화면이면 "./"(강의 목록으로 가서 그 화면을 엽니다). here: 지금 화면의 링크 주소.
 // 폴더는 Finder처럼 세 단계까지 펼칩니다(2022개정 ▸ 고1 ▸ 미래엔). 펼친 폴더는 브라우저에 기억합니다.
 // 돌려주는 값: folders(폴더 경로 → 링크), reveal(경로)(그 폴더가 보이게 위 폴더들을 펼침) — 강의 목록이 고른 폴더를 표시할 때 씁니다.
@@ -119,6 +134,7 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
   document.querySelector(".sidebar").replaceChildren(
     el("p", { class: "app-name" }, el("img", { src: "icon-180.png", alt: "", width: "22", height: "22" }), "학습 플레이어"),
     weekCard(),
+    picksSection(),
     el("h2", {}, "보관함"),
     el("ul", {}, ...[
       link(`${prefix}#v/recent`, "clock", "이어 보기", recentVideos(videos).length),
