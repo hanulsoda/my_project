@@ -38,6 +38,7 @@
         </div>
         <p id="now" class="now"></p>
         <div id="speed" class="speed" role="group" aria-label="재생 속도"></div>
+        <button type="button" id="loop-btn" class="loop" aria-pressed="false" title="구간 반복 (R)"><span class="icon i-repeat" aria-hidden="true"></span><span id="loop-label">구간 반복</span></button>
       </div>
       <p id="status" class="status" aria-live="polite"></p>
     </section>
@@ -101,6 +102,7 @@
       <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>이전·다음 챕터</dd>
       <dt><kbd>P</kbd> <kbd>N</kbd></dt><dd>같은 폴더의 이전·다음 강의</dd>
       <dt><kbd>B</kbd></dt><dd>지금 장면 북마크</dd>
+      <dt><kbd>R</kbd></dt><dd>구간 반복: 시작점 → 끝점(반복 시작) → 끄기</dd>
       <dt><kbd>?</kbd></dt><dd>이 도움말</dd>
     </dl>
     <form method="dialog"><button type="submit">닫기</button></form>

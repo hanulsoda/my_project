@@ -347,6 +347,31 @@ $("bookmark-btn").onclick = () => {
 };
 renderNotes();
 
+// ---- 구간 반복: 한 번 누르면 시작점, 두 번째는 끝점(반복 시작), 세 번째는 끄기. 어려운 설명을 여러 번 들을 때 ----
+let loopStart = null, loopEnd = null;
+function stepLoop() {
+  const t = video.currentTime;
+  if (loopStart === null) {
+    loopStart = t;
+    $("loop-label").textContent = `끝점 찍기 (시작 ${fmt(t)})`;
+  } else if (loopEnd === null) {
+    if (t <= loopStart + 1) {
+      $("status").textContent = `끝점은 시작점(${fmt(loopStart)})보다 뒤에서 찍어 주세요.`;
+      return;
+    }
+    loopEnd = t;
+    $("loop-label").textContent = `반복 ${fmt(loopStart)}–${fmt(loopEnd)}`;
+    $("loop-btn").setAttribute("aria-pressed", "true");
+    video.currentTime = loopStart;
+  } else {
+    loopStart = loopEnd = null;
+    $("loop-label").textContent = "구간 반복";
+    $("loop-btn").setAttribute("aria-pressed", "false");
+  }
+}
+$("loop-btn").onclick = stepLoop;
+video.addEventListener("timeupdate", () => { if (loopEnd !== null && video.currentTime >= loopEnd) video.currentTime = loopStart; });
+
 // ---- 공부 기록: 재생 중에 흐른 시간을 모아 두었다가 멈출 때·15초마다·화면을 떠날 때 저장합니다(사이드바 '이번 주 공부') ----
 let studyTick = null, studyUnsaved = 0;
 const saveStudy = () => {
@@ -407,6 +432,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "?") $("shortcuts").showModal();
   // 글자 단축키는 키 자리(code)로 봅니다: 한글 자판(ㅠ·ㅜ·ㅔ)일 때도 같은 키로 됩니다.
   else if (e.code === "KeyB") $("bookmark-btn").click();
+  else if (e.code === "KeyR") stepLoop();
   else if (e.code === "KeyN" && !$("next-lecture").hidden) location.href = $("next-lecture").href;
   else if (e.code === "KeyP" && !$("prev-lecture").hidden) location.href = $("prev-lecture").href;
   else return;
