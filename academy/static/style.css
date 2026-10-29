@@ -42,6 +42,7 @@
   --i-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 5l11 7-11 7z'/%3E%3C/svg%3E");
   --i-list: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6h11M9 12h11M9 18h11'/%3E%3Cpath d='M4 6h.01M4 12h.01M4 18h.01'/%3E%3C/svg%3E");
   --i-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='7' height='7' rx='1.5'/%3E%3Crect x='13' y='4' width='7' height='7' rx='1.5'/%3E%3Crect x='4' y='13' width='7' height='7' rx='1.5'/%3E%3Crect x='13' y='13' width='7' height='7' rx='1.5'/%3E%3C/svg%3E");
+  --i-keyboard: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='6' width='18' height='12' rx='2'/%3E%3Cpath d='M7 10h.01M11 10h.01M15 10h.01M7 14h10'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: dark) {
@@ -161,6 +162,7 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .i-skip-forward { --i: var(--i-skip-forward); }
 .i-list { --i: var(--i-list); }
 .i-grid { --i: var(--i-grid); }
+.i-keyboard { --i: var(--i-keyboard); }
 
 /* ---- 머리글(맥 도구 막대): 왼쪽 돌아가기 버튼, 제목, 오른쪽 아이콘 버튼. 위에 붙는 반투명 막대 ---- */
 .top {
@@ -442,7 +444,7 @@ a.time { display: inline-block; text-decoration: none; }
 .next-card::after { content: ""; flex: none; width: 22px; height: 22px; background: var(--accent); -webkit-mask: var(--i-play) center / contain no-repeat; mask: var(--i-play) center / contain no-repeat; }
 .player video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; box-shadow: var(--shadow); }
 
-.chapter-bar { display: flex; gap: 2px; height: 12px; margin-top: 10px; }
+.chapter-bar { position: relative; display: flex; gap: 2px; height: 12px; margin-top: 10px; }
 .chapter-bar button {
   flex-basis: 0;
   padding: 0;
@@ -454,6 +456,20 @@ a.time { display: inline-block; text-decoration: none; }
 .chapter-bar button:hover { background: var(--accent-soft); }
 @media (pointer: coarse) { .chapter-bar { height: 24px; } }  /* 손가락으로 누르기 쉽게 */
 .chapter-bar button.active { background: var(--accent); }
+/* 챕터 막대 미리 보기: 막대 위에 그 챕터의 교재 화면과 시각·제목 */
+.peek { position: absolute; bottom: calc(100% + 8px); z-index: 3; width: 200px; padding: 6px; border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); pointer-events: none; }
+.peek img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 6px; background: var(--hover); }
+.peek-text { display: block; margin-top: 4px; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (pointer: coarse) { #shortcuts-btn { display: none; } }  /* 손가락으로 쓰는 휴대폰에는 키보드가 없습니다 */
+/* 단축키 도움말: 맥 시트처럼 가운데 카드 */
+.sheet { width: min(420px, calc(100% - 32px)); box-sizing: border-box; padding: 20px 24px; border: 0; border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); }
+.sheet::backdrop { background: rgba(0, 0, 0, 0.3); }
+.sheet h2 { margin: 0 0 14px; font-size: 17px; }
+.keys { display: grid; grid-template-columns: max-content 1fr; align-items: center; gap: 10px 16px; margin: 0 0 18px; }
+.keys dt { white-space: nowrap; }
+.keys dd { margin: 0; }
+kbd { display: inline-block; min-width: 1.4em; padding: 1px 6px; border: 1px solid var(--control); border-bottom-width: 2px; border-radius: 6px; background: var(--bg); font: 600 12px/1.6 inherit; text-align: center; }
+.sheet form { margin: 0; text-align: right; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
 .chapter-nav { display: inline-flex; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); box-shadow: var(--raised); overflow: hidden; }
 .chapter-nav button { display: flex; align-items: center; justify-content: center; width: 40px; height: 32px; padding: 0; border: 0; background: none; cursor: pointer; }

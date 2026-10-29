@@ -109,16 +109,31 @@ function renderChapters(list, duration) {
       el("ul", {}, ...c.points.map((p) => el("li", {}, p))));
     const end = i + 1 < list.length ? list[i + 1].start : duration;
     const segment = el("button", {
-      title: `${fmt(c.start)} ${c.title}`,
       "aria-label": `${fmt(c.start)} ${c.title}로 이동`,
       style: `flex-grow: ${Math.max(end - c.start, 1)}`,
       onclick: () => seek(c.start),
+      onmouseenter: () => showPeek(c, segment), onfocus: () => showPeek(c, segment),
+      onmouseleave: hidePeek, onblur: hidePeek,
     });
     bar.append(segment);
     return { start: c.start, title: c.title, card, bar: segment };
   });
   return chapters.map((c) => c.card);
 }
+
+// 챕터 막대 미리 보기: 그 챕터가 시작할 때 펴 놓은 교재 화면(페이지 그림)과 시각·제목을 막대 위에 띄웁니다.
+function showPeek(chapter, segment) {
+  const peek = $("peek"), img = peek.querySelector("img");
+  const at = pages.findLastIndex((p) => p.start <= chapter.start + 20);  // 챕터 시작 직후에 화면을 넘기는 일이 많아 20초 여유
+  img.hidden = at < 0;
+  if (at >= 0) img.src = `/api/videos/${id}/pages/${at}.jpg`;
+  peek.querySelector(".peek-text").textContent = `${fmt(chapter.start)} ${chapter.title}`;
+  peek.hidden = false;
+  const bar = $("chapter-bar").getBoundingClientRect(), r = segment.getBoundingClientRect();
+  const left = r.left + r.width / 2 - bar.left - peek.offsetWidth / 2;
+  peek.style.left = `${Math.max(0, Math.min(left, bar.width - peek.offsetWidth))}px`;
+}
+function hidePeek() { $("peek").hidden = true; }
 
 // 이전·다음 챕터: 챕터에 들어온 지 3초가 넘었으면 '이전'은 그 챕터 처음으로 갑니다(음악 앱처럼).
 function jumpChapter(step) {
@@ -238,6 +253,7 @@ function printQuiz(quiz) {
   ] : []));
 }
 $("print-btn").onclick = () => window.print();
+$("shortcuts-btn").onclick = () => $("shortcuts").showModal();
 
 // ---- AI에게 질문하기 ----
 function linkify(text) {
@@ -381,13 +397,18 @@ setSpeed(store.get("speed") || 1);
 // 영상 자체 단축키보다 먼저 받아(true) 한 번만 움직이게 합니다.
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.closest("input, textarea, select")) return;
-  if (e.key === " " && e.target.closest("button")) return;
+  if ($("shortcuts").open || (e.key === " " && e.target.closest("button"))) return;
   if (e.key === " ") {
     if (!e.repeat) video.paused ? video.play().catch(() => {}) : video.pause();  // 꾹 누르고 있어도 반복하지 않게
   } else if (e.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);
   else if (e.key === "ArrowRight") video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
   else if (e.key === "[") jumpChapter(-1);
   else if (e.key === "]") jumpChapter(1);
+  else if (e.key === "?") $("shortcuts").showModal();
+  // 글자 단축키는 키 자리(code)로 봅니다: 한글 자판(ㅠ·ㅜ·ㅔ)일 때도 같은 키로 됩니다.
+  else if (e.code === "KeyB") $("bookmark-btn").click();
+  else if (e.code === "KeyN" && !$("next-lecture").hidden) location.href = $("next-lecture").href;
+  else if (e.code === "KeyP" && !$("prev-lecture").hidden) location.href = $("prev-lecture").href;
   else return;
   e.preventDefault();  // 스페이스·화살표로 화면이 움직이지 않게
 }, true);
