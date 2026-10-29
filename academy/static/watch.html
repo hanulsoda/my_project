@@ -29,7 +29,8 @@
         <video id="video" controls controlslist="nodownload" preload="metadata"></video>
         <a id="next-card" class="next-card" href="#" hidden><span><span class="label">다음 강의</span><strong id="next-title"></strong></span></a>
       </div>
-      <div id="chapter-bar" class="chapter-bar" hidden><div id="peek" class="peek" hidden><img alt=""><span class="peek-text"></span></div></div>
+      <!-- 챕터 막대는 마우스·손가락용: 같은 일을 하는 이전·다음 챕터 단추, 요점 정리의 챕터 시간, [ ] 키가 있어 화면 읽기·Tab에서는 뺍니다 -->
+      <div id="chapter-bar" class="chapter-bar" aria-hidden="true" hidden><div id="peek" class="peek" hidden><img alt=""><span class="peek-text"></span></div></div>
       <div class="controls">
         <div id="chapter-nav" class="chapter-nav" role="group" aria-label="챕터 이동" hidden>
           <button type="button" id="prev-chapter" aria-label="이전 챕터" title="이전 챕터 ( [ )"><span class="icon i-chev-left" aria-hidden="true"></span></button>
@@ -42,6 +43,7 @@
     </section>
 
     <section class="panel">
+      <h2 class="sr-only">학습 도구</h2>
       <nav class="tabs" role="tablist" aria-label="학습 도구">
         <button data-tab="guide" class="active" role="tab" id="tab-btn-guide" aria-controls="tab-guide" aria-selected="true">요점 정리</button>
         <button data-tab="pages" role="tab" id="tab-btn-pages" aria-controls="tab-pages" aria-selected="false">페이지</button>

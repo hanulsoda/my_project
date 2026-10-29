@@ -109,12 +109,11 @@ function renderChapters(list, duration) {
       el("h3", {}, timeButton(c.start), " ", c.title),
       el("ul", {}, ...c.points.map((p) => el("li", {}, p))));
     const end = i + 1 < list.length ? list[i + 1].start : duration;
-    const segment = el("button", {
-      "aria-label": `${fmt(c.start)} ${c.title}로 이동`,
+    const segment = el("span", {
+      class: "segment",
       style: `flex-grow: ${Math.max(end - c.start, 1)}`,
       onclick: () => seek(c.start),
-      onmouseenter: () => showPeek(c, segment), onfocus: () => showPeek(c, segment),
-      onmouseleave: hidePeek, onblur: hidePeek,
+      onmouseenter: () => showPeek(c, segment), onmouseleave: hidePeek,
     });
     bar.append(segment);
     return { start: c.start, title: c.title, card, bar: segment };

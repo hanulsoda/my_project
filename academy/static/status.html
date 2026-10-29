@@ -12,10 +12,10 @@
   <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 </head>
 <body class="library" data-view="page">
-  <div class="app">
+  <main class="app">
     <header class="content-head"><a class="back" href="./">강의</a><div class="heading"><h1>강의 현황</h1><p id="view-sub" class="sub"></p></div></header>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
-    <main class="content-body"><div class="list-page">
+    <div class="content-body"><div class="list-page">
     <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 페이지만 순서로 하나에만 셉니다.</p>
     <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
     <h2>자동 목차 진행</h2>
@@ -35,8 +35,8 @@
     </section>
     <h2>분석되지 않은 강의</h2>
     <ul id="unanalyzed" class="plain"></ul>
-    </div></main>
-  </div>
+    </div></div>
+  </main>
   <script src="common.js"></script>
   <script>
     fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((videos) => fillSidebar(videos, { here: "" }));

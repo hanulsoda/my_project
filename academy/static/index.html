@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 </head>
 <body class="library" data-view="home">
-  <div class="app">
+  <main class="app">
     <header class="content-head">
       <a class="back" href="#">강의</a>
       <div class="heading"><h1 id="view-title">강의</h1><p id="view-sub" class="sub"></p></div>
@@ -31,15 +31,15 @@
       </form>
     </header>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
-    <main class="content-body">
+    <div class="content-body">
       <p id="found-status" class="sr-only" aria-live="polite"></p>
       <section id="found" hidden></section>
       <section id="recent" hidden><h2>이어 보기</h2><ul id="recent-list" class="video-list"></ul></section>
       <section id="new" hidden><h2>새로 올라온 강의</h2><ul id="new-list" class="video-list"></ul></section>
       <p id="empty" class="notice" hidden></p>
       <div id="folders"></div>
-    </main>
-  </div>
+    </div>
+  </main>
   <script src="common.js"></script>
   <script>
     // 강의 목록: 왼쪽 사이드바(보관함·폴더)에서 고르면 오른쪽에 그 강의들이 나옵니다(맥 Finder처럼).
@@ -86,6 +86,7 @@
       let shown = 0, underPath = 0;
       for (const folder of folders) {
         const mine = !showingFound && (searching || folder.name === top);
+        if (mine && (!searching || folder.keys.some((key) => words.every((w) => key.includes(w))))) folder.build();
         let inFolder = 0;
         for (const group of folder.groups) {
           let inGroup = 0;
@@ -178,9 +179,9 @@
     setLayout(layout);
 
     // 정렬: 묶음(고1·고2 등) 안에서 이름순(목록 그대로, '2강 < 10강') 또는 NAS에 최근 올라온 순
-    function sortItems() {
+    function sortItems(groups = folders.flatMap((f) => f.groups)) {
       const byNew = $("sort").value === "new";
-      for (const group of folders.flatMap((f) => f.groups)) {
+      for (const group of groups) {
         group.ul.append(...[...group.items].sort((a, b) => (byNew ? b.added - a.added : 0) || a.index - b.index).map((item) => item.li));
       }
     }
@@ -267,24 +268,31 @@
           if (!byGroup.has(group)) byGroup.set(group, []);
           byGroup.get(group).push(entry);
         }
-        const groups = [...byGroup].map(([group, entries]) => {
-          const ul = el("ul", { class: "video-list" });
-          const items = entries.map(({ v, rest }, index) => {
-            const li = el("li", {}, lectureLink(v, rest.slice(0, -1).join(" · ")));
-            ul.append(li);
-            return { li, title: v.title, key: norm(v.title), guide: v.guide, added: v.added || 0, index };
-          });
-          return { box: el("div", { class: "group" }, ...(group ? [el("h3", {}, group)] : []), ul), ul, items };
-        });
         const head = el("h2", { class: "folder-name" }, name);
-        const box = el("section", { class: "folder", "aria-label": name }, head, ...groups.map((g) => g.box));
+        const box = el("section", { class: "folder", "aria-label": name }, head);
         $("folders").append(box);
         // 이 브라우저에서 보기 시작한 강의 수(시청 위치가 저장된 강의)
         const seen = list.filter(({ v }) => (store.get(`pos:${v.id}`)?.t || 0) > 5).length;
-        return { name, box, head, groups, seen };
+        // 강의 줄(요소 약 8개씩, 모두 합치면 3만 개 넘음)은 그 폴더를 열거나 찾기에 걸릴 때 처음 만듭니다: 휴대폰 첫 화면이 가볍게
+        const folder = { name, box, head, seen, groups: [], keys: list.map(({ v }) => norm(v.title)), built: false };
+        folder.build = () => {
+          if (folder.built) return;
+          folder.built = true;
+          folder.groups = [...byGroup].map(([group, entries]) => {
+            const ul = el("ul", { class: "video-list" });
+            const items = entries.map(({ v, rest }, index) => {
+              const li = el("li", {}, lectureLink(v, rest.slice(0, -1).join(" · ")));
+              ul.append(li);
+              return { li, title: v.title, key: norm(v.title), guide: v.guide, added: v.added || 0, index };
+            });
+            return { box: el("div", { class: "group" }, ...(group ? [el("h3", {}, group)] : []), ul), ul, items };
+          });
+          box.append(...folder.groups.map((g) => g.box));
+          sortItems(folder.groups);
+        };
+        return folder;
       });
       loaded = true;
-      sortItems();
       reveal();
       render();
     });

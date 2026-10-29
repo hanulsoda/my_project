@@ -180,6 +180,7 @@ button[type="submit"]:disabled { opacity: 0.6; }
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .top, .content-head { background: var(--surface); } }
 .top h1, .top .heading { flex: 1; min-width: 0; }
+.top .heading { min-height: 40px; }  /* 제목·위치 두 줄 자리를 미리 잡아, 불러온 뒤 화면이 밀리지 않게 */
 .top h1 { margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path { margin: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .back {
@@ -308,7 +309,7 @@ button[type="submit"]:disabled { opacity: 0.6; }
 /* 폴더 나무: 펼침 삼각형(›가 아래로 돌아감), 하위 폴더는 들여 씀 */
 .sidebar .row { display: flex; align-items: center; }
 .sidebar .row > a { flex: 1; min-width: 0; }
-.disclosure { flex: none; width: 18px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer; }
+.disclosure { flex: none; width: 24px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer; }
 button.disclosure::before { content: ""; display: block; width: 11px; height: 11px; margin: auto; background: var(--muted); -webkit-mask: var(--i-chev-right) center / contain no-repeat; mask: var(--i-chev-right) center / contain no-repeat; transition: transform 0.15s; }
 button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .sidebar .sub { padding-left: 14px; }
@@ -459,7 +460,7 @@ a.time { display: inline-block; text-decoration: none; }
 .player video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; box-shadow: var(--shadow); }
 
 .chapter-bar { position: relative; display: flex; gap: 2px; height: 12px; margin-top: 10px; }
-.chapter-bar button {
+.chapter-bar .segment {
   flex-basis: 0;
   padding: 0;
   border: 0;
@@ -467,9 +468,9 @@ a.time { display: inline-block; text-decoration: none; }
   background: var(--control);
   cursor: pointer;
 }
-.chapter-bar button:hover { background: var(--accent-soft); }
+.chapter-bar .segment:hover { background: var(--accent-soft); }
 @media (pointer: coarse) { .chapter-bar { height: 24px; } }  /* 손가락으로 누르기 쉽게 */
-.chapter-bar button.active { background: var(--accent); }
+.chapter-bar .segment.active { background: var(--accent); }
 /* 챕터 막대 미리 보기: 막대 위에 그 챕터의 교재 화면과 시각·제목 */
 .peek { position: absolute; bottom: calc(100% + 8px); z-index: 3; width: 200px; padding: 6px; border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); pointer-events: none; }
 .peek img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 6px; background: var(--hover); }
