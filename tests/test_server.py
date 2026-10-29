@@ -479,6 +479,34 @@ def test_moving_records_to_another_device_with_a_six_digit_code(tmp_path, monkey
     assert new.post(f"/api/transfer/{fresh}").status_code == 200  # 막힌 기기가 건드리지 못한 코드는 그대로
 
 
+def test_teachers_see_the_questions_students_miss_most(tmp_path):
+    video_dir, log_dir = tmp_path / "videos", tmp_path / "logs"
+    video_dir.mkdir()
+    log_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    app = create_app(video_dir, tmp_path / "data", None, log_dir=log_dir, usage_ignore=("10.0.0.9",))
+    a, b, c, me = (TestClient(app, client=(host, 1)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.9"))
+    answer = lambda client, name, question, right: client.post(
+        "/api/quiz-result", json={"id": ids[name], "key": question, "right": right}).status_code
+
+    for client, name, question, right in [(a, "1강", "Q1", False), (b, "1강", "Q1", False), (c, "1강", "Q1", True),
+                                          (a, "1강", "Q1", True),  # 다시 푼 것은 세지 않습니다(처음 푼 결과만)
+                                          (a, "1강", "Q2", True), (b, "1강", "Q2", True), (c, "1강", "Q2", True),
+                                          (a, "2강", "Q3", False), (b, "2강", "Q3", False),  # 2명만 푼 문제는 아직 빼고
+                                          (me, "1강", "Q2", False)]:  # 원장님 PC는 세지 않습니다
+        assert answer(client, name, question, right) == 204
+
+    quiz = a.get("/api/status").json()["quiz"]
+    # 3명 넘게 풀고 한 명이라도 틀린 문제를 정답률 낮은 순서로
+    assert quiz["hardest"] == [{"id": ids["1강"], "title": "1강", "question": "Q1", "attempts": 3, "right": 1}]
+    assert quiz["answered"] == 8
+    assert a.post("/api/quiz-result", json={"id": "nope", "key": "Q", "right": True}).status_code == 404
+    log = (log_dir / "quiz.log").read_text(encoding="utf-8")
+    assert "10.0.0." not in log
+
+
 def test_teachers_fix_or_hide_summary_items_without_touching_the_original(tmp_path):
     from academy.references import ref_key
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"

@@ -233,6 +233,9 @@ function wrongItems(videoId) {
 }
 
 function markWrong(videoId, key, wrong) {
+  // 선생님용 '많이 틀리는 문제' 통계: 강의·문제·맞음/틀림만 보냅니다(서버는 기기마다 처음 푼 결과만 셈). 실패해도 그만.
+  fetch("/api/quiz-result", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ id: videoId, key: key.slice(0, 1000), right: !wrong }) }).catch(() => {});
   let items = wrongItems(videoId);
   const item = items.find((w) => w.k === key);
   if (wrong) {

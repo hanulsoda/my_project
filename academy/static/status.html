@@ -47,6 +47,12 @@
       <div id="usage-week" class="bars usage-bars"></div>
       <p class="notice">학생 이름과 기기 주소는 남기지 않습니다. 플레이어에서 강의를 연 시각과, 기기를 알아볼 수 없게 바꾼 번호만 셉니다.</p>
     </section>
+    <section id="quiz-stats" hidden>
+      <h2>많이 틀리는 문제 (최근 30일)</h2>
+      <p id="quiz-summary" class="notice"></p>
+      <ol id="quiz-hardest" class="plain"></ol>
+      <p class="notice">기기마다 처음 푼 결과만 셉니다(다시 푼 것은 빼고). 세 기기 넘게 풀고 한 번이라도 틀린 문제를 정답률이 낮은 순서로 보여 줍니다. 빈칸 문제는 학생이 '알았어요·몰랐어요'로 스스로 고른 결과입니다.</p>
+    </section>
     <section id="ops" hidden>
       <h2>운영 기록</h2>
       <dl id="ops-lines" class="stats"></dl>
@@ -129,6 +135,15 @@
         const lines = [["마지막 백업", s.ops.backup], ["밤 작업", s.ops.night], ["새 강의 분석", s.ops.new_videos]];
         document.getElementById("ops-lines").replaceChildren(...lines.flatMap(([name, line]) => [el("dt", {}, name), el("dd", {}, line || "기록 없음")]));
         document.getElementById("ops").hidden = false;
+      }
+      if (s.quiz) {
+        document.getElementById("quiz-summary").textContent = s.quiz.answered
+          ? `학생들이 처음 푼 문제 ${s.quiz.answered.toLocaleString()}번`
+          : "아직 기록이 없습니다. 학생이 퀴즈를 풀면 그때부터 셉니다.";
+        document.getElementById("quiz-hardest").replaceChildren(...s.quiz.hardest.map((q) => el("li", {},
+          el("strong", {}, `정답률 ${Math.round((q.right / q.attempts) * 100)}%`), ` (${q.attempts}명 중 ${q.right}명) · `,
+          el("a", { href: `watch.html?id=${q.id}` }, q.title.split("/").pop()), ` · ${q.question.length > 120 ? `${q.question.slice(0, 120)}…` : q.question}`)));
+        document.getElementById("quiz-stats").hidden = false;
       }
       if (s.usage) {  // 이용 통계: 많이 연 강의 10개(기기 수 순)와 요일별 열기
         const u = s.usage, day = (iso) => new Date(`${iso}T00:00`).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });

@@ -64,6 +64,12 @@ class FixRequest(BaseModel):
     hidden: bool | None = None
 
 
+class QuizResult(BaseModel):
+    id: str = Field(max_length=32)
+    key: str = Field(min_length=1, max_length=1000)  # 문제 글(빈칸 문제는 지문과 답 문장)
+    right: bool
+
+
 class TransferRequest(BaseModel):
     data: dict
 
@@ -292,16 +298,47 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         with usage_lock, (Path(log_dir) / "usage.log").open("a", encoding="utf-8") as f:
             f.write(json.dumps({"t": int(wall_clock()), "id": video_id, "who": device(host)}) + "\n")
 
-    def usage_summary():
+    # ---- 많이 틀리는 문제: 퀴즈를 풀 때 강의·문제·맞음/틀림·기기 번호만 log_dir/quiz.log에(이용 통계와 같은 방식) ----
+    @app.post("/api/quiz-result", status_code=204)
+    def quiz_result(req: QuizResult, request: Request):
+        get_video(req.id)
+        host = request.client.host if request.client else ""
+        if not log_dir or host in usage_ignore:
+            return
+        with usage_lock, (Path(log_dir) / "quiz.log").open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": int(wall_clock()), "id": req.id, "k": req.key, "who": device(host), "right": req.right},
+                               ensure_ascii=False) + "\n")
+
+    def quiz_summary():
+        first = {}  # (기기, 강의, 문제) → 처음 푼 결과: 다시 푼 것은 정답률을 흐리므로 세지 않습니다
+        for row in read_lines(Path(log_dir) / "quiz.log"):
+            if row["t"] >= wall_clock() - 30 * 86400:
+                first.setdefault((row["who"], row["id"], row["k"]), row["right"])
+        tally = {}
+        for (_, video_id, key), right in first.items():
+            seen = tally.setdefault((video_id, key), [0, 0])
+            seen[0] += 1
+            seen[1] += right
+        titles = {v["id"]: v["title"] for v in current_library()["videos"]}
+        # 세 기기 넘게 풀고 한 번이라도 틀린 문제를 정답률 낮은 순서로 10개
+        hard = sorted(((n, r, i, k) for (i, k), (n, r) in tally.items() if n >= 3 and r < n), key=lambda x: (x[1] / x[0], -x[0]))
+        return {"answered": len(first), "hardest": [{"id": i, "title": titles.get(i, "(목록에 없는 강의)"), "question": k,
+                                                     "attempts": n, "right": r} for n, r, i, k in hard[:10]]}
+
+    def read_lines(path):  # JSON 한 줄씩 쌓은 기록(쓰다 끊긴 줄은 건너뜀)
         rows = []
         try:
-            for line in (Path(log_dir) / "usage.log").read_text(encoding="utf-8").splitlines():
+            for line in path.read_text(encoding="utf-8").splitlines():
                 try:
                     rows.append(json.loads(line))
                 except ValueError:
-                    pass  # 쓰다 끊긴 줄은 건너뜁니다
+                    pass
         except OSError:
             pass
+        return rows
+
+    def usage_summary():
+        rows = read_lines(Path(log_dir) / "usage.log")
         now = wall_clock()
         month = [r for r in rows if r["t"] >= now - 30 * 86400]
         opens, devices = Counter(r["id"] for r in month), {}
@@ -495,6 +532,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                             "night": _last_line(Path(log_dir) / "toc.log", dated=True),
                             "new_videos": _last_line(Path(log_dir) / "new-videos.log")}
             found["usage"] = usage_summary()
+            found["quiz"] = quiz_summary()
         return found
 
     @app.get("/api/videos/{video_id}")
