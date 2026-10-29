@@ -305,6 +305,13 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .sidebar .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .sidebar a[aria-current="page"] .n { color: inherit; }
+/* 폴더 나무: 펼침 삼각형(›가 아래로 돌아감), 하위 폴더는 들여 씀 */
+.sidebar .row { display: flex; align-items: center; }
+.sidebar .row > a { flex: 1; min-width: 0; }
+.disclosure { flex: none; width: 18px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer; }
+button.disclosure::before { content: ""; display: block; width: 11px; height: 11px; margin: auto; background: var(--muted); -webkit-mask: var(--i-chev-right) center / contain no-repeat; mask: var(--i-chev-right) center / contain no-repeat; transition: transform 0.15s; }
+button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
+.sidebar .sub { padding-left: 14px; }
 /* 이번 주 공부: 요일별 막대(오늘은 굵게), 합계, 며칠째 이어서 공부하는지 */
 .week { margin: 0 4px 6px; padding: 10px 12px; border-radius: 10px; background: rgba(127, 127, 127, 0.1); }
 .week-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 8px; color: var(--muted); font-size: 12px; }
@@ -397,8 +404,11 @@ a.time { display: inline-block; text-decoration: none; }
   .day .bar { height: 48px; }
   .sidebar h2 { margin: 18px 16px 6px; font-size: 13px; font-weight: 400; }
   .sidebar ul { border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .sidebar .sub { border-radius: 0; background: none; }
+  .sidebar .row { padding-left: 6px; }
+  .disclosure { width: 24px; height: 44px; }
   .sidebar a { min-height: 44px; padding: 0 14px; gap: 12px; border-radius: 0; font-size: 16px; }
-  .sidebar li + li > a, .sidebar li + li > a[aria-current="page"] { background: linear-gradient(var(--border), var(--border)) right top / calc(100% - 46px) 1px no-repeat; }
+  .sidebar li + li > a, .sidebar li + li > a[aria-current="page"], .sidebar li + li > .row, .sidebar .sub > li:first-child > .row { background: linear-gradient(var(--border), var(--border)) right top / calc(100% - 46px) 1px no-repeat; }
   .sidebar a::after { content: ""; flex: none; width: 14px; height: 14px; background: var(--control); -webkit-mask: var(--i-chev-right) center / contain no-repeat; mask: var(--i-chev-right) center / contain no-repeat; }
   .sidebar .icon { width: 20px; height: 20px; }
   .sidebar .n { font-size: 15px; }

@@ -28,8 +28,6 @@ const store = {
 };
 
 // ---- 왼쪽 사이드바(보관함·폴더): 강의 목록·내 메모·틀린 문제 복습·현황이 함께 씁니다 ----
-const folderOf = (title) => (title.includes("/") ? title.slice(0, title.indexOf("/")) : "기타");
-
 // 이어 보기: 다 보지 않은 강의를 최근에 본 순서로 5개
 function recentVideos(videos) {
   return videos.map((v) => ({ v, pos: store.get(`pos:${v.id}`) }))
@@ -74,15 +72,50 @@ function weekCard() {
 }
 
 // prefix: 강의 목록 화면 안이면 "", 다른 화면이면 "./"(강의 목록으로 가서 그 화면을 엽니다). here: 지금 화면의 링크 주소.
-// 돌려주는 값 {folders: Map(폴더 이름 → 링크)}는 강의 목록이 고른 폴더를 표시할 때 씁니다.
+// 폴더는 Finder처럼 세 단계까지 펼칩니다(2022개정 ▸ 고1 ▸ 미래엔). 펼친 폴더는 브라우저에 기억합니다.
+// 돌려주는 값: folders(폴더 경로 → 링크), reveal(경로)(그 폴더가 보이게 위 폴더들을 펼침) — 강의 목록이 고른 폴더를 표시할 때 씁니다.
 function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
   const total = (key) => savedLists(key).reduce((n, l) => n + l.items.length, 0);
   const link = (href, icon, name, n) => el("a", { href, ...(href === here ? { "aria-current": "page" } : {}) },
     el("span", { class: `icon i-${icon}`, "aria-hidden": "true" }), el("span", { class: "name" }, name),
     el("span", { class: "n" }, n ? n.toLocaleString() : ""));
-  const counts = new Map();
-  for (const v of videos) counts.set(folderOf(v.title), (counts.get(folderOf(v.title)) || 0) + 1);
-  const folders = new Map([...counts].map(([name, n]) => [name, link(`${prefix}#f/${name}`, "folder", name, n)]));
+  const tree = new Map();  // 폴더 경로 → {name, n: 그 아래 모든 강의 수, kids: 하위 폴더 경로}
+  for (const v of videos) {
+    const parts = v.title.includes("/") ? v.title.split("/").slice(0, -1) : ["기타"];
+    for (let depth = 1; depth <= Math.min(parts.length, 3); depth++) {
+      const path = parts.slice(0, depth).join("/");
+      if (!tree.has(path)) {
+        tree.set(path, { name: parts[depth - 1], n: 0, kids: [] });
+        if (depth > 1) tree.get(parts.slice(0, depth - 1).join("/")).kids.push(path);
+      }
+      tree.get(path).n++;
+    }
+  }
+  const opened = new Set(store.get("tree") || []);
+  const folders = new Map(), toggles = new Map();
+  const show = (path, open) => {
+    const t = toggles.get(path);
+    if (!t) return;
+    t.button.setAttribute("aria-expanded", String(open));
+    t.button.setAttribute("aria-label", `${tree.get(path).name} ${open ? "접기" : "펼치기"}`);
+    t.sub.hidden = !open;
+  };
+  const setOpen = (path, open) => {
+    if (open) opened.add(path); else opened.delete(path);
+    store.set("tree", [...opened]);
+    show(path, open);
+  };
+  const node = (path) => {
+    const { name, n, kids } = tree.get(path);
+    const a = link(`${prefix}#f/${path}`, "folder", name, n);
+    folders.set(path, a);
+    if (!kids.length) return el("li", {}, el("div", { class: "row" }, el("span", { class: "disclosure" }), a));
+    const sub = el("ul", { class: "sub" }, ...kids.map(node));
+    const button = el("button", { type: "button", class: "disclosure", onclick: () => setOpen(path, sub.hidden) });
+    toggles.set(path, { button, sub });
+    return el("li", {}, el("div", { class: "row" }, button, a), sub);
+  };
+  const top = [...tree.keys()].filter((path) => !path.includes("/"));
   document.querySelector(".sidebar").replaceChildren(
     el("p", { class: "app-name" }, el("img", { src: "icon-180.png", alt: "", width: "22", height: "22" }), "학습 플레이어"),
     weekCard(),
@@ -94,8 +127,13 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
       link("review.html", "repeat", "틀린 문제 복습", dueCount()),  // 오늘 복습할 문제 수
     ].map((a) => el("li", {}, a))),
     el("h2", {}, "폴더"),
-    el("ul", {}, ...[...folders.values()].map((a) => el("li", {}, a))));
-  return { folders };
+    el("ul", { class: "tree" }, ...top.map(node)));
+  for (const path of toggles.keys()) show(path, opened.has(path));
+  const reveal = (path) => {
+    const parts = path.split("/");
+    for (let depth = 1; depth < parts.length; depth++) setOpen(parts.slice(0, depth).join("/"), true);
+  };
+  return { folders, reveal };
 }
 
 // ---- 퀴즈 카드: 플레이어와 '틀린 문제 복습'이 함께 씁니다 ----

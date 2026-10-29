@@ -44,9 +44,10 @@ function render({ title, analysis, references = [], prev = null, next = null }) 
   const parts = title.split("/");
   $("title").textContent = parts.pop();
   $("path").textContent = parts.join(" · ");
-  const folder = parts[0] || "기타";
+  // 사이드바는 세 단계까지만 펼치므로, 더 깊은 강의는 셋째 단계 폴더로 돌아갑니다.
+  const folder = parts.length ? parts.slice(0, 3).join("/") : "기타";
   $("back").setAttribute("href", `./#f/${folder}`);
-  $("back").textContent = folder;
+  $("back").textContent = folder.split("/").pop();
   // 같은 폴더의 앞뒤 강의: 머리글 버튼, 그리고 영상이 끝나면 '다음 강의' 카드
   for (const [key, lecture, label] of [["prev", prev, "이전 강의"], ["next", next, "다음 강의"]]) {
     const link = $(`${key}-lecture`);

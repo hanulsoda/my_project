@@ -56,7 +56,7 @@
     let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
     $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
     const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value });
-    let folders = [], total = 0, loaded = false, showingFound = false;
+    let folders = [], total = 0, loaded = false, showingFound = false, side = null;
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
 
     function current() {  // 주소에서 지금 화면 {kind: home|recent|new|folder, name}
@@ -80,14 +80,19 @@
       const view = current();
       const words = scope === "title" ? search.value.trim().split(/\s+/).filter(Boolean).map(norm) : [];
       const searching = words.length > 0;
-      let shown = 0;
+      // 폴더 화면: 맨 위 폴더(2022개정)든 하위 폴더(2022개정/고1/미래엔)든 그 경로 아래 강의
+      const top = view.kind === "folder" ? view.name.split("/")[0] : null;
+      const inPath = (item) => searching || !view.name.includes("/") || item.title.startsWith(`${view.name}/`);
+      let shown = 0, underPath = 0;
       for (const folder of folders) {
-        const mine = !showingFound && (searching || (view.kind === "folder" && view.name === folder.name));
+        const mine = !showingFound && (searching || folder.name === top);
         let inFolder = 0;
         for (const group of folder.groups) {
           let inGroup = 0;
           for (const item of group.items) {
-            const hit = mine && words.every((w) => item.key.includes(w)) && (!guideOnly.checked || item.guide);
+            const here = mine && inPath(item);
+            underPath += here;
+            const hit = here && words.every((w) => item.key.includes(w)) && (!guideOnly.checked || item.guide);
             item.li.hidden = !hit;
             inGroup += hit;
           }
@@ -96,9 +101,10 @@
         }
         folder.box.hidden = !inFolder;
         folder.head.hidden = !searching;  // 여러 폴더에서 찾을 때만 폴더 이름을 위에 붙입니다
-        if (view.kind === "folder" && view.name === folder.name) folder.link.setAttribute("aria-current", "page");
-        else folder.link.removeAttribute("aria-current");
         shown += inFolder;
+      }
+      for (const [path, a] of side.folders) {
+        if (view.kind === "folder" && view.name === path) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
       }
       for (const a of document.querySelectorAll(".sidebar a[href^='#v/']")) {
         if (a.getAttribute("href") === `#v/${view.kind}`) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
@@ -108,11 +114,12 @@
       $("found").hidden = !showingFound;
       $("recent").hidden = !(listing && recent && ["home", "recent"].includes(view.kind));
       $("new").hidden = !(listing && fresh && ["home", "new"].includes(view.kind));
-      const folder = folders.find((f) => view.kind === "folder" && f.name === view.name);
+      const folder = folders.find((f) => f.name === top), parts = view.kind === "folder" ? view.name.split("/") : [];
       const [title, sub, empty] =
         showingFound ? ["선생님 말에서 찾기", `‘${search.value.trim()}’`, ""]
         : searching ? ["찾기 결과", `강의 ${shown.toLocaleString()}개 · ‘${search.value.trim()}’`, shown ? "" : "제목으로 찾은 강의가 없습니다."]
-        : folder ? [folder.name, `강의 ${folder.size.toLocaleString()}개${folder.seen ? ` · ${folder.seen}개 봄` : ""}`,
+        : folder ? [parts.at(-1), `${parts.length > 1 ? `${parts.slice(0, -1).join(" › ")} · ` : ""}강의 ${underPath.toLocaleString()}개`
+                    + (folder.seen && parts.length === 1 ? ` · ${folder.seen}개 봄` : ""),
                     shown ? "" : guideOnly.checked ? "이 폴더에는 요점 정리가 있는 강의가 없습니다." : "이 폴더에는 강의가 없습니다."]
         : view.kind === "recent" ? ["이어 보기", "다 보지 않은 강의를 최근에 본 순서로", recent ? "" : "다 보지 않은 강의가 없습니다."]
         : view.kind === "new" ? ["새로 올라온 강의", "최근 14일 안에 올라온 강의", fresh ? "" : "최근 14일 안에 올라온 강의가 없습니다."]
@@ -155,7 +162,8 @@
       showingFound = false;
       render();
     };
-    window.onhashchange = () => { render(); scrollTo(0, 0); };
+    const reveal = () => { if (current().kind === "folder") side.reveal(current().name); };  // 고른 하위 폴더가 사이드바에 보이게
+    window.onhashchange = () => { reveal(); render(); scrollTo(0, 0); };
     setScope(scope);
 
     function setLayout(next) {
@@ -239,7 +247,7 @@
 
     fetch("/api/videos").then((r) => r.json()).then((videos) => {
       total = videos.length;
-      const side = fillSidebar(videos, { prefix: "" });
+      side = fillSidebar(videos, { prefix: "" });
       $("recent-list").replaceChildren(...recentVideos(videos).map((v) => el("li", {}, lectureLink(v))));
       const day = (seconds) => new Date(seconds * 1000).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
       $("new-list").replaceChildren(...freshVideos(videos).map((v) => el("li", {},
@@ -264,20 +272,20 @@
           const items = entries.map(({ v, rest }, index) => {
             const li = el("li", {}, lectureLink(v, rest.slice(0, -1).join(" · ")));
             ul.append(li);
-            return { li, key: norm(v.title), guide: v.guide, added: v.added || 0, index };
+            return { li, title: v.title, key: norm(v.title), guide: v.guide, added: v.added || 0, index };
           });
           return { box: el("div", { class: "group" }, ...(group ? [el("h3", {}, group)] : []), ul), ul, items };
         });
         const head = el("h2", { class: "folder-name" }, name);
         const box = el("section", { class: "folder", "aria-label": name }, head, ...groups.map((g) => g.box));
         $("folders").append(box);
-        const link = side.folders.get(name);
         // 이 브라우저에서 보기 시작한 강의 수(시청 위치가 저장된 강의)
         const seen = list.filter(({ v }) => (store.get(`pos:${v.id}`)?.t || 0) > 5).length;
-        return { name, box, head, link, groups, size: list.length, seen };
+        return { name, box, head, groups, seen };
       });
       loaded = true;
       sortItems();
+      reveal();
       render();
     });
   </script>
