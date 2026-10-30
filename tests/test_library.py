@@ -22,6 +22,14 @@ def test_finds_video_files_recursively_in_lecture_order(tmp_path):
     assert videos[0]["path"] == tmp_path / "수학" / "2강.MP4"
 
 
+def test_a_lecture_comes_before_its_longer_named_follow_up(tmp_path):
+    # 확장자까지 비교하면 '1강 제망매가 학습활동.mp4'(빈칸)가 '1강 제망매가.mp4'(.)보다 앞섰습니다.
+    for name in ["1강 제망매가 학습활동.mp4", "1강 제망매가.mp4", "2강 청산별곡.mp4"]:
+        touch(tmp_path / "고1" / name)
+
+    assert [v["title"] for v in find_videos(tmp_path)] == ["고1/1강 제망매가", "고1/1강 제망매가 학습활동", "고1/2강 청산별곡"]
+
+
 def test_video_ids_are_stable_and_url_safe(tmp_path):
     touch(tmp_path / "수학" / "1강.mp4")
     touch(tmp_path / "영어" / "1강.mp4")
