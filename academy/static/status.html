@@ -80,6 +80,7 @@
       store.set("teacher-key", $("teacher-key").value.trim());
       $("teacher-key").value = "";
       showTeacher();
+      loadStatus();  // 인터넷에서 열쇠가 없어 못 본 현황을 다시 불러옵니다
     };
     $("key-forget").onclick = () => { localStorage.removeItem("teacher-key"); showTeacher(); };
     function renderChosen() {
@@ -122,7 +123,17 @@
       renderChosen();
     });
     showTeacher();
-    fetch("/api/status").then((r) => r.json()).then((s) => {
+    // 인터넷에서는 선생님 열쇠가 있어야 현황(이용 통계·운영 기록)이 옵니다. 학원 안에서는 열쇠 없이 옵니다.
+    const statusOrLocked = (r) => {
+      if (r.ok) return r.json();
+      if (r.status === 403) { localStorage.removeItem("teacher-key"); showTeacher(); }
+      const why = r.status === 403 ? "인터넷에서는 위 '이번 주 강의 지정'에 선생님 열쇠를 넣어야 현황이 보입니다."
+        : r.status === 429 ? "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요." : "현황을 불러오지 못했습니다.";
+      $("counts").replaceChildren(el("dt", {}, why), el("dd", {}, ""));
+      return null;
+    };
+    const loadStatus = () => fetch("/api/status", { headers: { "X-Teacher-Key": teacherKey() } }).then(statusOrLocked).then((s) => {
+      if (!s) return;
       const rows = [["전체 강의", s.total], ["분석 끝남", s.analyzed], ["Claude 요점 정리", s.guide], ["학원 정리", s.summary],
                     ["자동 목차", s.toc], ["페이지만", s.pages], ["분석 안 됨", s.total - s.analyzed]];
       document.getElementById("counts").replaceChildren(...rows.flatMap(([name, n]) => [el("dt", {}, name), el("dd", {}, n.toLocaleString())]));
@@ -169,6 +180,7 @@
       document.getElementById("unanalyzed").replaceChildren(...(s.unanalyzed.length
         ? s.unanalyzed.map((title) => el("li", {}, title)) : [el("li", { class: "notice" }, "없습니다.")]));
     });
+    loadStatus();
   </script>
 </body>
 </html>

@@ -45,6 +45,10 @@ ASK_WINDOW = 600       # 초 (10분)
 ASK_PER_HOUR = 200     # 학원 전체가 1시간에 할 수 있는 질문 수
 ASK_AT_ONCE = 4        # 동시에 답을 만드는 질문 수 (나머지 요청이 영상·목록을 막지 않게)
 HISTORY_CHARS = 20000  # 함께 보내는 대화 기록 글자 수 합
+MAX_QUERY = 30         # 검색어 최대 글자 수(띄어쓰기·기호 뺀 뒤). 긴 검색어로 서버를 오래 붙잡지 못하게
+NEAR_MAX = 10          # 받아쓰기가 한 소리 다르게 적은 말 찾기는 이 글자 수까지(작품명·용어용, 길면 매우 느림)
+LOG_WRITES_PER_HOUR = 600  # 한 기기가 1시간에 남기는 퀴즈 결과·강의 열기 기록 상한(평소 학생은 닿지 않음, 넘으면 기록만 안 함)
+TRANSFERS_PER_DEVICE = 10  # 한 기기가 10분에 만들 수 있는 기기 옮기기 코드 수
 MAX_BODY = 4 * 1024 * 1024  # 요청 본문 최대 크기. 기기 옮기기(기록 2MB까지)는 받고, 그보다 큰 요청으로 메모리를 채우지 못하게
 PASS_COOKIE = "study_pass"
 LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
@@ -358,10 +362,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
         exact: 그대로 말한 강의, similar: 그대로는 없고 받아쓰기가 한 소리 다르게 적은 말만 있는 강의(적힌 말과 함께)
         """
-        word = _norm(q)
-        if len(word) < 2:
-            raise HTTPException(400, "두 글자 이상 넣어 주세요")
-        near = _near(word)
+        word = _search_word(q)
+        near = _near(word) if len(word) <= NEAR_MAX else None
         exact, similar, notes = [], [], []
         for v in current_library()["videos"]:
             entry = analysis_entry(v["id"])
@@ -402,14 +404,12 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def search_lecture(video_id: str, q: str = ""):
         """이 강의에서 낱말을 말한 시각 모두와 그때의 챕터(대본 글은 보내지 않음). 그대로 말한 곳이 없으면
         받아쓰기가 한 소리 다르게 적은 곳(heard_as: 적힌 말), 목차·챕터 제목·학원 정리에 나오는 줄(notes)도 줍니다."""
-        video, word = get_video(video_id), _norm(q)
-        if len(word) < 2:
-            raise HTTPException(400, "두 글자 이상 넣어 주세요")
+        video, word = get_video(video_id), _search_word(q)
         entry = analysis_entry(video["id"])
         if not entry:
             return {"times": [], "chapters": [], "heard_as": [], "notes": []}
         at, heard = [m.start() for m in re.finditer(re.escape(word), entry["text"])], []
-        if not at and (near := _near(word)):
+        if not at and len(word) <= NEAR_MAX and (near := _near(word)):
             matches = list(near.finditer(entry["text"]))
             at, heard = [m.start() for m in matches], [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
         found, _ = found_at(video, entry, at, limit=None)
@@ -429,6 +429,22 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # 기기 번호는 서버만 아는 비밀값(.usage-salt)을 섞어 바꾼 짧은 글자라 기기 주소로 되돌릴 수 없습니다.
     # usage_ignore(원장님 PC 등)의 접속과, 복습 화면처럼 강의를 열지 않고 정보만 읽는 것(view 없음)은 세지 않습니다.
     usage_lock = Lock()
+    writes, writes_lock = {}, Lock()  # (기록 종류, 기기 주소) → 최근 1시간 동안 남긴 시각들
+
+    def may_log(kind, host):
+        """한 기기가 기록을 끝없이 보내 디스크를 채우지 못하게 합니다."""
+        now = wall_clock()
+        with writes_lock:
+            if len(writes) > 10000:  # 오래된 기기 기록 정리
+                for k in [k for k, t in writes.items() if not t or now - t[-1] >= 3600]:
+                    del writes[k]
+            times = writes.setdefault((kind, host), deque())
+            while times and now - times[0] >= 3600:
+                times.popleft()
+            if len(times) >= LOG_WRITES_PER_HOUR:
+                return False
+            times.append(now)
+            return True
 
     def device(host):
         salt_path = Path(log_dir) / ".usage-salt"
@@ -437,7 +453,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         return hashlib.sha256((salt_path.read_text(encoding="utf-8") + host).encode()).hexdigest()[:10]
 
     def record_open(video_id, host):
-        if not log_dir or host in usage_ignore:
+        if not log_dir or host in usage_ignore or not may_log("open", host):
             return
         with usage_lock, (Path(log_dir) / "usage.log").open("a", encoding="utf-8") as f:
             f.write(json.dumps({"t": int(wall_clock()), "id": video_id, "who": device(host)}) + "\n")
@@ -447,7 +463,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def quiz_result(req: QuizResult, request: Request):
         get_video(req.id)
         host = request.client.host if request.client else ""
-        if not log_dir or host in usage_ignore:
+        if not log_dir or host in usage_ignore or not may_log("quiz", host):
             return
         with usage_lock, (Path(log_dir) / "quiz.log").open("a", encoding="utf-8") as f:
             f.write(json.dumps({"t": int(wall_clock()), "id": req.id, "k": req.key, "who": device(host), "right": req.right},
@@ -528,14 +544,22 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # ---- 기기 옮기기: 학생 기록(메모·진도·틀린 문제 등)을 6자리 코드로 잠깐 맡겼다가 다른 기기가 한 번 찾아 갑니다 ----
     # 서버 메모리에만 두고(파일에 남기지 않음) 10분이 지나거나 한 번 찾아 가면 지웁니다.
     transfers = {}  # 코드 → (기록, 사라지는 시각)
+    made = {}  # 기기 주소 → 최근 10분 동안 코드를 만든 시각들(한 기기가 코드 자리를 다 차지하지 못하게)
 
     @app.post("/api/transfer")
-    def start_transfer(req: TransferRequest):
+    def start_transfer(req: TransferRequest, request: Request):
         if len(json.dumps(req.data, ensure_ascii=False).encode()) > 2_000_000:  # 2MB: 강의 3,900개의 진도를 다 담아도 0.3MB쯤
             raise HTTPException(413, "기록이 너무 큽니다")
         now = wall_clock()
         for code in [c for c, (_, until) in transfers.items() if until < now]:
             del transfers[code]
+        for who in [w for w, times in made.items() if now - times[-1] >= 600]:
+            del made[who]
+        host = request.client.host if request.client else ""
+        mine = [t for t in made.get(host, []) if now - t < 600]
+        if len(mine) >= TRANSFERS_PER_DEVICE:
+            raise HTTPException(429, "코드를 너무 많이 만들었습니다. 10분 뒤 다시 해 주세요")
+        made[host] = mine + [now]
         if len(transfers) >= 200:
             raise HTTPException(503, "잠시 뒤 다시 해 주세요")
         code = f"{secrets.randbelow(10**6):06d}"
@@ -652,8 +676,10 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         return reference_detail(key)
 
     @app.get("/api/status")
-    def status():
+    def status(request: Request):
         """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 페이지만)과 자동 목차 진행률"""
+        if entry_secret and _from_outside(request):
+            require_teacher(request)  # 인터넷에서는 입장한 학생도 이용 통계·운영 기록을 보지 못하게
         counts = {"guide": 0, "summary": 0, "toc": 0, "pages": 0}
         target = done = recent = 0
         since = wall_clock() - 3 * 86400
@@ -772,6 +798,16 @@ def _last_line(path, dated=False):
 
 def _norm(text):
     return re.sub(r"[^가-힣a-z0-9]", "", text.lower())
+
+
+def _search_word(q):
+    """검색어를 띄어쓰기·기호 없이 맞춥니다. 너무 짧거나 길면 400."""
+    word = _norm(q)
+    if len(word) < 2:
+        raise HTTPException(400, "두 글자 이상 넣어 주세요")
+    if len(word) > MAX_QUERY:
+        raise HTTPException(400, f"검색어는 {MAX_QUERY}글자까지 넣어 주세요")
+    return word
 
 
 def _near(word, spaced=False):
