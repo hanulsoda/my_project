@@ -97,8 +97,8 @@ def test_prepares_the_list_in_the_background_when_the_server_starts(tmp_path, mo
     video_dir.mkdir()
     (video_dir / "제망매가.mp4").write_bytes(b"x")
     save_analysis(tmp_path / "data", find_videos(video_dir)[0]["id"], {"title": "제망매가", "segments": SEGMENTS})
-    scans, matched, real = count_scans(monkeypatch), [], server.find_references
-    monkeypatch.setattr(server, "find_references", lambda *a: matched.append(a) or real(*a))
+    scans, matched, real = count_scans(monkeypatch), [], server.matcher
+    monkeypatch.setattr(server, "matcher", lambda refs: (lambda find: lambda *a: matched.append(a) or find(*a))(real(refs)))
 
     with TestClient(create_app(video_dir, tmp_path / "data", None, [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}])):
         deadline = time.monotonic() + 5

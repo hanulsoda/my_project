@@ -3,6 +3,7 @@
 실행: uvicorn academy.server:app --host 0.0.0.0 --port 8000
 """
 
+import gzip
 import hashlib
 import html
 import ipaddress
@@ -25,13 +26,13 @@ from typing import Literal
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from academy.entry import MIN_SECRET_LEN, PASS_TTL, entry_link_ok, make_pass, pass_ok
 from academy.library import find_videos, load_analysis
-from academy.references import find_references, load_references, ref_key, reference_sections, suspects, usable_references
+from academy.references import load_references, matcher, ref_key, reference_sections, suspects, usable_references
 from academy.timelink import link_times
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -190,7 +191,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     @asynccontextmanager
     async def lifespan(app):
         # NAS를 훑고 분석 상태를 읽고 학원 정리를 짝짓는 데 시간이 걸려, 첫 학생이 기다리지 않게 켜자마자 해 두고 요약을 저장합니다.
-        Thread(target=lambda: (list_videos(), save_index()), daemon=True).start()
+        Thread(target=lambda: (listing(), save_index()), daemon=True).start()
         yield
 
     # 서버가 자동으로 만드는 API 설명서(/docs 등)는 바깥에 보일 필요가 없어 끕니다.
@@ -353,17 +354,28 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         return {"analyzed": bool(entry), "guide": bool(entry and entry["guide"]), "toc": bool(entry and entry["toc"])}
 
     matched = {}  # 영상 id → 파일 이름으로 짝지어지는 학원 요점 정리. 처음 찾을 때 전체 목록에 몇 초 걸려 기억해 둡니다.
+    find_references = matcher(references)  # 정리마다 보여 줄 내용을 한 번만 만들어 모든 강의가 함께 씁니다
 
     def academy_summaries(video):
         if video["id"] not in matched:
             # 빈칸 문제는 퀴즈 탭에서 풀도록 요점 정리에서는 뺍니다.
             matched[video["id"]] = [{"source": r["source"], "key": r["key"], "quiz": r["quiz"],
                                      "sections": [s for s in r["sections"] if s["name"] != "빈칸 문제"]}
-                                    for r in find_references(video["title"], [], references)]
+                                    for r in find_references(video["title"])]
         return matched[video["id"]]
 
-    @app.get("/api/videos")
-    def list_videos():
+    def stamp(path):  # 파일이 바뀌었는지 보는 값(없으면 None)
+        try:
+            info = Path(path).stat()
+            return info.st_mtime_ns, info.st_size
+        except OSError:
+            return None
+
+    # 강의 목록: 수업 시작에 학생 수십 명이 한꺼번에 열어도 기다리지 않게, 다 만든 답(압축까지)을 두고 같이 씁니다.
+    # 새 강의(다시 훑기)·분석 결과 저장(분석 폴더가 바뀜)·선생님의 정리 고치기가 있으면 다시 만들고, 그 밖에도 1분마다 새로 만듭니다.
+    list_cache, list_lock = {"key": None}, Lock()
+
+    def built_list():
         listed, fixes = [], read_fixes()
         for v in current_library()["videos"]:
             status = analysis_status(v["id"])
@@ -371,6 +383,23 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             status["guide"] = status["guide"] or (status["analyzed"] and shows_summary(v, fixes))
             listed.append({"id": v["id"], "title": v["title"], "added": v.get("added", 0), **status})
         return listed
+
+    def listing():
+        current_library()
+        key = (library["at"], stamp(data_dir), stamp(fixes_path), int(monotonic() // 60))
+        with list_lock:  # 한 명이 만드는 동안 나머지는 기다렸다가 그 답을 씁니다
+            if list_cache["key"] != key:
+                body = json.dumps(built_list(), ensure_ascii=False, separators=(",", ":")).encode()
+                list_cache.update(key=key, body=body, gzip=gzip.compress(body, 6))
+        return list_cache
+
+    @app.get("/api/videos")
+    def list_videos(request: Request):
+        cache = listing()
+        if "gzip" in request.headers.get("accept-encoding", ""):  # 압축해 둔 것을 그대로(서버가 매번 다시 압축하지 않게)
+            return Response(cache["gzip"], media_type="application/json",
+                            headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+        return Response(cache["body"], media_type="application/json")
 
     @app.get("/api/search")
     def search(q: str = ""):
@@ -380,7 +409,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """
         word = _search_word(q)
         near = _near(word) if len(word) <= NEAR_MAX else None
-        exact, similar, notes, fixes = [], [], [], read_fixes()
+        maybe_near = _near_filter(word) if near else None  # 비슷한 말이 있을 수 없는 대본은 정규식을 돌리지 않음(결과는 같음)
+        exact, similar, notes, fixes, fixes_at = [], [], [], read_fixes(), stamp(fixes_path)
         for v in current_library()["videos"]:
             entry = analysis_entry(v["id"])
             if not entry:
@@ -388,21 +418,26 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             at = [m.start() for m in re.finditer(re.escape(word), entry["text"])]
             if at:
                 exact.append(found_at(v, entry, at))
-            elif near and (matches := list(near.finditer(entry["text"]))):
+            elif near and maybe_near(entry["text"]) and (matches := list(near.finditer(entry["text"]))):
                 result, recording = found_at(v, entry, [m.start() for m in matches])
                 result["heard_as"] = [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
                 similar.append((result, recording))
-            elif lines := noted(v, entry, word, fixes):
+            elif lines := noted(v, entry, word, fixes, fixes_at):
                 notes.append(({"id": v["id"], "title": v["title"], "matches": lines[:3], "also": []},
                               (round(entry["duration"]), entry["text"][:150])))
         return {"exact": merge_copies(exact), "similar": merge_copies(similar), "notes": merge_copies(notes)}
 
-    def noted(v, entry, word, fixes):
+    noted_lines = {}  # 영상 id → (분석 파일·정리 고치기 시점, [(띄어쓰기 뺀 글, 글, 시각)]): 찾을 때마다 10만 줄을 다시 다듬지 않게
+
+    def noted(v, entry, word, fixes, fixes_at):
         """말하지는 않았어도 목차·챕터 제목이나 학원 정리 항목에 낱말이 든 줄 [{"text", "time"}]"""
-        lines = [(title, start) for start, title in entry["chapters"]]
-        if not entry["guide"]:  # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니 챕터만 봅니다
-            lines += [(item, None) for r in fixed(academy_summaries(v), fixes) for s in r["sections"] for item in s["items"]]
-        return [{"text": text, "time": t} for text, t in lines if word in _norm(text)]
+        key = (status_cache.get(v["id"], (None,))[0], fixes_at)
+        if noted_lines.get(v["id"], (None,))[0] != key:
+            lines = [(title, start) for start, title in entry["chapters"]]
+            if not entry["guide"]:  # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니 챕터만 봅니다
+                lines += [(item, None) for r in fixed(academy_summaries(v), fixes) for s in r["sections"] for item in s["items"]]
+            noted_lines[v["id"]] = (key, [(_norm(text), text, t) for text, t in lines])
+        return [{"text": text, "time": t} for flat, text, t in noted_lines[v["id"]][1] if word in flat]
 
     def found_at(v, entry, positions, limit=5):
         spots = [entry["times"][bisect_right(entry["offsets"], at) - 1] for at in positions]
@@ -429,7 +464,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             matches = list(near.finditer(entry["text"]))
             at, heard = [m.start() for m in matches], [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
         found, _ = found_at(video, entry, at, limit=None)
-        return {"times": found["times"], "chapters": found["chapters"], "heard_as": heard, "notes": noted(video, entry, word, read_fixes())}
+        return {"times": found["times"], "chapters": found["chapters"], "heard_as": heard, "notes": noted(video, entry, word, read_fixes(), stamp(fixes_path))}
 
     def merge_copies(found):
         merged, first = [], {}
@@ -747,19 +782,33 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             found["ops"] = {"backup": _last_line(Path(log_dir) / "backup.log", dated=True),
                             "night": _last_line(Path(log_dir) / "toc.log", dated=True),
                             "new_videos": _last_line(Path(log_dir) / "new-videos.log")}
-            found["usage"] = usage_summary()
-            found["quiz"] = quiz_summary()
+            found["usage"] = counted("usage.log", usage_summary)
+            found["quiz"] = counted("quiz.log", quiz_summary)
         return found
+
+    log_counts = {}  # 기록 파일 → (파일 시점·10분 단위·강의 목록, 센 결과): 몇 달 치 기록을 현황을 열 때마다 다 읽지 않게
+
+    def counted(name, count):  # 기록이 늘었거나 10분이 지나면(최근 30일 창이 움직임) 다시 셉니다
+        key = (stamp(Path(log_dir) / name), int(wall_clock() // 600), library["at"])
+        if log_counts.get(name, (None,))[0] != key:
+            log_counts[name] = (key, count())
+        return log_counts[name][1]
+
+    linked = {}  # 영상 id → (분석 파일·정리 고치기 시점, 시간을 붙인 학원 정리): 대본에서 시간을 찾는 일을 강의를 열 때마다 하지 않게
 
     @app.get("/api/videos/{video_id}")
     def video_detail(video_id: str, request: Request, view: bool = False):
         video = get_video(video_id)
         if view:  # 플레이어에서 강의를 열 때만 view=1
             record_open(video_id, request.client.host if request.client else "")
+        key = (stamp(Path(data_dir) / f"{video_id}.json"), stamp(fixes_path))  # 읽기 전에 봐 둡니다(그사이 바뀌면 다음에 다시)
         analysis = read_analysis(video_id)
         # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 대본에서 찾은 시간과 함께 보냅니다.
-        summaries = (link_times(fixed(academy_summaries(video)), analysis.get("segments") or [])
-                     if analysis and not analysis.get("guide") else [])
+        summaries = []
+        if analysis and not analysis.get("guide"):
+            if linked.get(video_id, (None,))[0] != key:
+                linked[video_id] = (key, link_times(fixed(academy_summaries(video)), analysis.get("segments") or []))
+            summaries = linked[video_id][1]
         if analysis:
             # 받아쓰기 대본과 화면 글자 원문은 틀린 곳이 많아 학생에게 보내지 않고, 질문하기·요점 정리에만 씁니다.
             analysis.pop("segments", None)
@@ -858,6 +907,12 @@ def _near(word, spaced=False):
 
     spaced면 음절 사이 띄어쓰기도 허용합니다('성의 꽃').
     """
+    branches = [pattern for _, pattern in _near_branches(word, spaced)]
+    return re.compile("|".join(branches)) if branches else None
+
+
+def _near_branches(word, spaced=False):
+    """_near의 갈래마다 (바뀌는 음절 자리, 정규식 글). 갈래 하나가 한 음절이 다른 말 하나입니다."""
     sep = r"\s?" if spaced else ""
     branches = []
     for i, ch in enumerate(word):
@@ -871,8 +926,15 @@ def _near(word, spaced=False):
         syllables = "".join(chr(0xAC00 + a * 588 + b * 28 + c) for a, b, c in near)
         parts = [re.escape(c) for c in word]
         parts[i] = f"[{syllables}]"
-        branches.append(sep.join(parts))
-    return re.compile("|".join(branches)) if branches else None
+        branches.append((i, sep.join(parts)))
+    return branches
+
+
+def _near_filter(word):
+    """_near(word)가 이 글에서 무엇이라도 찾는지 빨리 답하는 함수(띄어쓰기 없는 대본용). 갈래마다 바뀌지 않는 앞뒤 글이 그대로
+    들어 있을 때만 그 갈래의 정규식을 돌립니다. 3,900개 대본에서 '선생님 말' 찾기가 1초 넘게 걸리던 것을 줄입니다."""
+    checks = [(word[:i], word[i + 1:], re.compile(pattern)) for i, pattern in _near_branches(word)]
+    return lambda text: any(before in text and after in text and pattern.search(text) for before, after, pattern in checks)
 
 
 def _respell(text, lecture_title):

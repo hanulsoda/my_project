@@ -52,26 +52,43 @@ def _norm(text):
 
 def find_references(title, screen_lines, references) -> list[dict]:
     """영상 제목(폴더/파일 이름)과 화면 글자로 짝지어지는 정리를 {"source", "text"} 목록으로 돌려줍니다."""
-    title = unicodedata.normalize("NFC", title)
-    name = _norm(title.rsplit("/", 1)[-1])
-    quoted = {_norm(q) for line in screen_lines for q in re.findall(r"[「『](.+?)[」』]", line)}
-    found = {}  # 작품 → (파일 이름으로 찾았는지, 정리, 학년 점수)
-    for ref in references:
-        if not ref.get("meta") and not any(ref.get(key) for key, _ in PARTS):
-            continue  # PDF 추출에 실패해 제목만 남은 정리는 근거가 못 됩니다.
-        work = _norm(_work(ref["title"]))
-        # 두 글자 제목(눈, 벽)은 다른 말과 겹치기 쉬워 파일 이름으로는 짝짓지 않고 화면의 「」만 봅니다.
-        named = len(work) >= 3 and work in name
-        if work and (named or work in quoted):
-            score = _grade_score(ref["grade"], title)
-            if work not in found or score > found[work][2]:
-                found[work] = (named, ref, score)
-    # 「비교하며 읽기」처럼 함께 찾은 더 긴 작품명의 일부일 뿐인 것은 뺍니다.
-    hits = [hit for work, hit in found.items() if not any(work != other and work in other for other in found)]
-    if any(hit[0] for hit in hits):  # 파일 이름으로 찾았으면 화면에 인용만 된 다른 작품은 뺍니다.
-        hits = [hit for hit in hits if hit[0]]
-    return [{"source": f"{ref['grade']} 「{_work(ref['title'])}」", "key": ref_key(ref), "text": reference_text(ref),
-             "sections": reference_sections(ref), "quiz": reference_quiz(ref)} for _, ref, _ in hits]
+    return matcher(references)(title, screen_lines)
+
+
+def matcher(references):
+    """find_references(제목, 화면 글자 줄)를 만들어 돌려줍니다. 여러 강의를 짝지을 때(서버의 강의 목록 3,900개)는 이것을 한 번
+    만들어 쓰면 정리마다 작품명과 보여 줄 내용을 한 번씩만 만듭니다(강의마다 다시 만들면 서버를 켠 뒤 첫 목록이 10초 넘게 걸림).
+    돌려주는 정리 묶음은 여러 강의가 함께 쓰므로 고치지 말고 읽기만 합니다."""
+    # PDF 추출에 실패해 제목만 남은 정리는 근거가 못 됩니다.
+    works = [(_norm(_work(ref["title"])), ref) for ref in references
+             if ref.get("meta") or any(ref.get(key) for key, _ in PARTS)]
+    made = {}  # id(정리) → 보여 줄 내용
+
+    def summary(ref):
+        if id(ref) not in made:
+            made[id(ref)] = {"source": f"{ref['grade']} 「{_work(ref['title'])}」", "key": ref_key(ref), "text": reference_text(ref),
+                             "sections": reference_sections(ref), "quiz": reference_quiz(ref)}
+        return made[id(ref)]
+
+    def find(title, screen_lines=()):
+        title = unicodedata.normalize("NFC", title)
+        name = _norm(title.rsplit("/", 1)[-1])
+        quoted = {_norm(q) for line in screen_lines for q in re.findall(r"[「『](.+?)[」』]", line)}
+        found = {}  # 작품 → (파일 이름으로 찾았는지, 정리, 학년 점수)
+        for work, ref in works:
+            # 두 글자 제목(눈, 벽)은 다른 말과 겹치기 쉬워 파일 이름으로는 짝짓지 않고 화면의 「」만 봅니다.
+            named = len(work) >= 3 and work in name
+            if work and (named or work in quoted):
+                score = _grade_score(ref["grade"], title)
+                if work not in found or score > found[work][2]:
+                    found[work] = (named, ref, score)
+        # 「비교하며 읽기」처럼 함께 찾은 더 긴 작품명의 일부일 뿐인 것은 뺍니다.
+        hits = [hit for work, hit in found.items() if not any(work != other and work in other for other in found)]
+        if any(hit[0] for hit in hits):  # 파일 이름으로 찾았으면 화면에 인용만 된 다른 작품은 뺍니다.
+            hits = [hit for hit in hits if hit[0]]
+        return [summary(ref) for _, ref, _ in hits]
+
+    return find
 
 
 def ref_key(ref) -> str:

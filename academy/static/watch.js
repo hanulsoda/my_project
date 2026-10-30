@@ -187,7 +187,7 @@ function renderPages(list) {
       class: "page",
       "aria-label": `${p.label || `${n + 1}번째 화면`}, ${fmt(p.start)}로 이동`,
       onclick: () => seek(p.start),
-    }, el("img", { src: `/api/videos/${id}/pages/${n}.jpg`, alt: "" }),
+    }, el("img", { src: `/api/videos/${id}/pages/${n}.jpg`, alt: "", loading: "lazy" }),  // 페이지 탭을 열 때 받음
        ...(p.label ? [el("span", { class: "page-label" }, p.label)] : []),
        el("span", { class: "time" }, fmt(p.start))));
     grid.append(item);

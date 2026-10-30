@@ -37,6 +37,14 @@
       return [...byDay].sort((a, b) => a[0] - b[0]).map(([d, n]) => `${d === 1 ? "내일" : `${d}일 뒤`} ${n}개`).join(" · ");
     }
 
+    async function inTurns(items, size, get) {  // items마다 get을 size개까지 한꺼번에, 결과는 items 순서대로
+      const results = [];
+      let next = 0;
+      const worker = async () => { while (next < items.length) { const n = next++; results[n] = await get(items[n]); } };
+      await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+      return results;
+    }
+
     function count() {  // 머리의 문제 수. 문제를 정리한 뒤에도 다시 셉니다.
       const later = wrongLists(videos).flatMap((l) => l.items).filter((w) => !isDue(w)).length;
       document.getElementById("view-sub").textContent = `오늘 복습할 문제 ${dueCount(videos)}개${later ? ` · 앞으로 ${later}개` : ""}`;
@@ -56,10 +64,11 @@
       say(el("p", { class: "notice" }, "불러오는 중…"));
       const sections = [];
       let failed = false;
-      for (const w of todo) {
-        const res = await fetch(`/api/videos/${w.id}`);
-        if (!res.ok) { failed = true; continue; }  // 지워진 강의이거나 서버 오류: 기록은 두고 이번엔 건너뜁니다
-        const lecture = await res.json();
+      // 강의를 6개씩 한꺼번에 받습니다(하나씩 기다리면 휴대폰에서 10초 넘게 걸림). 그리는 순서는 그대로.
+      const lectures = await inTurns(todo, 6, (w) => fetch(`/api/videos/${w.id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+      for (const [n, w] of todo.entries()) {
+        const lecture = lectures[n];
+        if (!lecture) { failed = true; continue; }  // 지워진 강의이거나 서버 오류: 기록은 두고 이번엔 건너뜁니다
         const quiz = lecture.analysis?.guide?.quiz || (lecture.references || []).flatMap((r) => r.quiz);
         if (quiz.length) {  // 다시 분석해서 없어진 문제는 기록에서 정리합니다(플레이어 퀴즈와 같게)
           const keys = new Set(quiz.map(quizKey));

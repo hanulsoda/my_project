@@ -154,9 +154,14 @@
           ...(score ? [`퀴즈 ${score.right}/${score.total}`] : []), ...progress));
     }
 
+    // 한글은 한 글자를 치는 동안 입력이 여러 번 바뀌어, 잠깐 멈춘 뒤 한 번만 거릅니다(3,900개를 글자마다 다시 거르지 않게).
+    let typing = null;
     search.oninput = () => {
-      if (scope === "spoken" && !search.value.trim()) showingFound = false;
-      render();
+      clearTimeout(typing);
+      typing = setTimeout(() => {
+        if (scope === "spoken" && !search.value.trim()) showingFound = false;
+        render();
+      }, 150);
     };
     guideOnly.onchange = render;
     $("scope-title").onclick = () => { setScope("title"); render(); search.focus(); };

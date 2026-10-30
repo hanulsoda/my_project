@@ -374,6 +374,9 @@ button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .video-list > li:nth-child(even of :not([hidden])) > a { background: var(--bg); }
 .video-list a:hover { box-shadow: inset 0 0 0 100vmax rgba(127, 127, 127, 0.1); }
 .video-list a:focus-visible { outline-offset: -2px; }
+/* 화면 밖 강의 줄은 그리지 않고 자리만 잡아 둡니다: 강의가 수백 개인 폴더·찾기에서도 휴대폰이 멈추지 않게 */
+.video-list > li { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+.content-body.grid .video-list > li { contain-intrinsic-size: auto 220px; }
 .thumb { flex: none; width: 72px; aspect-ratio: 16 / 9; border-radius: 6px; background: var(--hover); object-fit: cover; box-shadow: 0 0 0 1px var(--border); }
 .video-text { min-width: 0; }
 .video-title, .video-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -622,6 +625,7 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .judge .choice, .judge .feedback { margin: 0; }
 .quiz-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .review-lecture h2 { margin: 20px 0 8px; font-size: 16px; }
+.review-lecture { content-visibility: auto; contain-intrinsic-size: auto 300px; }  /* 메모가 수천 개여도 화면 밖은 그리지 않음 */
 .question blockquote { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--border); color: var(--muted); line-height: 1.7; }
 .blank-line { margin: 0 0 8px; line-height: 1.8; }
 .blank { color: var(--accent); white-space: pre-wrap; }  /* 가린 칸의 공백 유지, 긴 답은 줄바꿈 */
