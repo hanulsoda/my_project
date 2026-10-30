@@ -110,8 +110,8 @@ def test_forged_or_expired_pass_is_blocked(make_client):
     assert expired.status_code == 401
 
 
-def test_no_secret_keeps_app_open(make_client):
-    client, _ = make_client(entry_secret="")
+def test_no_secret_keeps_the_academy_network_open(make_client):
+    client, _ = make_client(entry_secret="", client=ACADEMY)
 
     assert client.get("/api/videos").status_code == 200
     assert client.get("/enter").headers["location"] == "/"
@@ -145,6 +145,28 @@ def test_proxy_without_client_address_is_treated_as_outside(make_client):
     client, _ = make_client(client=PROXY)
 
     assert client.get("/api/videos", headers={"x-forwarded-proto": "https"}).status_code == 401
+
+
+def test_without_entry_check_the_server_is_for_the_academy_only(make_client):
+    # 프록시를 만들어 둔 채 ENTRY_SECRET 없이 서버를 다시 켜도 강의가 인터넷에 열리지 않게 합니다.
+    home, video_id = make_client(entry_secret="")
+    proxied, _ = make_client(entry_secret="", client=PROXY)
+
+    page, api = home.get("/"), home.get("/api/videos")
+
+    assert page.status_code == 403 and "인터넷으로는 열려 있지 않습니다" in page.text
+    assert api.status_code == 403
+    assert home.get(f"/media/{video_id}").status_code == 403
+    assert proxied.get("/api/videos", headers={"x-forwarded-for": HOME[0]}).status_code == 403
+    assert proxied.get("/api/videos", headers={"x-forwarded-proto": "https"}).status_code == 403
+
+
+@pytest.mark.parametrize("address", ["192.168.0.5", "10.1.2.3", "172.16.0.9", "127.0.0.1", "100.101.102.103", "fd12::5"],
+                         ids=["home-router", "10", "172", "this-pc", "vpn-tailscale", "ipv6-local"])
+def test_academy_network_addresses_need_no_pass(make_client, address):
+    client, _ = make_client(client=(address, 50000))
+
+    assert client.get("/api/videos").status_code == 200
 
 
 def test_records_moved_from_home_can_be_claimed_at_the_academy(make_client):

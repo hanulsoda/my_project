@@ -48,6 +48,7 @@ HISTORY_CHARS = 20000  # 함께 보내는 대화 기록 글자 수 합
 MAX_BODY = 4 * 1024 * 1024  # 요청 본문 최대 크기. 기기 옮기기(기록 2MB까지)는 받고, 그보다 큰 요청으로 메모리를 채우지 못하게
 PASS_COOKIE = "study_pass"
 LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
+LAN_ONLY_NOTICE = "학습 플레이어는 인터넷으로는 열려 있지 않습니다. 학원 안에서 접속해 주세요."
 
 
 def _denied_page(site_url: str) -> HTMLResponse:
@@ -63,20 +64,33 @@ def _denied_page(site_url: str) -> HTMLResponse:
         status_code=401)
 
 
-def _from_outside(request) -> bool:
-    """학원 내부망 밖(인터넷)에서 온 요청인지. DS918+ 역방향 프록시가 X-Forwarded-For 맨 오른쪽에 붙인 주소가
-    실제 접속 주소입니다(그 앞의 주소는 학생이 마음대로 넣을 수 있음). 알 수 없으면 밖으로 봅니다."""
+# 인터넷에서 직접 올 수 없는 주소. 사설·자기 PC 주소(ipaddress의 is_private)와 Tailscale 같은 VPN이 쓰는 대역.
+_VPN = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _where(request) -> str:
+    """요청이 온 곳: "lan"(학원 내부망·VPN), "internet", "unknown"(주소 모양이 아님, 시험용 접속 등).
+
+    DS918+ 역방향 프록시가 X-Forwarded-For 맨 오른쪽에 붙인 주소가 실제 접속 주소입니다(그 앞의 주소는 학생이
+    마음대로 넣을 수 있음). 프록시를 거쳤는데 실제 주소를 알려 주지 않으면(설정 빠뜨림) 인터넷으로 봅니다.
+    """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         host = forwarded.split(",")[-1].strip()
     elif request.headers.get("x-forwarded-proto"):
-        return True  # 프록시를 거쳤는데 실제 접속 주소를 알려 주지 않음(설정 빠뜨림)
+        return "internet"
     else:
         host = request.client.host if request.client else ""
     try:
-        return not ipaddress.ip_address(host).is_private
+        address = ipaddress.ip_address(host)
     except ValueError:
-        return True
+        return "unknown"
+    return "lan" if address.is_private or address in _VPN else "internet"
+
+
+def _from_outside(request) -> bool:
+    """학원 내부망 밖에서 온 요청인지. 알 수 없으면 밖으로 봅니다."""
+    return _where(request) != "lan"
 
 
 class Turn(BaseModel):
@@ -183,6 +197,18 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             if path.startswith(("/api/", "/media/")):
                 return JSONResponse({"detail": LOGIN_NOTICE}, status_code=401)
             return _denied_page(site_url)
+    else:
+        # 입장 확인을 켜지 않은 서버는 학원 내부망 전용입니다. DS918+ 프록시를 만들어 둔 채 ENTRY_SECRET 없이
+        # 서버를 다시 켜도 강의가 인터넷에 열리지 않게, 인터넷에서 온 요청은 막습니다.
+        @app.middleware("http")
+        async def lan_only(request: Request, call_next):
+            if _where(request) != "internet":
+                return await call_next(request)
+            if request.url.path.startswith(("/api/", "/media/")):
+                return JSONResponse({"detail": LAN_ONLY_NOTICE}, status_code=403)
+            return HTMLResponse(f'<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>학습 플레이어</title>'
+                                f'</head><body><h1 style="font-size:20px">{LAN_ONLY_NOTICE}</h1></body></html>',
+                                status_code=403)
 
     # 입장 확인보다 먼저 요청 크기를 봅니다. 본문을 읽기 전에 거절해야 서버 메모리를 지킵니다.
     @app.middleware("http")
