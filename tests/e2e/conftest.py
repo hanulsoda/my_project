@@ -41,7 +41,8 @@ REFS = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가", 
 SAID_REF = [{"start": 30.0, "end": 35.0, "text": "이 작품의 갈래는 향가입니다 누이의 죽음을 종교적으로 극복합니다"}] + said()
 # 선생님 화면 테스트용: 어느 강의에도 붙지 않는 정리(학생 화면 테스트에 영향 없음). 첫 항목은 너무 길어 '의심'.
 TEACHER_REF = {"title": "성난 풀잎", "grade": "고2",
-               "features": [{"text": "긴 항목 " + "가" * 260}, {"text": "둘째 특징"}, {"text": "셋째 특징"}]}
+               "features": [{"text": "긴 항목 " + "가" * 260}, {"text": "둘째 특징"}, {"text": "셋째 특징"}],
+               "fillins": [{"passage": "풀잎은 무엇을 상징하나?", "answer_line": "풀잎은   민중  을 상징한다"}]}
 REFS.append(TEACHER_REF)
 TEACHER_KEY = "e2e-teacher-key"
 

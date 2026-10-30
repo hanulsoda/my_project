@@ -22,7 +22,8 @@
     </header>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
     <div class="content-body"><div class="list-page">
-      <p class="notice">학생이 요점 정리 탭에서 보는 학원 정리를 항목마다 고치거나 숨깁니다. 원본 정리 파일은 그대로 두고 고친 글과 숨긴 항목만 따로 저장해, 학생 화면에 바로 반영합니다. 고치려면 선생님 열쇠가 필요합니다(이 브라우저에 기억).</p>
+      <p class="notice">학생이 요점 정리 탭에서 보는 학원 정리를 항목마다 고치거나 숨깁니다. 원본 정리 파일은 그대로 두고 고친 글과 숨긴 항목만 따로 저장해, 학생 화면에 바로 반영합니다. 고치려면 선생님 열쇠가 필요합니다(이 브라우저에 기억).
+        빈칸 문제는 퀴즈로 나가며 숨기기만 됩니다. 한 정리의 요점 항목을 모두 숨기면 그 정리는 빈칸 문제까지 학생에게 나가지 않습니다.</p>
       <form id="key-form" class="note-form" hidden>
         <input id="teacher-key" type="password" autocomplete="off" aria-label="선생님 열쇠" placeholder="선생님 열쇠">
         <button type="submit">열쇠 넣기</button>
@@ -107,8 +108,11 @@
     }
 
     function itemCard(key, section, it) {
-      const area = el("textarea", { rows: String(Math.min(8, Math.ceil(it.text.length / 45) + 1)), "aria-label": `${section} 항목 고치기` });
-      area.value = it.text;
+      // 빈칸 문제는 퀴즈로 나갑니다. 빈칸 표시(두 칸 띄어쓰기)가 깨지기 쉬워 글은 고치지 않고 숨기기만 합니다.
+      const fill = section === "빈칸 문제";
+      const area = fill ? el("p", {}, it.text)
+        : el("textarea", { rows: String(Math.min(8, Math.ceil(it.text.length / 45) + 1)), "aria-label": `${section} 항목 고치기` });
+      if (!fill) area.value = it.text;
       const changed = it.text !== it.original;
       const card = el("article", { class: it.hidden ? "fix-item hidden-item" : "fix-item" },
         el("p", { class: "fix-flags" }, ...(it.suspect ? [el("span", { class: "chip warn" }, it.suspect)] : []),
@@ -116,10 +120,11 @@
         area,
         ...(changed ? [el("p", { class: "fix-original" }, `원래 글: ${it.original}`)] : []),
         el("div", { class: "quiz-actions" },
-          el("button", { type: "button", class: "retry", onclick: () => save(key, { section, original: it.original, text: area.value }, card) }, "저장"),
+          ...(fill ? [] : [el("button", { type: "button", class: "retry",
+            onclick: () => save(key, { section, original: it.original, text: area.value }, card) }, "저장")]),
           el("button", { type: "button", class: "more", onclick: () => save(key, { section, original: it.original, hidden: !it.hidden }, card) },
             it.hidden ? "다시 보이기" : "숨기기"),
-          ...(changed || it.hidden ? [el("button", { type: "button", class: "more",
+          ...(!fill && (changed || it.hidden) ? [el("button", { type: "button", class: "more",
             onclick: () => save(key, { section, original: it.original, text: it.original, hidden: false }, card) }, "원래대로")] : [])),
         el("p", { class: "notice fix-msg", "aria-live": "polite" }));
       return card;

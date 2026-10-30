@@ -101,7 +101,9 @@ def reference_quiz(ref) -> list[dict]:
             seen.add(asked)
             # 교재에서 빈칸에 들어갈 말은 앞뒤를 두 칸 이상 띄워 둡니다.
             parts = [p.strip() for p in re.split(r" {2,}(\S(?:.*?\S)?) {2,}", fill["answer_line"])]
-            quiz.append({"context": fill.get("passage", ""), "parts": parts if len(parts) > 1 else ["", parts[0], ""]})
+            # item: '빈칸 문제' 칸의 항목 글(선생님이 학원 정리 고치기에서 숨기면 퀴즈에서도 뺍니다)
+            quiz.append({"context": fill.get("passage", ""), "parts": parts if len(parts) > 1 else ["", parts[0], ""],
+                         "item": _item("fillins", fill)})
     words = {w["def"]: w for w in ref.get("words") or [] if w.get("w") and w.get("def")}  # 오답 보기가 겹치지 않게 뜻별로 하나
     if len(words) >= 4:
         for meaning, word in words.items():

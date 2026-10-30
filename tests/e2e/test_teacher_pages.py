@@ -144,6 +144,19 @@ def test_a_hidden_suspect_item_leaves_the_suspect_list(page, site):
     expect(page.locator(".fix-item").first).not_to_contain_text("숨김")
 
 
+def test_a_fill_in_question_can_be_hidden_but_not_edited(page, site):
+    cards = open_fixes(page, site)
+    fill = cards.filter(has_text="풀잎은 무엇을 상징하나?")
+    expect(fill).to_have_count(1)
+    expect(fill.locator("textarea")).to_have_count(0)  # 빈칸 표시(두 칸 띄어쓰기)가 깨지지 않게 글은 고치지 않음
+    expect(fill.get_by_role("button", name="저장")).to_have_count(0)
+    fill.get_by_role("button", name="숨기기").click()
+    expect(fill).to_contain_text("숨김")
+    expect(fill.locator(".fix-msg")).to_have_text("저장했습니다. 학생 화면에 바로 나옵니다.")
+    fill.get_by_role("button", name="다시 보이기").click()  # 되돌림
+    expect(fill).not_to_contain_text("숨김")
+
+
 def test_the_list_says_when_only_fifty_are_shown_and_search_ignores_spacing(page, site):
     fake = [{"key": f"k{n}", "title": f"연습 작품 {n}", "grade": "고1", "suspects": 1} for n in range(60)]
     page.route("**/api/references", lambda route: route.fulfill(json=fake))

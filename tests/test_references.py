@@ -66,10 +66,14 @@ def test_fill_in_questions_hide_the_blanks_marked_by_double_spaces():
         {"no": "Q1", "passage": "아버지는 연탄을 나른다.", "answer_line": "아버지의 직업은   연탄배달부  이고,   과묵한  성격이다."},
         {"no": "Q2", "passage": "이 글의 주제는?", "answer_line": "가난한 삶의 애환"}]}
 
+    # item: 정리의 '빈칸 문제' 칸 항목(선생님이 숨기면 퀴즈에서도 뺍니다)
     assert reference_quiz(ref) == [
-        {"context": "아버지는 연탄을 나른다.", "parts": ["아버지의 직업은", "연탄배달부", "이고,", "과묵한", "성격이다."]},
-        {"context": "이 글의 주제는?", "parts": ["", "가난한 삶의 애환", ""]},  # 빈칸 표시가 없으면 답 전체를 가립니다
+        {"context": "아버지는 연탄을 나른다.", "parts": ["아버지의 직업은", "연탄배달부", "이고,", "과묵한", "성격이다."],
+         "item": "아버지는 연탄을 나른다. → 아버지의 직업은   연탄배달부  이고,   과묵한  성격이다."},
+        {"context": "이 글의 주제는?", "parts": ["", "가난한 삶의 애환", ""],  # 빈칸 표시가 없으면 답 전체를 가립니다
+         "item": "이 글의 주제는? → 가난한 삶의 애환"},
     ]
+    assert [q["item"] for q in reference_quiz(ref)] == next(s for s in reference_sections(ref) if s["name"] == "빈칸 문제")["items"]
 
 
 def test_fill_in_questions_repeated_in_the_summary_are_asked_once():

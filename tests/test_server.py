@@ -251,7 +251,8 @@ def test_lectures_without_a_guide_show_the_academy_summary_as_is(tmp_path):
     from academy.references import ref_key
     assert references("고1/제망매가 학습활동") == [
         {"source": "고1 「제망매가」", "key": ref_key(refs[0]), "sections": [{"name": "개요", "items": ["갈래: 향가"], "times": [30.0]}],
-         "quiz": [{"context": "누이의 죽음", "parts": ["슬픔을", "종교적", "으로 극복함"]}]}]
+         "quiz": [{"context": "누이의 죽음", "parts": ["슬픔을", "종교적", "으로 극복함"],
+                   "item": "누이의 죽음 → 슬픔을   종교적  으로 극복함"}]}]
     assert references("고1/속미인곡 학습활동") == []  # 학원 정리를 바탕으로 만든 Claude 요점 정리가 이미 있습니다
     assert references("고1/1강") == []
     assert {v["title"]: v["guide"] for v in client.get("/api/videos").json()} == {

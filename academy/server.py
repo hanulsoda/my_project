@@ -650,7 +650,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             # 어휘 퀴즈는 원본 정리로 만들어서, 선생님이 숨기거나 뜻을 고친 낱말의 문제는 뺍니다
             # (숨긴 낱말을 묻거나 고치기 전의 틀린 뜻을 정답으로 내지 않게).
             words = fixes.get(r.get("key"), {}).get("어휘", {})
-            quiz = [q for q in r.get("quiz", []) if "choices" not in q or q["explanation"] not in words]
+            fills = fixes.get(r.get("key"), {}).get("빈칸 문제", {})  # 선생님이 숨긴 빈칸 문제도 뺍니다
+            quiz = [q for q in r.get("quiz", []) if ("choices" not in q or q["explanation"] not in words)
+                    and not fills.get(q.get("item"), {}).get("hidden")]
             out.append({**r, "sections": sections, "quiz": quiz})
         return out
 
@@ -678,7 +680,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             {"name": s["name"], "items": [{"original": i, "text": fixes.get(s["name"], {}).get(i, {}).get("text", i),
                                            "hidden": bool(fixes.get(s["name"], {}).get(i, {}).get("hidden")),
                                            "suspect": flagged.get(s["name"], {}).get(i)} for i in s["items"]]}
-            for s in reference_sections(ref) if s["name"] != "빈칸 문제"]}  # 빈칸 문제는 요점 정리가 아니라 퀴즈로 나갑니다
+            for s in reference_sections(ref)]}  # 빈칸 문제는 요점 정리가 아니라 퀴즈로 나가고, 숨기기만 됩니다
 
     @app.put("/api/references/{key}/fix")
     def fix_reference(key: str, req: FixRequest, request: Request):
@@ -686,6 +688,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         ref = ref_by_key(key)
         if req.original not in next((s["items"] for s in reference_sections(ref) if s["name"] == req.section), []):
             raise HTTPException(404, "그 항목을 찾을 수 없습니다")
+        if req.section == "빈칸 문제" and req.text not in (None, req.original):  # 빈칸 표시(두 칸 띄어쓰기)가 깨지기 쉬워
+            raise HTTPException(400, "빈칸 문제는 숨기기만 할 수 있습니다")
         with fixes_lock:
             fixes = read_fixes()
             entry = fixes.setdefault(key, {}).setdefault(req.section, {}).setdefault(req.original, {})

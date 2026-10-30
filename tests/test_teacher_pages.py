@@ -118,6 +118,29 @@ def test_a_summary_with_every_item_hidden_is_not_shown_or_counted(lectures):
     assert client.get(f"/api/videos/{ids[1]}").json()["references"][0]["quiz"]
 
 
+def test_teachers_can_hide_a_wrong_fill_in_question_but_not_rewrite_it(lectures):
+    video_dir, data_dir, ids = lectures
+    ref = {"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"},
+           "fillins": [{"passage": "누이의 죽음", "answer_line": "슬픔을   종교적  으로 극복함"},
+                       {"passage": "지은이", "answer_line": "월명사가   지었다"}]}
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-123"), client=LAN)
+    key = ref_key(ref)
+    fills = next(s for s in client.get(f"/api/references/{key}").json()["sections"] if s["name"] == "빈칸 문제")["items"]
+    asked = lambda: [q["context"] for q in client.get(f"/api/videos/{ids[0]}").json()["references"][0]["quiz"]]
+    assert [f["original"] for f in fills] == ["누이의 죽음 → 슬픔을   종교적  으로 극복함", "지은이 → 월명사가   지었다"]
+    hide = lambda hidden: client.put(f"/api/references/{key}/fix", json={"section": "빈칸 문제", "original": fills[1]["original"],
+                                                                         "hidden": hidden}, headers=TEACHER)
+
+    assert hide(True).status_code == 200
+    assert asked() == ["누이의 죽음"]  # 숨긴 빈칸 문제는 학생 퀴즈에서 빠짐
+    # 빈칸 표시(두 칸 띄어쓰기)가 깨지기 쉬워 글은 고치지 못하고 숨기기만 합니다
+    rewrite = client.put(f"/api/references/{key}/fix", json={"section": "빈칸 문제", "original": fills[0]["original"],
+                                                              "text": "누이의 죽음 → 다른 답"}, headers=TEACHER)
+    assert rewrite.status_code == 400
+    assert hide(False).status_code == 200
+    assert asked() == ["누이의 죽음", "지은이"]
+
+
 def test_a_teacher_key_a_browser_cannot_send_stops_the_server(tmp_path):
     path = tmp_path / "teacher-key"
     path.write_text("선생님열쇠\n", encoding="utf-8")  # 브라우저는 머리글에 한글을 보낼 수 없어 아무도 못 씀
