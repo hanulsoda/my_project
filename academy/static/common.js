@@ -1,5 +1,16 @@
 // 두 화면(강의 목록, 학습 플레이어)이 함께 쓰는 도우미
 
+// 인터넷으로 들어온 학생은 통과(12시간)가 끝나면 서버가 401로 답합니다. 화면을 다시 불러 로그인 안내를 보여 줍니다.
+// 학원 내부망과, 입장 확인을 켜지 않은 서버는 401을 쓰지 않습니다.
+{
+  const plainFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await plainFetch(...args);
+    if (res.status === 401) location.reload();
+    return res;
+  };
+}
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {

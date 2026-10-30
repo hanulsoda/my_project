@@ -4,6 +4,8 @@
 """
 
 import hashlib
+import html
+import ipaddress
 import json
 import logging
 import os
@@ -11,6 +13,7 @@ import re
 import secrets
 from bisect import bisect_right
 from collections import Counter
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime
 from itertools import accumulate
@@ -22,10 +25,11 @@ from typing import Literal
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from academy.entry import MIN_SECRET_LEN, PASS_TTL, entry_link_ok, make_pass, pass_ok
 from academy.library import find_videos, load_analysis
 from academy.references import find_references, load_references, ref_key, reference_sections, suspects
 from academy.timelink import link_times
@@ -35,6 +39,37 @@ STATIC_DIR = Path(__file__).parent / "static"
 REFRESH_SECONDS = 300  # 이보다 오래된 목록은 뒤에서 다시 훑습니다
 MISS_SECONDS = 30  # 모르는 id가 와도 이 안에 훑었으면 다시 훑지 않습니다
 INDEX_VERSION = 1  # 저장해 두는 서버 요약(.server-index.cache)에 넣는 항목을 바꾸면 올립니다
+PASS_COOKIE = "study_pass"
+LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
+
+
+def _denied_page(site_url: str) -> HTMLResponse:
+    link = f'<p><a href="{html.escape(site_url)}">학원 사이트로 가기</a></p>' if site_url else ""
+    return HTMLResponse(
+        '<!doctype html><html lang="ko"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1"><title>학습 플레이어</title></head>'
+        '<body style="font-family:sans-serif;max-width:480px;margin:15vh auto;padding:0 16px;line-height:1.6">'
+        f'<h1 style="font-size:20px">{LOGIN_NOTICE}</h1>'
+        '<p>학습 플레이어는 학원 사이트의 "강의 보기"로만 들어올 수 있습니다. '
+        '들어온 지 12시간이 지났다면 다시 들어와 주세요.</p>'
+        f"{link}</body></html>",
+        status_code=401)
+
+
+def _from_outside(request) -> bool:
+    """학원 내부망 밖(인터넷)에서 온 요청인지. DS918+ 역방향 프록시가 X-Forwarded-For 맨 오른쪽에 붙인 주소가
+    실제 접속 주소입니다(그 앞의 주소는 학생이 마음대로 넣을 수 있음). 알 수 없으면 밖으로 봅니다."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        host = forwarded.split(",")[-1].strip()
+    elif request.headers.get("x-forwarded-proto"):
+        return True  # 프록시를 거쳤는데 실제 접속 주소를 알려 주지 않음(설정 빠뜨림)
+    else:
+        host = request.client.host if request.client else ""
+    try:
+        return not ipaddress.ip_address(host).is_private
+    except ValueError:
+        return True
 
 
 class Turn(BaseModel):
@@ -82,8 +117,11 @@ class PicksRequest(BaseModel):
 
 
 def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=(),
-               teacher_key=None) -> FastAPI:
-    """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다."""
+               teacher_key=None, entry_secret="", site_url="") -> FastAPI:
+    """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다.
+
+    entry_secret을 주면 인터넷(학원 내부망 밖)에서 온 요청은 학원 사이트 입장 링크로 받은 통과 쿠키가 있어야 합니다.
+    """
     @asynccontextmanager
     async def lifespan(app):
         # NAS를 훑고 분석 상태를 읽고 학원 정리를 짝짓는 데 시간이 걸려, 첫 학생이 기다리지 않게 켜자마자 해 두고 요약을 저장합니다.
@@ -92,6 +130,18 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     # 서버가 자동으로 만드는 API 설명서(/docs 등)는 바깥에 보일 필요가 없어 끕니다.
     app = FastAPI(title="학원 학습 플레이어", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    if entry_secret:
+        # 보안 머리글보다 안쪽이라 로그인 안내 화면에도 머리글이 붙습니다. 학원 내부망은 지금처럼 그대로 씁니다.
+        @app.middleware("http")
+        async def require_pass(request: Request, call_next):
+            path = request.url.path
+            if (path == "/enter" or not _from_outside(request)
+                    or pass_ok(entry_secret, request.cookies.get(PASS_COOKIE), wall_clock())):
+                return await call_next(request)
+            if path.startswith(("/api/", "/media/")):
+                return JSONResponse({"detail": LOGIN_NOTICE}, status_code=401)
+            return _denied_page(site_url)
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -103,6 +153,20 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     # 강의 목록(약 550KB)·화면 파일을 압축해 휴대폰에 빨리 보냅니다. 영상·사진·영상 탐색(206)은 그대로 둡니다(Starlette 기본값).
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    @app.get("/enter")
+    def enter(request: Request, exp: str | None = None, sig: str | None = None):
+        """학원 사이트의 "강의 보기"가 보내는 입장 링크. 맞으면 12시간짜리 통과 쿠키를 줍니다."""
+        if not entry_secret:
+            return RedirectResponse("/", 303)
+        if not entry_link_ok(entry_secret, exp, sig, wall_clock()):
+            return _denied_page(site_url)
+        res = RedirectResponse("/", 303)
+        # DS918+가 https로 받아 http로 넘겨도 학생 브라우저와는 https라서 Secure를 붙입니다.
+        https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+        res.set_cookie(PASS_COOKIE, make_pass(entry_secret, wall_clock()), max_age=PASS_TTL,
+                       httponly=True, samesite="lax", secure=https)
+        return res
 
     library = {"at": None, "videos": [], "by_id": {}}
     scan_lock = Lock()
@@ -657,6 +721,19 @@ def _claude_answer():
     return answer
 
 
+def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
+    """(입장 링크 비밀 키, 학원 사이트 주소). 복사하다 붙은 앞뒤 공백은 지웁니다."""
+    secret = env.get("ENTRY_SECRET", "").strip()
+    # "1"뿐 아니라 "true"·"yes"도 켜진 것으로 봅니다. 꺼진 것으로 잘못 읽으면 인터넷에 그대로 열리기 때문입니다.
+    if env.get("REQUIRE_ENTRY", "").strip() not in ("", "0") and len(secret) < MIN_SECRET_LEN:
+        raise SystemExit(f"ENTRY_SECRET(입장 링크 비밀 키)가 없거나 {MIN_SECRET_LEN}자보다 짧아서 서버를 시작하지 않습니다.")
+    site_url = env.get("SITE_URL", "").strip()
+    # 입장이 막힌 화면의 "학원 사이트로 가기" 링크가 되므로 웹 주소만 받습니다.
+    if site_url and not re.match(r"https?://", site_url, re.I):
+        raise SystemExit(f"SITE_URL은 https:// 로 시작하는 학원 사이트 주소여야 합니다 (지금 값: {site_url})")
+    return secret, site_url
+
+
 def _teacher_key(path):
     """선생님 열쇠 파일(TEACHER_KEY_FILE)의 글. 파일이 없거나 비었으면 None: 아무도 '이번 주 강의' 등을 바꿀 수 없습니다."""
     try:
@@ -671,4 +748,5 @@ app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  load_references(os.environ.get("REFERENCES_FILE")),
                  os.environ.get("LOG_DIR"),
                  tuple(filter(None, os.environ.get("USAGE_IGNORE", "").split(","))),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
-                 _teacher_key(os.environ.get("TEACHER_KEY_FILE")))
+                 _teacher_key(os.environ.get("TEACHER_KEY_FILE")),
+                 *entry_settings(os.environ))  # 인터넷으로 열 때만: 학원 사이트 입장 확인(docs/인터넷-열기.md)

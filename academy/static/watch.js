@@ -3,6 +3,8 @@ const id = params.get("id");
 const $ = (elementId) => document.getElementById(elementId);
 const video = $("video");
 video.src = `/media/${id}`;
+// 영상을 보다가 통과가 끝나면 영상 요청이 401로 막힙니다. 서버에 한 번 물어 401이면 로그인 안내로 바뀝니다(common.js).
+video.addEventListener("error", () => fetch(`/api/videos/${id}`).catch(() => {}));
 
 let chapters = [];  // { start, title, card, bar }
 let pages = [];     // { start, item }
