@@ -104,13 +104,18 @@ def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now
         hour, minute = map(int, until.split(":"))
         deadline = began.replace(hour=hour, minute=minute, second=0, microsecond=0)
         deadline += timedelta(days=1) if deadline <= began else timedelta()
-    failures = 0
+    failures = made = 0
+
+    def summary(stopped):  # 현황 화면은 날짜로 시작하는 줄만 읽습니다. 매일 아침의 정상 종료는 '멈춤'(고장은 '멈춥니다')
+        print(f"{datetime.now():%Y-%m-%d %H:%M} 자동 목차 {made}개 만듦" + (f", 실패 {failures}개" if failures else "")
+              + (f", {until}이 되어 멈춤(다음에 이어서)" if stopped else ", 남은 강의 없음"), flush=True)
+
     for video in sorted(find_videos(video_dir), key=lambda v: has_summary(v["title"])):  # False(정리 없음) 먼저
-        data = load_analysis(data_dir, video["id"])
+        data = _load(data_dir, video)
         if not data or not data.get("segments") or data.get("guide") or "toc" in data:
             continue
         if deadline and now() >= deadline:
-            print(f"{until}이 지나 멈춥니다. 다음에 실행하면 이어서 합니다.", flush=True)
+            summary(stopped=True)
             return failures, False
         print(f"목차: {video['title']}", flush=True)
         try:
@@ -119,10 +124,26 @@ def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now
             failures += 1
             print(f"  실패: {e}", flush=True)
             continue
+        # ollama를 기다리는 동안 분석이 Claude 요점 정리를 저장했을 수 있어, 다시 읽어 목차만 더합니다.
+        data = _load(data_dir, video)
+        if not data or data.get("guide"):
+            continue
         # 쓸 수 없는 답이었어도 빈 목차로 남겨 매일 밤 다시 묻지 않습니다.
         data["toc"] = {"model": MODEL, "chapters": chapters or []}
         save_analysis(data_dir, video["id"], data)
+        made += 1
+    summary(stopped=False)
     return failures, True
+
+
+def _load(data_dir, video):
+    """손으로 고치다 형식이 깨진 분석 파일은 건너뜁니다(다른 강의는 계속)."""
+    try:
+        data = load_analysis(data_dir, video["id"])
+    except ValueError:
+        print(f"분석 파일 형식 오류, 건너뜀: {video['title']}", flush=True)
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def main():

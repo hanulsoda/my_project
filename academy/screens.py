@@ -7,6 +7,7 @@
 import importlib.util
 
 import av
+import numpy as np
 
 FIRST = 20  # 페이지가 뜨고 이만큼 지난 뒤부터 읽음(넘기는 중인 화면을 피함)
 EVERY = 60
@@ -40,11 +41,18 @@ def _frame_at(container, stream, t):
     # 페이지 시각은 영상 시작을 0초로 센 값이라, 잘라 낸 녹화(첫 화면 시각이 0이 아님)는 그만큼 더해 찾습니다.
     t += float(stream.start_time * stream.time_base) if stream.start_time else 0.0
     container.seek(int(t / stream.time_base), stream=stream)  # t 앞의 키프레임으로 간 뒤 t까지 풀어 냄
-    frame = None
+    # t에 떠 있던 화면 = t 이전의 마지막 프레임. 화면이 그대로면 프레임을 적지 않는 녹화(VFR)에서는 t 뒤 첫 프레임이 다음 페이지입니다.
+    shown = None
     for frame in container.decode(stream):
-        if frame.time is not None and frame.time >= t:
+        if frame.time is None:
+            continue
+        if frame.time > t + 1e-6 and shown is not None:
             break
-    return frame.to_ndarray(format="bgr24")
+        shown = frame
+        if frame.time >= t:
+            break
+    # 휴대폰 영상은 '돌려서 보여 줘'라는 정보만 붙어 있어 직접 세웁니다(페이지 그림과 같게, 반시계 방향).
+    return np.ascontiguousarray(np.rot90(shown.to_ndarray(format="bgr24"), round(shown.rotation / 90) % 4))
 
 
 def paddle_ocr():

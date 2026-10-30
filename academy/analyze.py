@@ -5,8 +5,10 @@
 """
 
 import argparse
+import fcntl
 import os
 import sys
+import time
 from itertools import groupby
 from pathlib import Path
 
@@ -15,30 +17,65 @@ import numpy as np
 from academy.library import VIDEO_EXTS, find_videos, load_analysis, save_analysis
 
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
+SETTLE_SECONDS = 600  # 이보다 최근에 바뀐 영상은 아직 NAS로 복사 중일 수 있어 다음에 분석합니다
+
+
+def run_lock(data_dir, part):
+    """같은 묶음(--part)의 분석이 이미 돌고 있으면 None. 돌려준 파일을 닫으면(프로세스가 끝나면) 풀립니다."""
+    Path(data_dir).mkdir(parents=True, exist_ok=True)
+    lock = open(Path(data_dir) / f".analyze-{part[0]}of{part[1]}.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        return None
+    return lock
 
 
 def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(1, 1),
-                detect_pages=None, read_screens=None, find_references=None) -> int:
+                detect_pages=None, read_screens=None, find_references=None, settle_seconds=0) -> int:
     """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
 
     read_screens가 있으면 요점 정리를 만들 때 페이지마다 화면 글자를 읽어 근거로 함께 보냅니다.
     find_references(제목, 화면 글자 줄)는 짝지어지는 학원 요점 정리를 {"source", "text"} 목록으로 돌려줍니다.
+    settle_seconds: 이보다 최근에 바뀐 영상은 복사 중일 수 있어 받아쓰지 않습니다(반쯤 받아쓴 것이 '분석됨'으로 남지 않게).
     """
     videos = find_videos(video_dir)
     if not videos:
         print(f"영상이 없습니다: {Path(video_dir).resolve()} ({' '.join(sorted(VIDEO_EXTS))} 파일만 찾습니다)")
         return 0
-    # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
-    videos = videos[part[0] - 1::part[1]]
+    lock = run_lock(data_dir, part)  # 밤 작업이 겹쳐 같은 강의를 두 번 받아쓰고 Claude 비용을 두 번 내지 않게
+    if lock is None:
+        print("이 묶음의 분석이 이미 돌고 있어 이번에는 하지 않습니다.")
+        return 0
+    try:
+        return _analyze(videos[part[0] - 1::part[1]],  # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
+                        data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds)
+    finally:
+        lock.close()
+
+
+def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds):
     failures = 0
     for n, video in enumerate(videos, 1):
         print(f"[{n}/{len(videos)}] {video['title']}", flush=True)
-        data = None if force else load_analysis(data_dir, video["id"])
+        try:
+            old = load_analysis(data_dir, video["id"])
+            if old is not None and not isinstance(old, dict):
+                raise ValueError("JSON 객체가 아님")
+        except ValueError as e:  # 손으로 고치다 형식이 깨진 파일: 덮어쓰지 않고 이 강의만 건너뜁니다
+            failures += 1
+            print(f"  분석 파일 형식 오류, 건너뜀(고친 곳의 쉼표·따옴표를 확인하세요): {e}", file=sys.stderr)
+            continue
+        data = None if force else old
         done = data or {}
         need_pages = detect_pages is not None and "pages" not in done
         need_guide = make_guide is not None and not done.get("guide")
         if data and not (need_pages or need_guide):
             print("  이미 분석됨, 건너뜀")
+            continue
+        if not data and time.time() - video["path"].stat().st_mtime < settle_seconds:
+            print("  방금 바뀐 영상이라(복사 중일 수 있음) 다음에 분석합니다")
             continue
         try:
             if not data:
@@ -46,6 +83,8 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
                 segments, duration = transcribe(video["path"])
                 data = {"title": video["title"], "duration": duration,
                         "segments": segments, "guide": None}
+                # 다시 분석(--force)해도 새 요점 정리가 생길 때까지 예전 요점 정리·목차(비용을 들인 결과)를 둡니다.
+                data.update({key: old[key] for key in ("guide", "toc") if old and key in old})
                 # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다.
                 save_analysis(data_dir, video["id"], data)
             if need_pages:
@@ -55,6 +94,9 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
                 except Exception as e:  # 페이지는 덤이라 실패해도 요점 정리는 만듭니다. 매번 다시 시도하지도 않습니다.
                     print(f"  페이지 찾기 실패, 건너뜀: {e}", file=sys.stderr)
                     data["pages"] = []
+                for page in data["pages"]:  # 다시 찾은 페이지에 예전 교재 쪽수 이름표를 이어 붙입니다(새 요점 정리가 다시 붙임)
+                    page.update(next(({"label": p["label"]} for p in (old or {}).get("pages", [])
+                                      if p.get("label") and abs(p["start"] - page["start"]) <= 1), {}))
                 save_analysis(data_dir, video["id"], data)
             if need_guide:
                 screens = None
@@ -134,6 +176,10 @@ def whisper_transcriber():
 
     def transcribe(path):
         nonlocal model
+        import av
+        with av.open(str(path)) as container:  # 소리 트랙이 없는 영상(화면만 녹화)은 '음성 없음'으로: 페이지는 만듭니다
+            if not container.streams.audio:
+                return [], (container.duration or 0) / av.time_base
         if model is None:  # 모델 로딩이 느리므로 받아쓸 영상이 있을 때 한 번만 불러옵니다.
             model = WhisperModel(os.environ.get("WHISPER_MODEL", "large-v3-turbo"),
                                  device="auto", compute_type="auto")
@@ -188,6 +234,7 @@ def main():
         detect_pages=detect_pages,
         read_screens=read_screens,
         find_references=find_references,
+        settle_seconds=SETTLE_SECONDS,
     )
     if failures:
         print(f"{failures}개 영상 분석 실패. 다시 실행하면 실패한 영상만 이어서 분석합니다.", file=sys.stderr)
