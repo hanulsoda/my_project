@@ -37,8 +37,8 @@ for (const tab of document.querySelectorAll(".tabs button")) {
 // ---- 데이터 불러오기 ----
 fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(선생님용 이용 통계)
   .then((r) => (r.ok ? r.json() : Promise.reject()))
-  .then(render)
-  .catch(() => { $("title").textContent = "영상을 찾을 수 없습니다"; });
+  // 화면을 그리다 난 오류는 '영상 없음'으로 덮지 않습니다(브라우저 콘솔에 그대로 나옴).
+  .then(render, () => { $("title").textContent = "영상을 찾을 수 없습니다"; });
 
 function render({ title, analysis, references = [], prev = null, next = null }) {
   document.title = title;
@@ -62,7 +62,7 @@ function render({ title, analysis, references = [], prev = null, next = null }) 
   if (next) {
     $("next-card").setAttribute("href", `watch.html?id=${next.id}`);
     $("next-title").textContent = next.title.split("/").pop();
-    video.addEventListener("ended", () => { $("next-card").hidden = false; });
+    video.addEventListener("ended", () => { if (loopEnd === null) $("next-card").hidden = false; });  // 구간 반복 중이면 다시 돕니다
     video.addEventListener("play", () => { $("next-card").hidden = true; });
   }
   video.setAttribute("aria-label", title);
@@ -79,7 +79,7 @@ function render({ title, analysis, references = [], prev = null, next = null }) 
   $("print-btn").hidden = !(analysis.guide || references.length || toc.length);
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);
-    renderQuiz(analysis.guide.quiz);
+    renderQuiz(analysis.guide.quiz || []);  // 손으로 고친 분석 파일에 퀴즈가 없을 수 있음
   } else if (references.length) {
     renderReferences(references);
     renderQuiz(references.flatMap((r) => r.quiz));
@@ -110,7 +110,7 @@ function renderChapters(list, duration) {
     const card = el("article", { class: "chapter" },
       el("h3", {}, timeButton(c.start), " ", c.title),
       el("ul", {}, ...c.points.map((p) => el("li", {}, p))));
-    const end = i + 1 < list.length ? list[i + 1].start : duration;
+    const end = i + 1 < list.length ? list[i + 1].start : duration ?? c.start + 60;  // 길이가 없는 분석 파일도 막대가 보이게
     const segment = el("span", {
       class: "segment",
       style: `flex-grow: ${Math.max(end - c.start, 1)}`,
@@ -330,8 +330,9 @@ function renderNotes() {
   if (!notes.length) $("notes").append(el("li", { class: "notice" }, "아직 메모가 없습니다. 영상을 보다가 기억할 장면에서 추가하세요."));
 }
 
-function addNote(text) {  // 지금 장면에 메모(글이 없으면 북마크)
+function addNote(text) {  // 지금 장면에 메모(글이 없으면 북마크). 같은 초에 같은 글이 있으면 더하지 않습니다(두 번 누름).
   const notes = store.get(notesKey) || [];
+  if (notes.some((n) => Math.floor(n.t) === Math.floor(video.currentTime) && n.text === text)) return;
   notes.push({ t: video.currentTime, text });
   notes.sort((a, b) => a.t - b.t);
   store.set(notesKey, notes);
@@ -350,6 +351,7 @@ $("bookmark-btn").onclick = () => {
 renderNotes();
 
 // ---- 구간 반복: 한 번 누르면 시작점, 두 번째는 끝점(반복 시작), 세 번째는 끄기. 어려운 설명을 여러 번 들을 때 ----
+// 시작점만 찍은 뒤 시작점이나 그 앞에서 다시 누르면 시작점을 지웁니다.
 let loopStart = null, loopEnd = null;
 function stepLoop() {
   const t = video.currentTime;
@@ -358,7 +360,9 @@ function stepLoop() {
     $("loop-label").textContent = `끝점 찍기 (시작 ${fmt(t)})`;
   } else if (loopEnd === null) {
     if (t <= loopStart + 1) {
-      $("status").textContent = `끝점은 시작점(${fmt(loopStart)})보다 뒤에서 찍어 주세요.`;
+      loopStart = null;
+      $("loop-label").textContent = "구간 반복";
+      $("status").textContent = "구간 반복 시작점을 지웠습니다. 끝점은 시작점보다 뒤에서 찍어 주세요.";
       return;
     }
     loopEnd = t;
@@ -373,6 +377,7 @@ function stepLoop() {
 }
 $("loop-btn").onclick = stepLoop;
 video.addEventListener("timeupdate", () => { if (loopEnd !== null && video.currentTime >= loopEnd) video.currentTime = loopStart; });
+video.addEventListener("ended", () => { if (loopEnd !== null) seek(loopStart); });  // 끝점이 영상 끝이면 멈추므로 다시 틉니다
 
 // ---- 공부 기록: 재생 중에 흐른 시간을 모아 두었다가 멈출 때·15초마다·화면을 떠날 때 저장합니다(사이드바 '이번 주 공부') ----
 let studyTick = null, studyUnsaved = 0;
@@ -433,8 +438,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "]") jumpChapter(1);
   else if (e.key === "?") $("shortcuts").showModal();
   // 글자 단축키는 키 자리(code)로 봅니다: 한글 자판(ㅠ·ㅜ·ㅔ)일 때도 같은 키로 됩니다.
-  else if (e.code === "KeyB") $("bookmark-btn").click();
-  else if (e.code === "KeyR") stepLoop();
+  else if (e.code === "KeyB") { if (!e.repeat) $("bookmark-btn").click(); }  // 꾹 누르고 있어도 한 번만
+  else if (e.code === "KeyR") { if (!e.repeat) stepLoop(); }
   else if (e.code === "KeyN" && !$("next-lecture").hidden) location.href = $("next-lecture").href;
   else if (e.code === "KeyP" && !$("prev-lecture").hidden) location.href = $("prev-lecture").href;
   else return;
@@ -461,9 +466,10 @@ const savePosition = () => {
 };
 
 video.addEventListener("loadedmetadata", () => {
+  if (video.currentTime > 0) return;  // 영상을 받기 전에 학생이 챕터·페이지를 눌러 옮겼으면 그대로 둡니다
   const saved = store.get(posKey);
-  const from = Number(params.get("t"));  // 내용 검색 결과에서 고른 시각
-  if (from > 0) {
+  const from = params.has("t") ? Number(params.get("t")) : NaN;  // 내용 검색 결과·메모에서 고른 시각(0초도)
+  if (from >= 0) {
     video.currentTime = from;
     $("status").textContent = `찾은 낱말을 말한 ${fmt(from)}부터 봅니다.`;
   } else if (saved && saved.t > 5 && saved.t < video.duration - 5) {
@@ -487,7 +493,7 @@ function currentItem(items, t) {
   return found;
 }
 
-let activeChapter = null, activePage = null, activeRef = null;
+let activeChapter = null, activePage = null, activeRefStart = null;
 function showCurrent(t) {
   const page = currentItem(pages, t);
   if (page !== activePage) {
@@ -505,12 +511,11 @@ function showCurrent(t) {
                                             " ", el("strong", {}, chapter.title)] : []));
     activeChapter = chapter;
   }
-  // 학원 정리 항목은 시간을 찾을 때 본 3분 구간 동안만 강조합니다.
+  // 학원 정리 항목은 시간을 찾을 때 본 3분 구간 동안만 강조합니다. 같은 시각에 붙은 항목은 모두 강조합니다.
   const latest = currentItem(refItems, t);
-  const ref = latest && t - latest.start <= 180 ? latest : null;
-  if (ref !== activeRef) {
-    activeRef?.item.classList.remove("active");
-    ref?.item.classList.add("active");
-    activeRef = ref;
+  const refStart = latest && t - latest.start <= 180 ? latest.start : null;
+  if (refStart !== activeRefStart) {
+    for (const r of refItems) r.item.classList.toggle("active", r.start === refStart);
+    activeRefStart = refStart;
   }
 }
