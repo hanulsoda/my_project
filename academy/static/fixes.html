@@ -38,28 +38,41 @@
     // 의심 항목(너무 긴 항목, 한 단계에 내용이 몰림)은 표시해 둡니다. 저장은 X-Teacher-Key가 맞아야 됩니다.
     const $ = (elementId) => document.getElementById(elementId);
     let refs = [];
-    const teacherKey = () => store.get("teacher-key") || "";
     const say = (text) => { $("fix-status").textContent = text; };
+    const flat = (text) => text.toLowerCase().replace(/\s+/g, "");  // 찾을 때 띄어쓰기는 보지 않습니다('운수좋은날')
     fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((videos) => fillSidebar(videos, { here: "" }));
 
+    // 열쇠 칸은 저장을 누른 항목 바로 아래로 옮겨 보여 줍니다(휴대폰에서 맨 위까지 올라가지 않게). 항목을 다시 그리기 전에 제자리로.
+    const tell = (card, text) => { card.querySelector(".fix-msg").textContent = text; };
+    const keyHome = () => $("fix-status").before($("key-form"));
+    function askKey(card, text) {
+      card.append($("key-form"));
+      $("key-form").hidden = false;
+      tell(card, text);
+      $("teacher-key").focus();
+    }
     $("key-form").onsubmit = (e) => {
       e.preventDefault();
-      if (!$("teacher-key").value.trim()) return;
-      store.set("teacher-key", $("teacher-key").value.trim());
+      const key = $("teacher-key").value.trim(), card = $("key-form").closest(".fix-item");
+      const answer = (text) => (card ? tell(card, text) : say(text));
+      if (!key) return;
+      if (!keyLooksOk(key)) return answer(KEY_HINT);
+      store.set("teacher-key", key);
       $("teacher-key").value = "";
       $("key-form").hidden = true;
-      say("열쇠를 넣었습니다. 다시 저장해 주세요.");
+      answer("열쇠를 넣었습니다. 다시 저장해 주세요.");
     };
 
     function renderList() {
-      const words = $("ref-search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const words = $("ref-search").value.split(/\s+/).filter(Boolean).map(flat);
       const shown = refs.filter((r) => (!$("suspect-only").checked || r.suspects)
-                                       && words.every((w) => `${r.grade} ${r.title}`.toLowerCase().includes(w)));
+                                       && words.every((w) => flat(`${r.grade} ${r.title}`).includes(w)));
       const flagged = refs.filter((r) => r.suspects).length;
       $("view-sub").textContent = `학원 정리 ${refs.length.toLocaleString()}개 · 의심 항목 있는 정리 ${flagged.toLocaleString()}개`;
       $("ref-list").replaceChildren(...shown.slice(0, 50).map((r) => el("li", {},
         el("button", { type: "button", class: "link", onclick: () => openRef(r.key) }, `${r.grade} · ${r.title}`),
         ...(r.suspects ? [" ", el("span", { class: "chip warn" }, `의심 ${r.suspects}`)] : []))));
+      if (shown.length > 50) $("ref-list").append(el("li", { class: "notice" }, `${shown.length.toLocaleString()}개 중 50개만 보입니다. 작품 이름으로 찾아 주세요.`));
       if (!shown.length) $("ref-list").append(el("li", { class: "notice" }, "찾은 정리가 없습니다."));
     }
     $("ref-search").oninput = renderList;
@@ -71,46 +84,54 @@
       renderDetail(await res.json());
     }
 
-    async function save(key, body) {
-      if (!teacherKey()) {
-        $("key-form").hidden = false;
-        return say("고치려면 선생님 열쇠가 필요합니다. 열쇠를 넣어 주세요.");
-      }
+    // 저장하면 그 항목만 다시 그립니다: 다른 항목에 쓰다 만 글이 지워지지 않게.
+    async function save(key, body, card) {
+      if (!teacherKey()) return askKey(card, "고치려면 선생님 열쇠가 필요합니다. 열쇠를 넣어 주세요.");
       const res = await fetch(`/api/references/${key}/fix`, {
         method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() }, body: JSON.stringify(body) });
-      if (res.status === 429) return say("열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
+      if (res.status === 429) return tell(card, "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
       if (res.status === 403) {
         localStorage.removeItem("teacher-key");
-        $("key-form").hidden = false;
-        return say("선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.");
+        return askKey(card, "선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.");
       }
-      if (!res.ok) return say("저장하지 못했습니다. 잠시 뒤 다시 해 주세요.");
-      renderDetail(await res.json());
-      say("저장했습니다. 학생 화면에 바로 나옵니다.");
+      if (!res.ok) return tell(card, "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      const ref = await res.json(), all = ref.sections.flatMap((s) => s.items);
+      const listed = refs.find((r) => r.key === key);  // 목록의 의심 수: 고치거나 숨긴 항목은 빼고
+      if (listed) listed.suspects = all.filter((it) => it.suspect && it.text === it.original && !it.hidden).length;
+      const it = ref.sections.find((s) => s.name === body.section).items.find((i) => i.original === body.original);
+      if (card.contains($("key-form"))) keyHome();
+      const fresh = itemCard(key, body.section, it);
+      card.replaceWith(fresh);
+      tell(fresh, "저장했습니다. 학생 화면에 바로 나옵니다.");
+      fresh.querySelector("button").focus({ preventScroll: true });  // 키보드로 저장했으면 같은 자리에서 이어서
     }
 
     function itemCard(key, section, it) {
       const area = el("textarea", { rows: String(Math.min(8, Math.ceil(it.text.length / 45) + 1)), "aria-label": `${section} 항목 고치기` });
       area.value = it.text;
       const changed = it.text !== it.original;
-      return el("article", { class: it.hidden ? "fix-item hidden-item" : "fix-item" },
+      const card = el("article", { class: it.hidden ? "fix-item hidden-item" : "fix-item" },
         el("p", { class: "fix-flags" }, ...(it.suspect ? [el("span", { class: "chip warn" }, it.suspect)] : []),
           ...(changed ? [el("span", { class: "chip" }, "고침")] : []), ...(it.hidden ? [el("span", { class: "chip" }, "숨김")] : [])),
         area,
         ...(changed ? [el("p", { class: "fix-original" }, `원래 글: ${it.original}`)] : []),
         el("div", { class: "quiz-actions" },
-          el("button", { type: "button", class: "retry", onclick: () => save(key, { section, original: it.original, text: area.value }) }, "저장"),
-          el("button", { type: "button", class: "more", onclick: () => save(key, { section, original: it.original, hidden: !it.hidden }) },
+          el("button", { type: "button", class: "retry", onclick: () => save(key, { section, original: it.original, text: area.value }, card) }, "저장"),
+          el("button", { type: "button", class: "more", onclick: () => save(key, { section, original: it.original, hidden: !it.hidden }, card) },
             it.hidden ? "다시 보이기" : "숨기기"),
           ...(changed || it.hidden ? [el("button", { type: "button", class: "more",
-            onclick: () => save(key, { section, original: it.original, text: it.original, hidden: false }) }, "원래대로")] : [])));
+            onclick: () => save(key, { section, original: it.original, text: it.original, hidden: false }, card) }, "원래대로")] : [])),
+        el("p", { class: "notice fix-msg", "aria-live": "polite" }));
+      return card;
     }
 
     function renderDetail(ref) {
+      keyHome();
       $("ref-list").hidden = true;
       $("ref-detail").hidden = false;
       $("ref-detail").replaceChildren(
-        el("button", { type: "button", class: "more", onclick: () => { $("ref-detail").hidden = true; $("ref-list").hidden = false; } }, "‹ 정리 목록"),
+        el("button", { type: "button", class: "more", onclick: () => { keyHome(); $("ref-detail").hidden = true; $("ref-list").hidden = false; renderList(); } },
+          "‹ 정리 목록"),
         el("h2", {}, `${ref.grade} 「${ref.title}」`),
         ...ref.sections.flatMap((s) => [el("h3", {}, s.name), ...s.items.map((it) => itemCard(ref.key, s.name, it))]));
     }

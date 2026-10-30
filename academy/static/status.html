@@ -64,7 +64,9 @@
   <script src="common.js"></script>
   <script>
     const $ = (elementId) => document.getElementById(elementId);
-    let videos = [], chosen = [];  // chosen: 고른 강의 [{id, title}]
+    let videos = [], chosen = [], pickedAt = null;  // chosen: 고른 강의 [{id, title}], pickedAt: 불러온 목록의 저장 시각
+    const MAX_PICKS = 20;  // 서버도 20개까지 받습니다
+    const flat = (text) => text.toLowerCase().replace(/\s+/g, "");  // 찾을 때 띄어쓰기는 보지 않습니다('운수좋은날')
     fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => {
       videos = list;
       fillSidebar(videos, { here: "" });
@@ -72,12 +74,14 @@
     });
 
     // ---- 선생님: 이번 주 강의 지정(열쇠는 X-Teacher-Key로 보내고, 틀리면 지우고 다시 묻습니다) ----
-    const teacherKey = () => store.get("teacher-key") || "";
     const showTeacher = () => { $("key-form").hidden = !!teacherKey(); $("picker").hidden = !teacherKey(); };
     $("key-form").onsubmit = (e) => {
       e.preventDefault();
-      if (!$("teacher-key").value.trim()) return;
-      store.set("teacher-key", $("teacher-key").value.trim());
+      const key = $("teacher-key").value.trim();
+      if (!key) return;
+      if (!keyLooksOk(key)) return void ($("pick-status").textContent = KEY_HINT);
+      $("pick-status").textContent = "";
+      store.set("teacher-key", key);
       $("teacher-key").value = "";
       showTeacher();
       loadStatus();  // 인터넷에서 열쇠가 없어 못 본 현황을 다시 불러옵니다
@@ -96,16 +100,20 @@
       if (!chosen.length) $("pick-list").append(el("li", { class: "notice" }, "아직 고른 강의가 없습니다. 아래에서 찾아 더하세요."));
     }
     $("pick-search").oninput = () => {
-      const words = $("pick-search").value.toLowerCase().split(/\s+/).filter(Boolean);
-      const found = words.length ? videos.filter((v) => words.every((w) => v.title.toLowerCase().includes(w))
+      const words = $("pick-search").value.split(/\s+/).filter(Boolean).map(flat);
+      if (words.length && chosen.length >= MAX_PICKS) {
+        return $("pick-found").replaceChildren(el("li", { class: "notice" }, `${MAX_PICKS}개까지 고를 수 있습니다. 하나를 뺀 뒤 더하세요.`));
+      }
+      const found = words.length ? videos.filter((v) => words.every((w) => flat(v.title).includes(w))
                                                       && !chosen.some((c) => c.id === v.id)).slice(0, 10) : [];
       $("pick-found").replaceChildren(...found.map((v) => el("li", {}, el("span", { class: "note-text" }, v.title),
         el("button", { type: "button", class: "delete", "aria-label": `${v.title} 더하기`,
                        onclick: () => { chosen.push({ id: v.id, title: v.title }); renderChosen(); $("pick-search").oninput(); } }, "더하기"))));
     };
     $("pick-save").onclick = async () => {
+      // at: 이 화면을 열 때의 저장 시각. 그사이 다른 탭·선생님이 저장했으면 서버가 409로 막습니다(덮어쓰지 않게).
       const res = await fetch("/api/picks", { method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() },
-                                              body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value,
+                                              body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value, at: pickedAt,
                                                                      grades: Object.fromEntries(chosen.map((l) => [l.id, l.grade || ""])) }) });
       if (res.status === 429) return void ($("pick-status").textContent = "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
       if (res.status === 403) {
@@ -114,11 +122,20 @@
         $("pick-status").textContent = "선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.";
         return;
       }
-      $("pick-status").textContent = res.ok ? "저장했습니다. 학생 화면에 바로 나옵니다." : "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.";
-      if (res.ok) { picksLoad = null; fillSidebar(videos, { here: "" }); }
+      const body = await res.json().catch(() => ({}));
+      $("pick-status").textContent = res.ok ? "저장했습니다. 학생 화면에 바로 나옵니다."
+        : res.status === 409 ? body.detail  // 다른 화면에서 먼저 바꿈: 다시 해도 같으니 새로 고침을 알려 줍니다
+        : res.status === 422 ? `저장하지 못했습니다. 강의는 ${MAX_PICKS}개까지, 한마디는 200자까지입니다.`
+        : "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.";
+      if (res.ok) {
+        pickedAt = body.at;
+        picksLoad = null;
+        fillSidebar(videos, { here: "" });
+      }
     };
     fetch("/api/picks").then((r) => r.json()).then((picks) => {
       chosen = picks.lectures;
+      pickedAt = picks.at;
       $("pick-note").value = picks.note || "";
       renderChosen();
     });
@@ -126,8 +143,10 @@
     // 인터넷에서는 선생님 열쇠가 있어야 현황(이용 통계·운영 기록)이 옵니다. 학원 안에서는 열쇠 없이 옵니다.
     const statusOrLocked = (r) => {
       if (r.ok) return r.json();
+      const hadKey = !!teacherKey();
       if (r.status === 403) { localStorage.removeItem("teacher-key"); showTeacher(); }
-      const why = r.status === 403 ? "인터넷에서는 위 '이번 주 강의 지정'에 선생님 열쇠를 넣어야 현황이 보입니다."
+      const why = r.status === 403 && hadKey ? "선생님 열쇠가 맞지 않습니다. 위에 다시 넣어 주세요."
+        : r.status === 403 ? "인터넷에서는 위 '이번 주 강의 지정'에 선생님 열쇠를 넣어야 현황이 보입니다."
         : r.status === 429 ? "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요." : "현황을 불러오지 못했습니다.";
       $("counts").replaceChildren(el("dt", {}, why), el("dd", {}, ""));
       return null;
@@ -141,11 +160,14 @@
       const { target, done, last_3_days: recent } = s.toc_progress;
       // 최근 3일 속도로 남은 날을 어림합니다. 밤 작업 마지막 기록이 '…멈춥니다'(팬·NAS 문제로 멈춤)면 어림하지 않습니다.
       // 매일 아침의 정상 종료 기록은 '멈춤'이라 여기에 걸리지 않습니다.
-      const pace = s.ops?.night?.includes("멈춥니다") ? "지금은 밤 작업이 멈춰 있습니다(아래 운영 기록 참고)."
-        : recent ? `최근 3일 동안 ${recent.toLocaleString()}개(하루 약 ${Math.round(recent / 3)}개) 만들어, 이대로면 약 ${Math.ceil((target - done) / (recent / 3))}일 더 걸립니다.`
+      const left = target - done;
+      const pace = !left ? "모두 처리했습니다."
+        : s.ops?.night?.includes("멈춥니다") ? "지금은 밤 작업이 멈춰 있습니다(아래 운영 기록 참고)."
+        : recent ? `최근 3일 동안 ${recent.toLocaleString()}개${recent >= 3 ? `(하루 약 ${Math.round(recent / 3)}개)` : ""} 만들어, `
+                   + `이대로면 약 ${Math.ceil(left / (recent / 3))}일 더 걸립니다.`
         : "최근 3일 동안 만든 목차가 없습니다(밤 작업이 멈춰 있을 수 있습니다).";
       document.getElementById("toc").textContent = `대상(Claude 요점 정리가 없는 강의) ${target.toLocaleString()}개 중 `
-        + `${done.toLocaleString()}개 처리 (${target ? Math.floor(done / target * 100) : 100}%), 남은 강의 ${(target - done).toLocaleString()}개. ${pace}`;
+        + `${done.toLocaleString()}개 처리 (${target ? Math.floor(done / target * 100) : 100}%), 남은 강의 ${left.toLocaleString()}개. ${pace}`;
       const bar = document.getElementById("toc-bar");
       bar.max = target || 1;
       bar.value = done;

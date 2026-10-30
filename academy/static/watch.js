@@ -319,13 +319,13 @@ const notesKey = `notes:${id}`;
 
 function renderNotes() {
   const notes = store.get(notesKey) || [];
-  $("notes").replaceChildren(...notes.map((n, i) => el("li", {},
+  $("notes").replaceChildren(...notes.map((n) => el("li", {},
     timeButton(n.t),
     el("span", { class: "note-text" }, n.text || "🔖 북마크"),
     el("button", {
       class: "delete",
       "aria-label": `${fmt(n.t)} 메모 삭제`,
-      onclick: () => { notes.splice(i, 1); store.set(notesKey, notes); renderNotes(); },
+      onclick: () => { removeNote(id, n); renderNotes(); },
     }, "삭제"))));
   if (!notes.length) $("notes").append(el("li", { class: "notice" }, "아직 메모가 없습니다. 영상을 보다가 기억할 장면에서 추가하세요."));
 }

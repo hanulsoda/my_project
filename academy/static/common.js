@@ -38,6 +38,12 @@ const store = {
   },
 };
 
+// ---- 선생님 열쇠(현황·학원 정리 고치기): 브라우저는 머리글(X-Teacher-Key)에 영문·숫자·기호만 보낼 수 있습니다 ----
+// 한글 자판 상태로 친 열쇠(예: rkskek → 가나다)는 받지 않고, 예전에 그렇게 기억한 열쇠는 없는 것으로 봅니다.
+const KEY_HINT = "열쇠에 한글이 들어갔습니다. 한/영 키로 영문으로 바꿔 다시 넣어 주세요.";
+const keyLooksOk = (key) => /^[\x20-\x7e]+$/.test(key);
+const teacherKey = () => { const key = store.get("teacher-key") || ""; return keyLooksOk(key) ? key : ""; };
+
 // ---- 왼쪽 사이드바(보관함·폴더): 강의 목록·내 메모·틀린 문제 복습·현황이 함께 씁니다 ----
 // 이어 보기: 다 보지 않은 강의를 최근에 본 순서로 5개
 function recentVideos(videos) {
@@ -247,6 +253,15 @@ function mergeRecords(data) {
     }
   }
   return counts;
+}
+
+// 메모 하나 지우기(내 메모·플레이어): 지금 저장된 목록에서 같은 시각·글을 지웁니다.
+// 화면을 그릴 때 읽어 둔 목록으로 덮어쓰면, 그사이 다른 탭에서 더한 메모가 사라집니다.
+function removeNote(videoId, note) {
+  const notes = store.get(`notes:${videoId}`) || [];
+  const at = notes.findIndex((n) => n.t === note.t && (n.text || "") === (note.text || ""));
+  if (at >= 0) notes.splice(at, 1);
+  store.set(`notes:${videoId}`, notes);
 }
 
 // ---- 퀴즈 카드: 플레이어와 '틀린 문제 복습'이 함께 씁니다 ----

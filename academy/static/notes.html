@@ -33,7 +33,7 @@
       }
       const name = (id) => titles.get(id) || "목록에 없는 강의";  // 지워졌거나 옮겨진 강의의 메모도 버리지 않고 보여 줍니다
       lists.sort((a, b) => name(a.id).localeCompare(name(b.id), "ko"));
-      box.replaceChildren(...lists.map(({ id, items }) => el("section", { class: "review-lecture" },
+      box.replaceChildren(...lists.map(({ id, items }) => el("section", { class: "review-lecture", "data-id": id },
         el("h2", {}, titles.has(id) ? el("a", { href: `watch.html?id=${id}` }, name(id)) : name(id)),
         el("ul", { class: "notes" }, ...items.map((n, i) => el("li", {},
           el("a", { class: "time", href: `watch.html?id=${id}&t=${Math.floor(n.t)}` }, fmt(n.t)),
@@ -41,9 +41,17 @@
           el("button", {
             class: "delete",
             "aria-label": `${fmt(n.t)} 메모 삭제`,
-            onclick: () => { items.splice(i, 1); store.set(`notes:${id}`, items); render(); },
+            onclick: () => {
+              removeNote(id, n);
+              render();
+              // 키보드로 지웠을 때 초점이 화면 맨 처음으로 가지 않게 같은 자리의 다음 삭제 버튼으로
+              const left = box.querySelectorAll(`section[data-id="${id}"] button.delete`);
+              left[Math.min(i, left.length - 1)]?.focus();
+            },
           }, "삭제")))))));
     }
+    // 다른 탭(플레이어 등)에서 메모를 더하거나 지우면 이 화면도 바로 다시 그립니다.
+    addEventListener("storage", (e) => { if (e.key === null || e.key.startsWith("notes:")) render(); });
 
     fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => [])
       .then((list) => { videos = list; titles = new Map(videos.map((v) => [v.id, v.title])); render(); });

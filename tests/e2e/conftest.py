@@ -39,6 +39,11 @@ REFS = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가", 
          "words": [{"w": "울안", "pos": "명사", "def": "울타리를 둘러친 안"}, {"w": "낱말둘", "pos": "명사", "def": "뜻둘"},
                    {"w": "낱말셋", "pos": "명사", "def": "뜻셋"}, {"w": "낱말넷", "pos": "명사", "def": "뜻넷"}]}]
 SAID_REF = [{"start": 30.0, "end": 35.0, "text": "이 작품의 갈래는 향가입니다 누이의 죽음을 종교적으로 극복합니다"}] + said()
+# 선생님 화면 테스트용: 어느 강의에도 붙지 않는 정리(학생 화면 테스트에 영향 없음). 첫 항목은 너무 길어 '의심'.
+TEACHER_REF = {"title": "성난 풀잎", "grade": "고2",
+               "features": [{"text": "긴 항목 " + "가" * 260}, {"text": "둘째 특징"}, {"text": "셋째 특징"}]}
+REFS.append(TEACHER_REF)
+TEACHER_KEY = "e2e-teacher-key"
 
 LECTURES = {  # 영상 경로 → 분석 파일 내용(None이면 분석 전)
     "2022개정/고1/미래엔/제망매가.webm": {"duration": 150.0, "segments": said("반어법"),
@@ -85,7 +90,8 @@ def site(tmp_path_factory):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    app = create_app(videos, data, None, load_references(root / "refs.json"))
+    app = create_app(videos, data, None, load_references(root / "refs.json"), log_dir=root / "logs", teacher_key=TEACHER_KEY)
+    (root / "logs").mkdir()
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
