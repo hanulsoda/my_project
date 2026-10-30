@@ -55,8 +55,10 @@
     let scope = saved.scope === "spoken" ? "spoken" : "title";
     let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
     $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
-    // found: 선생님 말에서 찾은 결과를 보던 중(강의를 보고 돌아오면 다시 찾아 보여 줍니다)
-    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value, found: showingFound });
+    // found: 선생님 말에서 찾은 결과를 보던 중, foundAt: 그때의 화면 주소. 강의를 보고 같은 주소로 돌아오면 다시 찾아 보여 주고,
+    // 폴더 링크(플레이어의 '‹ 폴더' 등)로 오면 그 폴더를 엽니다.
+    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value,
+                                           found: showingFound, foundAt: location.hash });
     let folders = [], total = 0, loaded = false, showingFound = false, side = null, searchSeq = 0;
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
 
@@ -165,7 +167,7 @@
       render();
     };
     const reveal = () => { if (current().kind === "folder") side.reveal(current().name); };  // 고른 하위 폴더가 사이드바에 보이게
-    window.onhashchange = () => { reveal(); render(); scrollTo(0, 0); };
+    window.onhashchange = () => { showingFound = false; reveal(); render(); scrollTo(0, 0); };  // 폴더를 고르면 찾은 결과 대신 그 폴더
     setScope(scope);
 
     function setLayout(next) {
@@ -314,7 +316,7 @@
       loaded = true;
       reveal();
       render();
-      if (saved.found && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
+      if (saved.found && saved.foundAt === location.hash && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
     });
   </script>
 </body>

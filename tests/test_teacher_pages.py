@@ -150,3 +150,10 @@ def test_a_teacher_key_a_browser_cannot_send_stops_the_server(tmp_path):
     path.write_text("plain-key-123\n", encoding="utf-8")
     assert server._teacher_key(str(path)) == "plain-key-123"
     assert json.dumps(server._teacher_key(None)) == "null"
+
+
+def test_a_teacher_key_file_saved_with_a_bom_still_works(tmp_path):
+    path = tmp_path / "teacher-key"
+    path.write_text("﻿plain-key-123\n", encoding="utf-8")  # 윈도 메모장이 붙이는 글자(BOM)
+
+    assert server._teacher_key(str(path)) == "plain-key-123"

@@ -82,3 +82,11 @@ def test_a_save_cut_off_midway_keeps_the_previous_analysis(tmp_path, monkeypatch
 
     # 서버가 읽는 파일은 늘 온전한 이전 분석이거나 새 분석입니다.
     assert load_analysis(tmp_path, "abc") == {"title": "예전 분석"}
+
+
+def test_a_folder_copied_from_a_mac_and_a_pc_keeps_lecture_order(tmp_path):
+    import unicodedata
+    touch(tmp_path / "고1" / "1강 제망매가.mp4")  # 윈도·NAS에서 만든 폴더 이름
+    touch(tmp_path / unicodedata.normalize("NFD", "고1") / "2강 청산별곡.mp4")  # 같은 이름을 맥에서 만든 폴더(자모로 나뉨)
+
+    assert [v["title"] for v in find_videos(tmp_path)] == ["고1/1강 제망매가", "고1/2강 청산별곡"]

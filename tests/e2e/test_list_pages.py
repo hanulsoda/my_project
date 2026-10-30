@@ -165,3 +165,24 @@ def test_receiving_notes_counts_only_new_ones(page, site):
                            f"notes:{vid}")
     assert counts["notes"] == 1
     assert stored(page, f"notes:{vid}") == [{"t": 10, "text": "같은 메모"}, {"t": 20, "text": "새 메모"}]
+
+
+def test_a_folder_link_opens_the_folder_even_after_a_spoken_search(page, site):
+    remember(page, site, {"list": {"scope": "spoken"}})
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    page.locator("nav.sidebar a", has_text="100%완성").click()  # 찾은 결과를 보다가 사이드바 폴더
+    expect(page.locator("#view-title")).to_have_text("100%완성")
+
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    searched = []
+    page.on("request", lambda r: searched.append(r.url) if "/api/search" in r.url else None)
+    page.goto(site.url + "/review.html")
+    page.goto(site.url + "/#f/2022개정/고1/미래엔")  # 다른 화면(플레이어의 '‹ 폴더' 등)에서 폴더로
+    expect(page.locator("#view-title")).to_have_text("미래엔")
+    assert searched == []

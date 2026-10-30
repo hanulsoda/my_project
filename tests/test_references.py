@@ -150,10 +150,9 @@ def test_summaries_with_only_a_title_are_not_used():
 
 def test_odd_shapes_in_the_summary_file_are_shown_as_text_or_left_out(caplog):
     from academy.references import usable_references
-    odd = {"title": "운수 좋은 날", "grade": "고1", "meta": {"갈래": "단편 소설", "시점": None, "배경": ["1920년대", "서울"]},
+    odd = {"title": "운수 좋은 날", "grade": "고1", "meta": {"갈래": "단편 소설"},
            "features": ["인력거꾼의 하루"], "persons": ["김첨지: 인력거꾼"],
-           "stages": [{"label": "발단", "bullets": None}, {"label": "", "bullets": ["비 오는 날"]}],
-           "words": [{"w": "울안", "pos": "", "def": "울타리를 둘러친 안"}]}
+           "stages": [{"label": "발단", "bullets": None}, {"label": "전개", "bullets": ["비 오는 날"]}]}
     broken = [{"title": "관동별곡", "grade": "고1", "meta": ["가사"]},  # meta가 목록
               {"grade": "고1", "meta": {"갈래": "시"}},  # 제목 없음
               {"title": "속미인곡", "grade": "고1", "fillins": [{"passage": "임", "answer_line": 3}]},
@@ -165,12 +164,35 @@ def test_odd_shapes_in_the_summary_file_are_shown_as_text_or_left_out(caplog):
     assert usable == [odd]  # 쓸 수 없는 정리는 빼고(로그에 남김) 나머지는 그대로
     assert "건너뜀" in caplog.text
     assert reference_sections(odd) == [
-        {"name": "개요", "items": ["갈래: 단편 소설", "배경: 1920년대, 서울"]},  # 비어 있는 값은 빼고 목록은 이어 씀
-        {"name": "핵심 특징", "items": ["인력거꾼의 하루"]},
-        {"name": "구조", "items": ["비 오는 날"]},  # 이름 없는 단계는 ': '를 붙이지 않음
+        {"name": "개요", "items": ["갈래: 단편 소설"]},
+        {"name": "핵심 특징", "items": ["인력거꾼의 하루"]},  # 항목이 글 한 줄이면 그대로
+        {"name": "구조", "items": ["전개: 비 오는 날"]},
         {"name": "인물", "items": ["김첨지: 인력거꾼"]},
-        {"name": "어휘", "items": ["울안: 울타리를 둘러친 안"]},  # 품사가 없으면 '()'를 붙이지 않음
     ]
+
+
+def test_item_text_stays_the_same_so_teacher_fixes_keep_matching():
+    # 선생님이 고치거나 숨긴 내용은 항목 글로 기억합니다(.reference-fixes). 보기 좋게 바꾸면 고친 것이 풀립니다.
+    ref = {"title": "관동별곡", "grade": "고1", "meta": {"갈래": "가사", "시점": None},
+           "stages": [{"label": "", "bullets": ["관동 유람"]}],
+           "words": [{"w": "울안", "def": "울타리를 둘러친 안"}, {"w": "울안", "pos": "명사", "def": "울타리를 둘러친 안."}],
+           "fillins": [{"passage": "청산", "answer_line": "청산에  살어리랏다  라리"},
+                       {"passage": "청산", "answer_line": "청산에 살어리랏다 라리"}]}
+
+    assert {s["name"]: s["items"] for s in reference_sections(ref)} == {
+        "개요": ["갈래: 가사", "시점: None"],
+        "구조": [": 관동 유람"],
+        "빈칸 문제": ["청산 → 청산에  살어리랏다  라리", "청산 → 청산에 살어리랏다 라리"],  # 둘 다 퀴즈에 나가니 둘 다 숨길 수 있게
+        "어휘": ["울안(): 울타리를 둘러친 안", "울안(명사): 울타리를 둘러친 안."],
+    }
+
+
+def test_a_title_only_copy_does_not_push_out_the_real_summary():
+    from academy.references import usable_references
+    empty = {"title": "제망매가", "grade": "고1", "meta": {}, "features": []}  # PDF에서 제목만 뽑힌 것
+    real = {"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}
+
+    assert usable_references([empty, real]) == [real]
 
 
 def test_the_same_grade_and_title_twice_keeps_the_first(caplog):
@@ -196,8 +218,6 @@ def test_word_questions_never_offer_another_meaning_of_the_same_word_or_a_near_c
         assert len({flat(c) for c in q["choices"]}) == 4  # 화면에서 똑같아 보이는 보기 없음
     youth = next(q for q in quiz if "어리다" in q["question"])
     assert youth["choices"][youth["answer"]] == "어리석다" and "나이가 적다" not in youth["choices"]  # 다른 뜻을 오답으로 내지 않음
-    vocabulary = next(s for s in reference_sections({"title": "t", "grade": "고1", "words": words}) if s["name"] == "어휘")
-    assert sum("잠방이" in item for item in vocabulary["items"]) == 1  # 어휘 칸에도 한 번
 
 
 def test_grade_folders_written_with_deung_pick_that_grade():

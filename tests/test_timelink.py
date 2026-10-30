@@ -50,3 +50,13 @@ def test_the_summaries_given_are_left_unchanged():
 
     assert given == summary()  # 서버가 기억해 둔 정리를 바꾸지 않습니다
     assert link_times(copy.deepcopy(given), [])[0]["sections"][0]["times"] == [None, None]  # 대본이 없을 때
+
+
+def test_a_word_without_a_part_of_speech_still_gets_its_time():
+    from academy.references import reference_sections
+    ref = {"title": "t", "grade": "고1", "words": [{"w": "울안", "def": "울타리를 둘러친 안"}]}
+    summaries = [{"source": "s", "sections": reference_sections(ref), "quiz": []}]
+    segments = [{"start": 0.0, "end": 9.0, "text": "오늘은 처음 시작합니다"},
+                {"start": 42.0, "end": 50.0, "text": "울안은 울타리를 둘러친 안을 말해요"}]
+
+    assert link_times(summaries, segments)[0]["sections"][0]["times"] == [42.0]

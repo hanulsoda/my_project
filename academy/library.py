@@ -13,7 +13,8 @@ VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".mov"}
 
 def _lecture_order(path: Path):
     # "2강"이 "10강"보다 앞에 오도록 숫자는 숫자로 비교합니다. 확장자는 빼고 비교합니다('1강 제망매가'가 '1강 제망매가 학습활동'보다 앞).
-    return [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", path.with_suffix("").as_posix())]
+    # 맥에서 만든 폴더 이름(자모로 나뉨)도 같은 이름으로 봅니다(제목과 같게).
+    return [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", unicodedata.normalize("NFC", path.with_suffix("").as_posix()))]
 
 
 def find_videos(video_dir: Path) -> list[dict]:

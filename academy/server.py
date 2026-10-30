@@ -917,7 +917,7 @@ def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
 def _teacher_key(path):
     """선생님 열쇠 파일(TEACHER_KEY_FILE)의 글. 파일이 없거나 비었으면 None: 아무도 '이번 주 강의' 등을 바꿀 수 없습니다."""
     try:
-        key = Path(path).read_text(encoding="utf-8").strip() or None if path else None
+        key = Path(path).read_text(encoding="utf-8-sig").strip() or None if path else None  # -sig: 메모장이 붙이는 BOM을 뺌
     except OSError:
         return None
     if key and not all(" " <= c <= "~" for c in key):  # 브라우저는 머리글(X-Teacher-Key)에 한글 등을 보내지 못합니다

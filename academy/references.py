@@ -32,6 +32,8 @@ def usable_references(refs) -> list[dict]:
         except Exception as error:  # noqa: BLE001 — 어떤 모양이든 그 정리만 뺍니다
             logging.warning("학원 정리 %d번째를 건너뜀(모양이 다름): %r", n, error)
             continue
+        if not ref.get("meta") and not any(ref.get(key) for key, _ in PARTS):
+            continue  # PDF 추출에 실패해 제목만 남은 정리: 같은 학년·제목의 진짜 정리를 밀어내지 않게 먼저 뺍니다
         if ref_key(ref) in keys:
             logging.warning("학원 정리 %d번째를 건너뜀(같은 학년·제목이 이미 있음): %s %s", n, ref["grade"], ref["title"])
             continue
@@ -108,25 +110,18 @@ def _grade_score(grade, title):
 def reference_sections(ref) -> list[dict]:
     """정리를 [{"name": "개요"·"핵심 특징"…, "items": [...]}]로 나눕니다(학생 화면에 그대로 보여 줄 때)."""
     ref = _tidy(ref)
-    sections = [("개요", [f"{k}: {_value(v)}" for k, v in ref["meta"].items() if _value(v)])] if ref.get("meta") else []
+    # 항목 글은 바꾸지 않습니다: 선생님이 고치거나 숨긴 내용을 이 글로 기억합니다(.reference-fixes).
+    sections = [("개요", [f"{k}: {v}" for k, v in ref["meta"].items()])] if ref.get("meta") else []
     sections += [(name, [_item(key, item) for item in ref[key]]) for key, name in PARTS if ref.get(key)]
-    # 내용 없는 항목('전개:')과 같은 칸 안의 중복(띄어쓰기·끝 마침표만 다른 것도)은 뺍니다.
-    sections = [(name, _unique(items)) for name, items in sections]
+    # 내용 없는 항목('전개:')과 같은 칸 안의 중복은 뺍니다.
+    sections = [(name, list(dict.fromkeys(i for i in items if i.strip() and not i.strip().endswith(":"))))
+                for name, items in sections]
     return [{"name": name, "items": items} for name, items in sections if items]
 
 
 def _same(text):
-    """띄어쓰기·끝 마침표만 다른 글은 같은 글로 봅니다(PDF에서 두 번 뽑힌 항목)."""
+    """띄어쓰기·끝 마침표만 다른 글은 같은 글로 봅니다(PDF에서 두 번 뽑힌 뜻)."""
     return re.sub(r"\s+", " ", text).strip().rstrip(".")
-
-
-def _unique(items):
-    seen, kept = set(), []
-    for item in items:
-        if item.strip() and not item.strip().endswith(":") and _same(item) not in seen:
-            seen.add(_same(item))
-            kept.append(item)
-    return kept
 
 
 def reference_quiz(ref) -> list[dict]:
@@ -187,27 +182,16 @@ def reference_text(ref) -> str:
     return "\n".join(lines)
 
 
-def _value(value):
-    """개요 값·항목 값을 글로: 목록·묶음은 이어 쓰고, 빈 값(None 등)은 ''."""
-    if isinstance(value, dict):
-        value = list(value.values())
-    if isinstance(value, list):
-        return ", ".join(text for text in map(_value, value) if text)
-    return "" if value is None else str(value)
-
-
 def _item(key, item):
     if not isinstance(item, dict):  # 정리에 따라 항목이 글 한 줄이기도 합니다("김첨지: 인력거꾼")
-        return _value(item)
+        return ", ".join(map(str, item)) if isinstance(item, list) else str(item)
     if key == "features":
-        return _value(item.get("text"))
+        return item.get("text", "")
     if key == "stages":
-        bullets, label = " / ".join(map(_value, item.get("bullets") or [])), _value(item.get("label"))
-        return f"{label}: {bullets}" if label else bullets
+        return f"{item.get('label', '')}: " + " / ".join(map(str, item.get("bullets") or []))
     if key == "fillins":
         return f"{item.get('passage', '')} → {item.get('answer_line', '')}"
     if key == "words":
-        pos = _value(item.get("pos"))
-        return f"{item.get('w', '')}({pos}): {item.get('def', '')}" if pos else f"{item.get('w', '')}: {item.get('def', '')}"
+        return f"{item.get('w', '')}({item.get('pos', '')}): {item.get('def', '')}"
     # 연별 정리·인물 등은 형태가 제각각이라 값만 이어 붙입니다.
-    return " / ".join(text for text in map(_value, item.values()) if text)
+    return " / ".join(", ".join(map(str, v)) if isinstance(v, list) else str(v) for v in item.values() if v)
