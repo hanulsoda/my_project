@@ -50,7 +50,11 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
                 save_analysis(data_dir, video["id"], data)
             if need_pages:
                 print("  페이지 찾는 중...", flush=True)
-                data["pages"] = detect_pages(video["path"], Path(data_dir) / video["id"])
+                try:
+                    data["pages"] = detect_pages(video["path"], Path(data_dir) / video["id"])
+                except Exception as e:  # 페이지는 덤이라 실패해도 요점 정리는 만듭니다. 매번 다시 시도하지도 않습니다.
+                    print(f"  페이지 찾기 실패, 건너뜀: {e}", file=sys.stderr)
+                    data["pages"] = []
                 save_analysis(data_dir, video["id"], data)
             if need_guide:
                 screens = None

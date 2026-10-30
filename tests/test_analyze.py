@@ -274,3 +274,22 @@ def test_guide_without_a_matched_summary_gets_no_references(tmp_path):
 
     assert rec.references == [None]
     assert "sources" not in load_analysis(tmp_path / "data", ids["녹화"])["guide"]
+
+
+def test_page_detection_failure_does_not_block_the_guide(tmp_path, capsys):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder()
+    tries = []
+
+    def broken_pages(path, out_dir):
+        tries.append(path.name)
+        raise ValueError("페이지를 읽지 못함")  # 깨진 파일, 시각 정보가 없는 화면 등
+
+    first = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, detect_pages=broken_pages)
+    second = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, detect_pages=broken_pages)
+
+    data = load_analysis(tmp_path / "data", ids["1강"])
+    assert (first, second) == (0, 0)  # 페이지는 덤이라 실패로 세지 않음
+    assert data["guide"] == GUIDE and data["pages"] == []
+    assert tries == ["1강.mp4"]  # 다음 실행에서 같은 영상을 계속 다시 시도하지 않음
+    assert "페이지" in capsys.readouterr().err
