@@ -57,12 +57,14 @@
       const res = await fetch("/api/transfer", { method: "POST", headers: { "Content-Type": "application/json" },
                                                  body: JSON.stringify({ data: collectRecords() }) });
       if (!res.ok) return void ($("send-status").textContent = "코드를 만들지 못했습니다. 잠시 뒤 다시 해 주세요.");
-      const { code, expires } = await res.json();
+      const { code } = await res.json();
+      // 서버는 코드를 10분 동안 둡니다. 남은 시간은 이 기기 시계로 받은 때부터 셉니다(기기 시계가 틀려도 맞게).
+      const until = Date.now() + 600e3;
       $("code").textContent = `${code.slice(0, 3)} ${code.slice(3)}`;
       $("code").hidden = false;
       clearInterval(countdown);
       const tick = () => {
-        const left = Math.max(0, Math.round(expires - Date.now() / 1000));
+        const left = Math.max(0, Math.round((until - Date.now()) / 1000));
         $("send-status").textContent = left
           ? `다른 기기의 '기록 받기'에 이 코드를 넣으세요. 남은 시간 ${fmt(left)}`
           : "시간이 지나 코드가 사라졌습니다. 다시 만들어 주세요.";

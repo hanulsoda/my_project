@@ -111,6 +111,9 @@ function picksSection() {
   return box;
 }
 
+// 강의 목록의 폴더 화면 주소(#f/2022개정/고1). 폴더 이름의 %·# 같은 글자도 그대로 열리게 바꿔 적습니다.
+const folderHash = (path) => `#f/${path.split("/").map(encodeURIComponent).join("/")}`;
+
 // prefix: 강의 목록 화면 안이면 "", 다른 화면이면 "./"(강의 목록으로 가서 그 화면을 엽니다). here: 지금 화면의 링크 주소.
 // 폴더는 Finder처럼 세 단계까지 펼칩니다(2022개정 ▸ 고1 ▸ 미래엔). 펼친 폴더는 브라우저에 기억합니다.
 // 돌려주는 값: folders(폴더 경로 → 링크), reveal(경로)(그 폴더가 보이게 위 폴더들을 펼침) — 강의 목록이 고른 폴더를 표시할 때 씁니다.
@@ -147,7 +150,7 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
   };
   const node = (path) => {
     const { name, n, kids } = tree.get(path);
-    const a = link(`${prefix}#f/${path}`, "folder", name, n);
+    const a = link(`${prefix}${folderHash(path)}`, "folder", name, n);
     folders.set(path, a);
     if (!kids.length) return el("li", {}, el("div", { class: "row" }, el("span", { class: "disclosure" }), a));
     const sub = el("ul", { class: "sub" }, ...kids.map(node));
@@ -165,7 +168,7 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
       link(`${prefix}#v/recent`, "clock", "이어 보기", recentVideos(videos).length),
       link(`${prefix}#v/new`, "new", "새로 올라온 강의", freshVideos(videos).length),
       link("notes.html", "note", "내 메모", total("notes:")),
-      link("review.html", "repeat", "틀린 문제 복습", dueCount()),  // 오늘 복습할 문제 수
+      link("review.html", "repeat", "틀린 문제 복습", dueCount(videos)),  // 오늘 복습할 문제 수
       link("move.html", "move", "기기 옮기기", 0),
     ].map((a) => el("li", {}, a))),
     el("h2", {}, "폴더"),
@@ -177,7 +180,7 @@ function fillSidebar(videos, { prefix = "./", here = "" } = {}) {
     const a = e.target.closest("a");
     if (!a || e.altKey || e.ctrlKey || e.metaKey) return;
     const links = [...nav.querySelectorAll("a")].filter((x) => x.offsetParent);
-    const i = links.indexOf(a), path = (a.getAttribute("href").match(/#f\/(.*)$/) || [])[1];
+    const i = links.indexOf(a), path = [...folders].find(([, x]) => x === a)?.[0];
     const t = toggles.get(path);
     let next = null;
     if (e.key === "ArrowDown") next = links[i + 1];
@@ -219,9 +222,11 @@ function mergeRecords(data) {
       const ok = kind === "pos" ? num(value?.t) && num(value?.d) : num(value?.right) && num(value?.total);
       if (MOVABLE.test(key) && ok && (!mine || (value.at || 0) > (mine.at || 0))) { store.set(key, value); counts[kind]++; }
     } else if (kind === "notes" && MOVABLE.test(key) && Array.isArray(value)) {  // 메모는 둘 다(같은 시각·글은 한 번)
-      const all = [...(mine || []), ...value.filter((n) => num(n?.t) && typeof (n.text ?? "") === "string")];
-      const merged = [...new Map(all.map((n) => [`${n.t}|${n.text || ""}`, { t: n.t, text: n.text || "" }])).values()].sort((a, b) => a.t - b.t);
-      counts.notes += merged.length - (mine || []).length;
+      const same = (n) => `${n.t}|${n.text || ""}`;
+      const got = value.filter((n) => num(n?.t) && typeof (n.text ?? "") === "string");
+      const had = new Set((mine || []).map(same));
+      const merged = [...new Map([...(mine || []), ...got].map((n) => [same(n), { t: n.t, text: n.text || "" }])).values()].sort((a, b) => a.t - b.t);
+      counts.notes += new Set(got.map(same).filter((k) => !had.has(k))).size;  // 이 기기에 없던 메모만 셉니다
       store.set(key, merged);
     } else if (kind === "wrong" && MOVABLE.test(key) && Array.isArray(value)) {  // 틀린 문제는 복습이 더 나간 쪽
       const items = new Map(wrongItems(key.slice(6)).map((w) => [w.k, w]));
@@ -250,8 +255,11 @@ const quizKey = (q) => q.question || [q.context, ...q.parts].join(" ");
 
 // 간격 복습: 틀린 문제는 내일 다시, 맞히면 3일 뒤·7일 뒤 다시 내고, 세 번 이어서 맞히면 목록에서 뺍니다.
 // 기록은 [{k: 문제 글, stage: 이어서 맞힌 횟수, due: 다시 낼 시각(ms)}]. 예전 기록(문제 글만)은 오늘 낼 문제로 읽습니다.
+// '내일'은 달력의 내일입니다: 밤 11시에 틀린 문제도 다음 날 아침에 나옵니다(그날 0시부터 낼 때).
 const DAY_MS = 86400e3;
-const isDue = (w) => w.due <= Date.now();
+const dayStart = (ms) => new Date(ms).setHours(0, 0, 0, 0);
+const daysLater = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return dayStart(d); };
+const isDue = (w) => dayStart(w.due) <= Date.now();
 
 function wrongItems(videoId) {
   return (store.get(`wrong:${videoId}`) || []).map((w) => (typeof w === "string" ? { k: w, stage: 0, due: 0 } : w));
@@ -264,12 +272,12 @@ function markWrong(videoId, key, wrong) {
   let items = wrongItems(videoId);
   const item = items.find((w) => w.k === key);
   if (wrong) {
-    if (item) Object.assign(item, { stage: 0, due: Date.now() + DAY_MS });
-    else items.push({ k: key, stage: 0, due: Date.now() + DAY_MS });
+    if (item) Object.assign(item, { stage: 0, due: daysLater(1) });
+    else items.push({ k: key, stage: 0, due: daysLater(1) });
   } else if (item && isDue(item)) {  // 아직 때가 안 된 문제를 미리 맞힌 것(강의 퀴즈에서 다시 풀 때 등)은 세지 않습니다
     item.stage += 1;
     if (item.stage >= 3) items = items.filter((w) => w !== item);
-    else item.due = Date.now() + [0, 3, 7][item.stage] * DAY_MS;
+    else item.due = daysLater([0, 3, 7][item.stage]);
   }
   store.set(`wrong:${videoId}`, items);
 }
@@ -281,8 +289,13 @@ function savedLists(prefix) {
   return names.map((k) => ({ id: k.slice(prefix.length), items: store.get(k) || [] })).filter((l) => l.items.length);
 }
 
-const wrongLists = () => savedLists("wrong:").map(({ id }) => ({ id, items: wrongItems(id) }));
-const dueCount = () => wrongLists().reduce((n, l) => n + l.items.filter(isDue).length, 0);
+// videos: 지금 강의 목록. 목록에 없는 강의(옮기거나 이름을 바꾼 강의)의 기록은 지우지 않고 세지도 않습니다.
+// 목록을 받지 못했으면(빈 목록) 모두 셉니다.
+function wrongLists(videos) {
+  const listed = new Set(videos.map((v) => v.id));
+  return savedLists("wrong:").filter(({ id }) => !listed.size || listed.has(id)).map(({ id }) => ({ id, items: wrongItems(id) }));
+}
+const dueCount = (videos) => wrongLists(videos).reduce((n, l) => n + l.items.filter(isDue).length, 0);
 
 // q는 4지선다({question, choices, answer, explanation, time?})나 빈칸 문제({context, parts: 글·빈칸 번갈아}).
 // onResult(맞았는지)는 보기를 고르거나 '알았어요·몰랐어요'를 누를 때 부르고, replay(q)는 '설명 다시 보기' 요소(없으면 null).

@@ -55,8 +55,9 @@
     let scope = saved.scope === "spoken" ? "spoken" : "title";
     let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
     $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
-    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value });
-    let folders = [], total = 0, loaded = false, showingFound = false, side = null;
+    // found: 선생님 말에서 찾은 결과를 보던 중(강의를 보고 돌아오면 다시 찾아 보여 줍니다)
+    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value, found: showingFound });
+    let folders = [], total = 0, loaded = false, showingFound = false, side = null, searchSeq = 0;
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
 
     function current() {  // 주소에서 지금 화면 {kind: home|recent|new|folder, name}
@@ -83,7 +84,7 @@
       // 폴더 화면: 맨 위 폴더(2022개정)든 하위 폴더(2022개정/고1/미래엔)든 그 경로 아래 강의
       const top = view.kind === "folder" ? view.name.split("/")[0] : null;
       const inPath = (item) => searching || !view.name.includes("/") || item.title.startsWith(`${view.name}/`);
-      let shown = 0, underPath = 0;
+      let shown = 0;
       for (const folder of folders) {
         const mine = !showingFound && (searching || folder.name === top);
         if (mine && (!searching || folder.keys.some((key) => words.every((w) => key.includes(w))))) folder.build();
@@ -92,7 +93,6 @@
           let inGroup = 0;
           for (const item of group.items) {
             const here = mine && inPath(item);
-            underPath += here;
             const hit = here && words.every((w) => item.key.includes(w)) && (!guideOnly.checked || item.guide);
             item.li.hidden = !hit;
             inGroup += hit;
@@ -119,7 +119,7 @@
       const [title, sub, empty] =
         showingFound ? ["선생님 말에서 찾기", `‘${search.value.trim()}’`, ""]
         : searching ? ["찾기 결과", `강의 ${shown.toLocaleString()}개 · ‘${search.value.trim()}’`, shown ? "" : "제목으로 찾은 강의가 없습니다."]
-        : folder ? [parts.at(-1), `${parts.length > 1 ? `${parts.slice(0, -1).join(" › ")} · ` : ""}강의 ${underPath.toLocaleString()}개`
+        : folder ? [parts.at(-1), `${parts.length > 1 ? `${parts.slice(0, -1).join(" › ")} · ` : ""}강의 ${shown.toLocaleString()}개`
                     + (folder.seen && parts.length === 1 ? ` · ${folder.seen}개 봄` : ""),
                     shown ? "" : guideOnly.checked ? "이 폴더에는 요점 정리가 있는 강의가 없습니다." : "이 폴더에는 강의가 없습니다."]
         : view.kind === "recent" ? ["이어 보기", "다 보지 않은 강의를 최근에 본 순서로", recent ? "" : "다 보지 않은 강의가 없습니다."]
@@ -136,7 +136,7 @@
     function lectureLink(v, sub) {
       const parts = v.title.split("/"), name = parts.pop();
       const pos = store.get(`pos:${v.id}`), score = store.get(`score:${v.id}`);  // score: 퀴즈 4지선다를 끝까지 푼 마지막 점수
-      const progress = !pos ? [] : pos.t >= pos.d - 5 ? [el("span", { class: "done" }, "다 봄")]
+      const progress = !(pos?.d > 0) ? [] : pos.t >= pos.d - 5 ? [el("span", { class: "done" }, "다 봄")]  // 길이를 모르는 기록은 표시 안 함
         : [el("span", { class: "progress" }, el("span", { class: "bar", "aria-hidden": "true" },
             el("span", { style: `width: ${Math.round((pos.t / pos.d) * 100)}%` })), `${fmt(pos.t)}까지`)];
       // 첫 교재 화면을 작게(화면에 보일 때만 불러옴). 그림이 없으면 같은 크기의 빈 칸으로 줄을 맞춥니다.
@@ -208,7 +208,7 @@
     $("tools").onsubmit = async (e) => {
       e.preventDefault();
       if (scope === "title") return;  // 제목은 입력하는 대로 걸러 보여 줍니다
-      const q = search.value.trim(), box = $("found");
+      const q = search.value.trim(), box = $("found"), seq = ++searchSeq;
       showingFound = true;
       render();
       box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
@@ -216,6 +216,7 @@
       status.textContent = "찾는 중";
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const found = await res.json().catch(() => ({}));
+      if (seq !== searchSeq || !showingFound) return;  // 그사이 다른 말을 찾았거나 찾기를 닫았으면 이 결과는 버립니다
       if (!res.ok) {
         box.replaceChildren(el("p", { class: "notice" }, found.detail || "찾지 못했습니다."));
         status.textContent = found.detail || "찾지 못했습니다.";
@@ -312,6 +313,7 @@
       loaded = true;
       reveal();
       render();
+      if (saved.found && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
     });
   </script>
 </body>

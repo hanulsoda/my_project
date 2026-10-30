@@ -48,7 +48,7 @@ function render({ title, analysis, references = [], prev = null, next = null }) 
   $("path").textContent = parts.join(" · ");
   // 사이드바는 세 단계까지만 펼치므로, 더 깊은 강의는 셋째 단계 폴더로 돌아갑니다.
   const folder = parts.length ? parts.slice(0, 3).join("/") : "기타";
-  $("back").setAttribute("href", `./#f/${folder}`);
+  $("back").setAttribute("href", `./${folderHash(folder)}`);
   $("back").textContent = folder.split("/").pop();
   // 같은 폴더의 앞뒤 강의: 머리글 버튼, 그리고 영상이 끝나면 '다음 강의' 카드
   for (const [key, lecture, label] of [["prev", prev, "이전 강의"], ["next", next, "다음 강의"]]) {
@@ -454,6 +454,8 @@ video.addEventListener("contextmenu", (e) => e.preventDefault());  // 우클릭 
 const posKey = `pos:${id}`;
 let lastSaved = 0;
 const savePosition = () => {
+  // 영상 길이를 받기 전(느린 인터넷에서 바로 멈춤 등)에는 저장하지 않습니다: 보던 위치가 0으로 지워지고 '다 봄'이 되던 문제
+  if (!(video.duration > 0 && Number.isFinite(video.duration))) return;
   lastSaved = video.currentTime;
   store.set(posKey, { t: video.currentTime, d: video.duration, at: Date.now() });  // at: 목록의 '이어 보기' 순서
 };
