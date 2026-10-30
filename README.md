@@ -226,3 +226,5 @@ Claude Opus 5.5 요금(입력 100만 토큰당 $4, 출력 $20)으로 계산한 �
 ```bash
 python -m pytest
 ```
+
+GitHub에 올릴 때마다 같은 테스트가 자동으로 돕니다(`.github/workflows/tests.yml`, ffmpeg·php도 설치해 빠짐없이). 결과는 GitHub 저장소의 **Actions** 탭과 커밋 옆 표시(초록 ✓ / 빨강 ✗)에서 봅니다.

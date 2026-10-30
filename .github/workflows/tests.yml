@@ -1,0 +1,21 @@
+# GitHub에 올릴 때마다 모든 테스트를 돌립니다. 깨진 코드가 올라오면 GitHub의 Actions 탭과 커밋 옆에 빨간 표시가 납니다.
+name: 테스트
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      # ffmpeg: 휴대폰 세로 영상 그림 테스트, php: 학원 사이트 입장 링크 테스트 (없으면 건너뜀)
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg php-cli
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q -rs
