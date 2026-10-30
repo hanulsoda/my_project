@@ -37,6 +37,8 @@ def _mmss(t):
 
 
 def _seconds(text):
+    if hours := re.search(r"(\d+):(\d{1,2}):(\d{1,2})", str(text)):  # 1시간 넘는 강의를 시:분:초로 적은 경우
+        return int(hours[1]) * 3600 + int(hours[2]) * 60 + int(hours[3])
     nums = re.findall(r"\d+", str(text))
     return int(nums[-2]) * 60 + int(nums[-1]) if len(nums) >= 2 else None
 

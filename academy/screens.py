@@ -37,10 +37,12 @@ def read_screens(video_path, pages, duration, ocr):
 
 
 def _frame_at(container, stream, t):
+    # 페이지 시각은 영상 시작을 0초로 센 값이라, 잘라 낸 녹화(첫 화면 시각이 0이 아님)는 그만큼 더해 찾습니다.
+    t += float(stream.start_time * stream.time_base) if stream.start_time else 0.0
     container.seek(int(t / stream.time_base), stream=stream)  # t 앞의 키프레임으로 간 뒤 t까지 풀어 냄
     frame = None
     for frame in container.decode(stream):
-        if frame.time >= t:
+        if frame.time is not None and frame.time >= t:
             break
     return frame.to_ndarray(format="bgr24")
 

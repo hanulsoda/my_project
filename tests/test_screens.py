@@ -21,3 +21,13 @@ def test_read_screens_merges_lines_per_page_and_drops_short_fragments(tmp_path):
 
     assert texts == [["교재 12쪽 상징"], ["원형적 상징: 해"]]
     assert seen == [(36, 64, 3), (36, 64, 3)]  # 페이지마다 1분 간격 → 이 영상은 한 번씩
+
+
+def test_read_screens_on_a_trimmed_recording_reads_each_page(tmp_path):
+    # 잘라 낸 녹화는 첫 화면 시각이 0이 아닙니다. 페이지 시각은 영상 시작을 0초로 센 값입니다(pages.detect_pages).
+    make_video(tmp_path / "trimmed.mp4", [30, 220], 60, first_pts=600)
+
+    texts = read_screens(tmp_path / "trimmed.mp4", [{"start": 0.0}, {"start": 60.0}], 120.0,
+                         lambda image: ["어두운 첫 페이지"] if image.mean() < 128 else ["밝은 둘째 페이지"])
+
+    assert texts == [["어두운 첫 페이지"], ["밝은 둘째 페이지"]]

@@ -124,3 +124,11 @@ def test_remembers_unusable_answers_and_counts_failures(tmp_path):
     assert (failures, finished) == (1, True)
     assert "toc" not in load_analysis(data_dir, ids["1강"])  # 실패한 강의는 다음에 다시 시도합니다
     assert load_analysis(data_dir, ids["6강"])["toc"] == {"model": MODEL, "chapters": []}  # 매일 밤 다시 묻지 않습니다
+
+
+def test_chapter_times_with_hours_are_read_in_full():
+    from academy.toc import _seconds
+
+    assert _seconds("61:40") == 3700
+    assert _seconds("1:01:40") == 3700  # 모델이 시:분:초로 적어도
+    assert _seconds("[01:40]") == 100

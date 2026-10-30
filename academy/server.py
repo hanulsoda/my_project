@@ -259,6 +259,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         with scan_lock:  # 한 번에 하나만 훑고, 기다리는 사이 다른 요청이 훑었으면 그 결과를 씁니다.
             if library["at"] is None or monotonic() - library["at"] > max_age:
                 videos = find_videos(video_dir)
+                if not videos and library["videos"]:
+                    # NAS 연결이 잠깐 끊기면 영상 폴더가 비어 보입니다. 학생 목록을 비우지 않고 1분 뒤 다시 훑습니다.
+                    logging.warning("영상 폴더가 비어 보여 이전 목록을 그대로 씁니다(NAS 연결 확인): %s", video_dir)
+                    library["at"] = monotonic() - REFRESH_SECONDS + 60
+                    return
                 for v in videos:  # '새로 올라온 강의'를 고를 파일 날짜(NAS 3,900개에 3초쯤 더 걸림)
                     try:
                         v["added"] = int(v["path"].stat().st_mtime)
@@ -309,16 +314,21 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def read_analysis(video_id):
         """손으로 고치다 형식이 깨진 분석 파일은 그 강의만 '분석 전'으로 보고, 목록·검색·현황은 계속 돌게 합니다."""
         try:
-            return load_analysis(data_dir, video_id)
+            data = load_analysis(data_dir, video_id)
         except ValueError:  # JSON 형식 오류(JSONDecodeError)·글자 깨짐
-            logging.warning("분석 파일 형식 오류로 건너뜀: %s.json", video_id)
-            return None
+            data = []
+        if data is None or isinstance(data, dict):
+            return data
+        logging.warning("분석 파일 형식 오류로 건너뜀: %s.json", video_id)  # 깨졌거나, 내용이 통째로 목록·숫자 등으로 바뀜
+        return None
 
     def analysis_entry(video_id):
         path = Path(data_dir) / f"{video_id}.json"
-        if not path.exists():
+        try:
+            stat = path.stat()  # 한 번만 봅니다. 그사이 분석이 파일을 바꿔도 모두의 목록이 오류 나지 않게
+        except FileNotFoundError:
             return None
-        stamp = (path.stat().st_mtime_ns, path.stat().st_size)
+        stamp = (stat.st_mtime_ns, stat.st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
             data = read_analysis(video_id)
             if data is None:  # 파일이 다시 바뀔(고쳐질) 때까지 '분석 전'
@@ -519,7 +529,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     # ---- 선생님이 고른 '이번 주 강의': 누구나 보고, 바꾸는 것은 선생님 열쇠(X-Teacher-Key)가 있어야 합니다 ----
     # 열쇠를 정하지 않은 서버(teacher_key 없음)는 아무도 바꿀 수 없습니다. 분석 결과 폴더에 두어 매일 백업에 들어갑니다.
-    picks_path = Path(data_dir) / ".teacher-picks"
+    picks_path, picks_lock = Path(data_dir) / ".teacher-picks", Lock()
 
     # 마구 넣어 보기 막기: 기기마다 틀린 횟수를 세어 limit번 틀리면 10분 동안 429
     misses = {"key": {}, "code": {}}  # 종류 → 기기 주소 → (틀린 횟수, 마지막으로 틀린 시각)
@@ -595,13 +605,14 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         require_teacher(request)
         for video_id in req.ids:
             get_video(video_id)  # 없는 강의면 404
-        picks_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = picks_path.with_name(picks_path.name + ".tmp")
         ids = list(dict.fromkeys(req.ids))
         grades = {i: g for i, g in req.grades.items() if i in ids and g}
-        tmp.write_text(json.dumps({"ids": ids, "grades": grades, "note": req.note.strip(), "at": int(wall_clock())},
-                                  ensure_ascii=False), encoding="utf-8")
-        tmp.replace(picks_path)
+        with picks_lock:  # 두 PC에서 동시에 저장해도 같은 임시 파일을 서로 지우지 않게
+            picks_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = picks_path.with_name(picks_path.name + ".tmp")
+            tmp.write_text(json.dumps({"ids": ids, "grades": grades, "note": req.note.strip(), "at": int(wall_clock())},
+                                      ensure_ascii=False), encoding="utf-8")
+            tmp.replace(picks_path)
         return picks()
 
     # ---- 학원 정리 고치기(선생님): 원본 정리는 그대로 두고, 고친 글·숨긴 항목만 DATA_DIR/.reference-fixes에 ----
@@ -624,7 +635,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 items = [mine.get(i, {}).get("text", i) for i in s["items"] if not mine.get(i, {}).get("hidden")]
                 if items := [i for i in items if i]:
                     sections.append({**s, "items": items})
-            out.append({**r, "sections": sections})
+            # 어휘 퀴즈는 원본 정리로 만들어서, 선생님이 숨기거나 뜻을 고친 낱말의 문제는 뺍니다
+            # (숨긴 낱말을 묻거나 고치기 전의 틀린 뜻을 정답으로 내지 않게).
+            words = fixes.get(r.get("key"), {}).get("어휘", {})
+            quiz = [q for q in r.get("quiz", []) if "choices" not in q or q["explanation"] not in words]
+            out.append({**r, "sections": sections, "quiz": quiz})
         return out
 
     def ref_by_key(key):
@@ -839,7 +854,8 @@ def _respell(text, lecture_title):
     for part in re.split(r"[,_()\[\]·\-~]|\d+", lecture_title.rsplit("/", 1)[-1]):
         name = re.sub(r"[^가-힣]", "", part)
         if len(name) >= 3 and (pattern := _near(name, spaced=True)):
-            text = pattern.sub(name, text)
+            spelled = " ".join(re.sub(r"[^가-힣 ]", "", part).split())  # 파일 이름의 띄어쓰기 그대로('운수 좋은 날')
+            text = pattern.sub(spelled, text)
     return text
 
 
