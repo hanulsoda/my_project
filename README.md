@@ -227,4 +227,11 @@ Claude Opus 5.5 요금(입력 100만 토큰당 $4, 출력 $20)으로 계산한 �
 python -m pytest
 ```
 
-GitHub에 올릴 때마다 같은 테스트가 자동으로 돕니다(`.github/workflows/tests.yml`, ffmpeg·php도 설치해 빠짐없이). 결과는 GitHub 저장소의 **Actions** 탭과 커밋 옆 표시(초록 ✓ / 빨강 ✗)에서 봅니다.
+화면 테스트(`tests/e2e`: 실제 브라우저로 강의 목록·복습·기기 옮기기·플레이어를 눌러 봄)는 브라우저 도구가 있어야 돌고, 없으면 건너뜁니다. 고친 화면 코드를 확인하려면 한 번 설치하세요:
+
+```bash
+pip install -r requirements-test.txt
+python -m playwright install chromium
+```
+
+GitHub에 올릴 때마다 같은 테스트가 자동으로 돕니다(`.github/workflows/tests.yml`, ffmpeg·php·브라우저도 설치해 빠짐없이). 결과는 GitHub 저장소의 **Actions** 탭과 커밋 옆 표시(초록 ✓ / 빨강 ✗)에서 봅니다.

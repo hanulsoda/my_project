@@ -17,5 +17,7 @@ jobs:
           cache: pip
       # ffmpeg: 휴대폰 세로 영상 그림 테스트, php: 학원 사이트 입장 링크 테스트 (없으면 건너뜀)
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg php-cli
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      # 화면 테스트(tests/e2e)용 브라우저
+      - run: python -m playwright install --with-deps chromium
       - run: python -m pytest -q -rs
