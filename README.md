@@ -234,4 +234,6 @@ pip install -r requirements-test.txt
 python -m playwright install chromium
 ```
 
-GitHub에 올릴 때마다 같은 테스트가 자동으로 돕니다(`.github/workflows/tests.yml`, ffmpeg·php·브라우저도 설치해 빠짐없이). 결과는 GitHub 저장소의 **Actions** 탭과 커밋 옆 표시(초록 ✓ / 빨강 ✗)에서 봅니다.
+접근성 테스트(`tests/e2e/test_accessibility.py`: 모든 화면을 axe-core로 WCAG 2.1 A/AA 점검, 컴퓨터·휴대폰 폭)는 `AXE_JS`에 axe-core 파일 경로를 알려 줄 때만 돕니다(파일 맨 위 설명 참고).
+
+GitHub에 올릴 때마다 같은 테스트가 자동으로 돕니다(`.github/workflows/tests.yml`, ffmpeg·php·브라우저·axe-core도 설치해 빠짐없이). 결과는 GitHub 저장소의 **Actions** 탭과 커밋 옆 표시(초록 ✓ / 빨강 ✗)에서 봅니다.

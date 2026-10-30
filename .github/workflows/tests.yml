@@ -20,4 +20,8 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-test.txt
       # 화면 테스트(tests/e2e)용 브라우저
       - run: python -m playwright install --with-deps chromium
+      # 접근성 테스트(tests/e2e/test_accessibility.py)용 axe-core
+      - run: npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/axe" axe-core@4.10.3
       - run: python -m pytest -q -rs
+        env:
+          AXE_JS: ${{ runner.temp }}/axe/node_modules/axe-core/axe.min.js

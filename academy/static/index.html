@@ -101,7 +101,8 @@
           inFolder += inGroup;
         }
         folder.box.hidden = !inFolder;
-        folder.head.hidden = !searching;  // 여러 폴더에서 찾을 때만 폴더 이름을 위에 붙입니다
+        // 여러 폴더에서 찾을 때만 폴더 이름을 위에 보입니다. 폴더 화면에서는 화면 읽기 프로그램에만 남겨 제목 단계(h1 → h2 → h3)를 지킵니다.
+        folder.head.classList.toggle("sr-only", !searching);
         shown += inFolder;
       }
       for (const [path, a] of side.folders) {
