@@ -159,6 +159,14 @@ def test_an_analysis_without_a_length_shows_every_chapter_bar(page, site):
     assert len(widths) == 3 and min(widths) > 20
 
 
+def test_a_summary_with_only_fill_ins_shows_no_empty_card_but_keeps_the_quiz(page, site):
+    open_player(page, site, "2022개정/고1/미래엔/청산별곡")
+    expect(page.locator("#tab-guide")).to_contain_text("아직 요점 정리가 없습니다")
+    expect(page.locator("#tab-guide .reference")).to_have_count(0)
+    page.click("[data-tab=quiz]")
+    expect(page.locator("#tab-quiz .blank-line")).to_contain_text("청산에")  # 줄 끝의 빈칸도 앞 글은 보임
+
+
 def test_every_academy_item_at_the_same_time_is_highlighted(page, site):
     open_player(page, site, "2022개정/고1/미래엔/제망매가 학습활동")
     items = page.locator(".reference li")

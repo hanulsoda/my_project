@@ -114,8 +114,8 @@ def test_a_summary_with_every_item_hidden_is_not_shown_or_counted(lectures):
     listed = {v["id"]: v for v in client.get("/api/videos").json()}
     assert listed[ids[0]]["guide"] is False
     status = client.get("/api/status").json()
-    assert (status["summary"], status["pages"]) == (1, 1)  # 청산별곡(빈칸 문제만 있는 정리)은 그대로 학원 정리
-    assert client.get(f"/api/videos/{ids[1]}").json()["references"][0]["quiz"]
+    assert (status["summary"], status["pages"]) == (0, 2)  # 청산별곡(빈칸 문제만 있는 정리)은 요점 정리가 아니라
+    assert client.get(f"/api/videos/{ids[1]}").json()["references"][0]["quiz"]  # 퀴즈로만 나감
 
 
 def test_teachers_can_hide_a_wrong_fill_in_question_but_not_rewrite_it(lectures):

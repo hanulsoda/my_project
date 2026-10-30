@@ -144,3 +144,87 @@ def test_summaries_with_only_a_title_are_not_used():
     empty = {"title": "공감하며 소통하기", "grade": "고1", "meta": {}, "features": [], "stages": []}
 
     assert find_references("2022개정/고1/공감하며 소통하기", [], [empty]) == []
+
+
+# ---- 학원 정리 버그 찾기에서 나온 경우들 ----
+
+def test_odd_shapes_in_the_summary_file_are_shown_as_text_or_left_out(caplog):
+    from academy.references import usable_references
+    odd = {"title": "운수 좋은 날", "grade": "고1", "meta": {"갈래": "단편 소설", "시점": None, "배경": ["1920년대", "서울"]},
+           "features": ["인력거꾼의 하루"], "persons": ["김첨지: 인력거꾼"],
+           "stages": [{"label": "발단", "bullets": None}, {"label": "", "bullets": ["비 오는 날"]}],
+           "words": [{"w": "울안", "pos": "", "def": "울타리를 둘러친 안"}]}
+    broken = [{"title": "관동별곡", "grade": "고1", "meta": ["가사"]},  # meta가 목록
+              {"grade": "고1", "meta": {"갈래": "시"}},  # 제목 없음
+              {"title": "속미인곡", "grade": "고1", "fillins": [{"passage": "임", "answer_line": 3}]},
+              {"title": "사미인곡", "grade": "고1", "words": [{"w": "님", "def": ["임", "사랑하는 사람"]}]},
+              "글만 있는 줄"]
+
+    usable = usable_references([odd, *broken])
+
+    assert usable == [odd]  # 쓸 수 없는 정리는 빼고(로그에 남김) 나머지는 그대로
+    assert "건너뜀" in caplog.text
+    assert reference_sections(odd) == [
+        {"name": "개요", "items": ["갈래: 단편 소설", "배경: 1920년대, 서울"]},  # 비어 있는 값은 빼고 목록은 이어 씀
+        {"name": "핵심 특징", "items": ["인력거꾼의 하루"]},
+        {"name": "구조", "items": ["비 오는 날"]},  # 이름 없는 단계는 ': '를 붙이지 않음
+        {"name": "인물", "items": ["김첨지: 인력거꾼"]},
+        {"name": "어휘", "items": ["울안: 울타리를 둘러친 안"]},  # 품사가 없으면 '()'를 붙이지 않음
+    ]
+
+
+def test_the_same_grade_and_title_twice_keeps_the_first(caplog):
+    from academy.references import usable_references
+    first, second = {**POEM}, {**POEM, "meta": {"갈래": "다른 교재의 정리"}}
+
+    assert usable_references([first, second]) == [first]  # 열쇠(학년+제목)가 같으면 선생님 고치기 화면에서 섞임
+    assert "같은 학년·제목" in caplog.text
+
+
+def test_word_questions_never_offer_another_meaning_of_the_same_word_or_a_near_copy():
+    words = [{"w": "잠방이", "pos": "명사", "def": "가랑이가 무릎까지 오는 짧은 홑바지"},
+             {"w": "잠방이", "pos": "명사", "def": "가랑이가 무릎까지 오는  짧은 홑바지."},  # PDF에서 두 번(띄어쓰기·마침표만 다름)
+             {"w": "어리다", "pos": "형용사", "def": "어리석다"}, {"w": "어리다", "pos": "형용사", "def": "나이가 적다"},
+             {"w": "비탈길", "pos": "명사", "def": "비탈진 언덕의 길"}, {"w": "울안", "pos": "명사", "def": "울타리를 둘러친 안"},
+             {"w": "고샅", "pos": "명사", "def": "마을의 좁은 골목길"}]
+    quiz = reference_quiz({"title": "노새 두 마리", "grade": "고1", "words": words})
+
+    asked = [q["question"] for q in quiz]
+    assert len(asked) == len(set(asked)) == 5  # 낱말마다 한 번
+    flat = lambda text: text.replace(" ", "").rstrip(".")
+    for q in quiz:
+        assert len({flat(c) for c in q["choices"]}) == 4  # 화면에서 똑같아 보이는 보기 없음
+    youth = next(q for q in quiz if "어리다" in q["question"])
+    assert youth["choices"][youth["answer"]] == "어리석다" and "나이가 적다" not in youth["choices"]  # 다른 뜻을 오답으로 내지 않음
+    vocabulary = next(s for s in reference_sections({"title": "t", "grade": "고1", "words": words}) if s["name"] == "어휘")
+    assert sum("잠방이" in item for item in vocabulary["items"]) == 1  # 어휘 칸에도 한 번
+
+
+def test_grade_folders_written_with_deung_pick_that_grade():
+    first, second = {"title": "관동별곡", "grade": "고2", "meta": {"갈래": "가사"}}, {"title": "관동별곡", "grade": "고1", "meta": {"갈래": "가사"}}
+    middle = [{"title": "동백꽃", "grade": "중1", "meta": {"갈래": "소설"}}, {"title": "동백꽃", "grade": "중3", "meta": {"갈래": "소설"}}]
+
+    assert [r["source"] for r in find_references("고등1/관동별곡 1강", [], [first, second])] == ["고1 「관동별곡」"]
+    assert [r["source"] for r in find_references("중등3/동백꽃", [], middle)] == ["중3 「동백꽃」"]
+    assert [r["source"] for r in find_references("집중1강/중3/동백꽃", [], middle)] == ["중3 「동백꽃」"]  # '집중1강'은 중1이 아님
+
+
+def test_long_fill_in_passages_are_not_flagged():
+    ref = {"title": "노새 두 마리", "grade": "고1", "fillins": [{"passage": "가" * 300, "answer_line": "답은   노새  이다"}]}
+
+    assert suspects(ref) == {}  # 빈칸 문제 지문은 보통 길어 '너무 긴 항목'이 아님
+
+
+def test_a_blank_at_either_end_of_the_line_keeps_the_rest_visible():
+    ref = {"title": "관동별곡", "grade": "고1", "fillins": [{"passage": "갈래", "answer_line": "이 작품의 갈래는   가사  "},
+                                                       {"passage": "작가", "answer_line": "  정철  이 지었다"}]}
+
+    assert [q["parts"] for q in reference_quiz(ref)] == [["이 작품의 갈래는", "가사", ""], ["", "정철", "이 지었다"]]
+
+
+def test_file_names_copied_from_a_mac_still_match():
+    import unicodedata
+    title = unicodedata.normalize("NFD", "2022개정/고1/미래엔/3강 제망매가")  # 맥에서 NAS로 옮기면 한글이 자모로 나뉘기도 함
+    ref = {"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}
+
+    assert [r["source"] for r in find_references(title, [], [ref])] == ["고1 「제망매가」"]

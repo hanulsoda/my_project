@@ -6,8 +6,10 @@
 
 import hashlib
 import json
+import logging
 import random
 import re
+import unicodedata
 from pathlib import Path
 
 PARTS = [("features", "핵심 특징"), ("stages", "구조"), ("stanzas", "연별 정리"), ("persons", "인물"),
@@ -15,7 +17,27 @@ PARTS = [("features", "핵심 특징"), ("stages", "구조"), ("stanzas", "연�
 
 
 def load_references(path) -> list[dict]:
-    return json.loads(Path(path).read_text(encoding="utf-8")) if path else []
+    return usable_references(json.loads(Path(path).read_text(encoding="utf-8"))) if path else []
+
+
+def usable_references(refs) -> list[dict]:
+    """정리 파일에 모양이 다른 정리(손으로 고친 JSON 등)가 섞여도 목록·검색·현황이 멈추지 않게, 쓸 수 없는 정리는 빼고 로그에 남깁니다.
+    같은 학년·제목의 정리가 또 있으면 처음 것만 씁니다(선생님이 고친 내용을 학년+제목 열쇠로 기억하므로)."""
+    usable, keys = [], set()
+    for n, ref in enumerate(refs, 1):
+        try:
+            if not (isinstance(ref, dict) and isinstance(ref.get("title"), str) and isinstance(ref.get("grade"), str)):
+                raise ValueError("제목·학년이 없음")
+            reference_text(ref), reference_quiz(ref), suspects(ref)  # 학생·선생님 화면에 쓰는 것을 미리 만들어 봅니다
+        except Exception as error:  # noqa: BLE001 — 어떤 모양이든 그 정리만 뺍니다
+            logging.warning("학원 정리 %d번째를 건너뜀(모양이 다름): %r", n, error)
+            continue
+        if ref_key(ref) in keys:
+            logging.warning("학원 정리 %d번째를 건너뜀(같은 학년·제목이 이미 있음): %s %s", n, ref["grade"], ref["title"])
+            continue
+        keys.add(ref_key(ref))
+        usable.append(ref)
+    return usable
 
 
 def _work(title):
@@ -23,11 +45,12 @@ def _work(title):
 
 
 def _norm(text):
-    return re.sub(r"[\W_]+", "", text)
+    return re.sub(r"[\W_]+", "", unicodedata.normalize("NFC", text))  # 맥에서 옮긴 이름은 한글이 자모로 나뉘어 있기도 함
 
 
 def find_references(title, screen_lines, references) -> list[dict]:
     """영상 제목(폴더/파일 이름)과 화면 글자로 짝지어지는 정리를 {"source", "text"} 목록으로 돌려줍니다."""
+    title = unicodedata.normalize("NFC", title)
     name = _norm(title.rsplit("/", 1)[-1])
     quoted = {_norm(q) for line in screen_lines for q in re.findall(r"[「『](.+?)[」』]", line)}
     found = {}  # 작품 → (파일 이름으로 찾았는지, 정리, 학년 점수)
@@ -59,11 +82,13 @@ def suspects(ref) -> dict:
     깨진 기호·쪽 머리글 꼬리·같은 칸 중복·빈 단계는 보여 줄 때 이미 자동으로 정리하므로, 그 뒤에도 남는 것만 봅니다."""
     found = {}
     for section in reference_sections(ref):
+        if section["name"] == "빈칸 문제":  # 빈칸 문제 지문은 보통 길어 따로 보지 않습니다
+            continue
         for item in section["items"]:
             if len(item) > 250:
                 found.setdefault(section["name"], {})[item] = f"너무 긴 항목({len(item)}자)"
     # PDF에서 뽑다가 다른 단계의 내용이 한 단계로 몰린 것: 단계가 셋 이상인데 빈 단계가 있고 한 단계가 70% 이상
-    stages = _tidy(ref).get("stages") or []
+    stages = [s for s in _tidy(ref).get("stages") or [] if isinstance(s, dict)]
     counts = [len(s.get("bullets") or []) for s in stages]
     empty = [s.get("label", "") for s in stages if not s.get("bullets")]
     if len(stages) >= 3 and empty and sum(counts) >= 3 and max(counts) >= 0.7 * sum(counts):
@@ -73,45 +98,71 @@ def suspects(ref) -> dict:
 
 
 def _grade_score(grade, title):
-    """같은 작품이 여러 학년에 있을 때: 폴더의 학년(고1)과 같으면 2, 학교급(중등부·고1 등의 중/고)만 같으면 1."""
-    exact = re.search(r"[중고][1-3]", title)
-    level = exact.group(0)[0] if exact else "중" if "중등" in title else "고" if "고등" in title else None
-    return 2 if exact and grade == exact.group(0) else 1 if level and grade.startswith(level) else 0
+    """같은 작품이 여러 학년에 있을 때: 폴더의 학년(고1·고등1)과 같으면 2, 학교급(중등부·고1 등의 중/고)만 같으면 1.
+    낱말 안의 글자('집중1강'의 중1)는 학년으로 보지 않습니다."""
+    exact = re.search(r"(?<![가-힣])([중고])등?\s?([1-3])(?!\d)", title)
+    level = exact.group(1) if exact else "중" if "중등" in title else "고" if "고등" in title else None
+    return 2 if exact and grade == exact.group(1) + exact.group(2) else 1 if level and grade.startswith(level) else 0
 
 
 def reference_sections(ref) -> list[dict]:
     """정리를 [{"name": "개요"·"핵심 특징"…, "items": [...]}]로 나눕니다(학생 화면에 그대로 보여 줄 때)."""
     ref = _tidy(ref)
-    sections = [("개요", [f"{k}: {v}" for k, v in ref["meta"].items()])] if ref.get("meta") else []
+    sections = [("개요", [f"{k}: {_value(v)}" for k, v in ref["meta"].items() if _value(v)])] if ref.get("meta") else []
     sections += [(name, [_item(key, item) for item in ref[key]]) for key, name in PARTS if ref.get(key)]
-    # 내용 없는 항목('전개:')과 같은 칸 안의 중복은 뺍니다.
-    sections = [(name, list(dict.fromkeys(i for i in items if i.strip() and not i.strip().endswith(":"))))
-                for name, items in sections]
+    # 내용 없는 항목('전개:')과 같은 칸 안의 중복(띄어쓰기·끝 마침표만 다른 것도)은 뺍니다.
+    sections = [(name, _unique(items)) for name, items in sections]
     return [{"name": name, "items": items} for name, items in sections if items]
+
+
+def _same(text):
+    """띄어쓰기·끝 마침표만 다른 글은 같은 글로 봅니다(PDF에서 두 번 뽑힌 항목)."""
+    return re.sub(r"\s+", " ", text).strip().rstrip(".")
+
+
+def _unique(items):
+    seen, kept = set(), []
+    for item in items:
+        if item.strip() and not item.strip().endswith(":") and _same(item) not in seen:
+            seen.add(_same(item))
+            kept.append(item)
+    return kept
 
 
 def reference_quiz(ref) -> list[dict]:
     """빈칸 문제는 {"context", "parts": [글, 빈칸, 글, …]}, 어휘는 뜻을 고르는 4지선다로 만듭니다."""
+    raw_fills = ref.get("fillins") or []
     ref = _tidy(ref)
     quiz = []
     seen = set()
-    for fill in ref.get("fillins") or []:
+    for raw, fill in zip(raw_fills, ref.get("fillins") or []):
         asked = (fill.get("passage", ""), fill.get("answer_line"))
         if fill.get("answer_line") and asked not in seen:  # PDF에서 뽑다가 같은 문제가 두 번 들어간 것은 한 번만
             seen.add(asked)
-            # 교재에서 빈칸에 들어갈 말은 앞뒤를 두 칸 이상 띄워 둡니다.
-            parts = [p.strip() for p in re.split(r" {2,}(\S(?:.*?\S)?) {2,}", fill["answer_line"])]
+            # 교재에서 빈칸에 들어갈 말은 앞뒤를 두 칸 이상 띄워 둡니다. 줄 맨 앞·끝의 빈칸은 다듬을 때 띄어쓰기가
+            # 지워지므로 원래 글에 있던 두 칸을 되살립니다.
+            edge = raw["answer_line"]
+            line = ("  " if re.match(r" {2,}\S", edge) else "") + fill["answer_line"] + ("  " if re.search(r"\S {2,}$", edge) else "")
+            parts = [p.strip() for p in re.split(r" {2,}(\S(?:.*?\S)?) {2,}", line)]
             # item: '빈칸 문제' 칸의 항목 글(선생님이 학원 정리 고치기에서 숨기면 퀴즈에서도 뺍니다)
             quiz.append({"context": fill.get("passage", ""), "parts": parts if len(parts) > 1 else ["", parts[0], ""],
                          "item": _item("fillins", fill)})
-    words = {w["def"]: w for w in ref.get("words") or [] if w.get("w") and w.get("def")}  # 오답 보기가 겹치지 않게 뜻별로 하나
-    if len(words) >= 4:
-        for meaning, word in words.items():
-            rng = random.Random(word["w"] + meaning)  # 강의를 열 때마다 같은 보기·순서
-            choices = rng.sample([m for m in words if m != meaning], 3) + [meaning]
-            rng.shuffle(choices)
-            quiz.append({"question": f"‘{word['w']}’의 뜻으로 알맞은 것은?", "choices": choices,
-                         "answer": choices.index(meaning), "explanation": _item("words", word)})
+    # 어휘: 낱말마다 한 번(뜻이 둘이면 처음 뜻), 오답 보기는 다른 낱말의 뜻 가운데 정답·같은 낱말의 다른 뜻과 겹치지 않는 것
+    words = [w for w in ref.get("words") or [] if w.get("w") and w.get("def")]
+    first = {}
+    for w in words:
+        first.setdefault(w["w"], w)
+    for name, word in first.items():
+        senses = {_same(w["def"]) for w in words if w["w"] == name}
+        others = list({_same(w["def"]): w["def"] for w in words if _same(w["def"]) not in senses}.values())
+        if len(others) < 3:
+            continue
+        meaning = word["def"]
+        rng = random.Random(name + meaning)  # 강의를 열 때마다 같은 보기·순서
+        choices = rng.sample(others, 3) + [meaning]
+        rng.shuffle(choices)
+        quiz.append({"question": f"‘{name}’의 뜻으로 알맞은 것은?", "choices": choices,
+                     "answer": choices.index(meaning), "explanation": _item("words", word)})
     return quiz
 
 
@@ -136,14 +187,27 @@ def reference_text(ref) -> str:
     return "\n".join(lines)
 
 
+def _value(value):
+    """개요 값·항목 값을 글로: 목록·묶음은 이어 쓰고, 빈 값(None 등)은 ''."""
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        return ", ".join(text for text in map(_value, value) if text)
+    return "" if value is None else str(value)
+
+
 def _item(key, item):
+    if not isinstance(item, dict):  # 정리에 따라 항목이 글 한 줄이기도 합니다("김첨지: 인력거꾼")
+        return _value(item)
     if key == "features":
-        return item.get("text", "")
+        return _value(item.get("text"))
     if key == "stages":
-        return f"{item.get('label', '')}: " + " / ".join(item.get("bullets", []))
+        bullets, label = " / ".join(map(_value, item.get("bullets") or [])), _value(item.get("label"))
+        return f"{label}: {bullets}" if label else bullets
     if key == "fillins":
         return f"{item.get('passage', '')} → {item.get('answer_line', '')}"
     if key == "words":
-        return f"{item.get('w', '')}({item.get('pos', '')}): {item.get('def', '')}"
+        pos = _value(item.get("pos"))
+        return f"{item.get('w', '')}({pos}): {item.get('def', '')}" if pos else f"{item.get('w', '')}: {item.get('def', '')}"
     # 연별 정리·인물 등은 형태가 제각각이라 값만 이어 붙입니다.
-    return " / ".join(", ".join(map(str, v)) if isinstance(v, list) else str(v) for v in item.values() if v)
+    return " / ".join(text for text in map(_value, item.values()) if text)

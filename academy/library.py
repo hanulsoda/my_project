@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 # 브라우저에서 바로 재생되는 형식만 다룹니다.
@@ -29,7 +30,8 @@ def find_videos(video_dir: Path) -> list[dict]:
             rel = path.relative_to(video_dir).as_posix()
             videos.append({
                 "id": hashlib.sha1(rel.encode()).hexdigest()[:12],
-                "title": rel.rsplit(".", 1)[0],
+                # 맥에서 NAS로 옮긴 이름은 한글이 자모로 나뉘어(NFD) 학생이 친 낱말로 찾지 못해 합쳐 둡니다. 영상 번호는 그대로.
+                "title": unicodedata.normalize("NFC", rel.rsplit(".", 1)[0]),
                 "path": path,
             })
     return videos

@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from academy.entry import MIN_SECRET_LEN, PASS_TTL, entry_link_ok, make_pass, pass_ok
 from academy.library import find_videos, load_analysis
-from academy.references import find_references, load_references, ref_key, reference_sections, suspects
+from academy.references import find_references, load_references, ref_key, reference_sections, suspects, usable_references
 from academy.timelink import link_times
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -185,6 +185,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     entry_secret을 주면 인터넷(학원 내부망 밖)에서 온 요청은 학원 사이트 입장 링크로 받은 통과 쿠키가 있어야 합니다.
     """
+    references = usable_references(references)  # 모양이 다른 정리 하나가 목록·검색·현황을 멈추지 않게
+
     @asynccontextmanager
     async def lifespan(app):
         # NAS를 훑고 분석 상태를 읽고 학원 정리를 짝짓는 데 시간이 걸려, 첫 학생이 기다리지 않게 켜자마자 해 두고 요약을 저장합니다.
@@ -366,7 +368,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         for v in current_library()["videos"]:
             status = analysis_status(v["id"])
             # Claude 요점 정리가 없어도 학원 요점 정리를 보여 줄 수 있으면 요점 정리가 있는 강의입니다.
-            status["guide"] = status["guide"] or (status["analyzed"] and bool(fixed(academy_summaries(v), fixes)))
+            status["guide"] = status["guide"] or (status["analyzed"] and shows_summary(v, fixes))
             listed.append({"id": v["id"], "title": v["title"], "added": v.get("added", 0), **status})
         return listed
 
@@ -656,6 +658,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             out.append({**r, "sections": sections, "quiz": quiz})
         return out
 
+    def shows_summary(video, fixes):  # 요점 정리 탭에 보일 학원 정리가 있는지(빈칸 문제만 있는 정리는 퀴즈로만 나감)
+        return any(r["sections"] for r in fixed(academy_summaries(video), fixes))
+
     def ref_by_key(key):
         ref = next((r for r in references if ref_key(r) == key and reference_sections(r)), None)
         if ref is None:
@@ -728,7 +733,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             if not entry:
                 unanalyzed.append(v["title"])
                 continue
-            summary = not entry["guide"] and bool(fixed(academy_summaries(v), fixes))
+            summary = not entry["guide"] and shows_summary(v, fixes)
             counts["guide" if entry["guide"] else "summary" if summary else "toc" if entry["toc"] else "pages"] += 1
             # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 Claude 요점 정리가 없는 강의
             if not entry["guide"] and entry["times"]:

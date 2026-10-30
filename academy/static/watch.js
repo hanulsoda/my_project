@@ -158,8 +158,10 @@ function overviewCard({ overview = [], glossary = [], sources = [] }) {
 }
 
 // 이 강의를 위한 요점 정리가 없을 때: 학원이 만든 작품별 요점 정리를 그대로 보여 줍니다(영상 시간 연결 없음).
-function renderReferences(references) {
+function renderReferences(all) {
   refItems = [];
+  const references = all.filter((r) => r.sections.length);  // 빈칸 문제만 있는 정리는 퀴즈 탭에만 나옵니다
+  if (!references.length) return $("tab-guide").replaceChildren(notice("이 강의는 아직 요점 정리가 없습니다. 퀴즈 탭의 문제는 풀 수 있습니다."));
   $("tab-guide").replaceChildren(
     notice("학원 요점 정리입니다. 시간을 누르면 그 설명으로 이동합니다. 시간은 대본에서 자동으로 찾은 것이라 가끔 틀릴 수 있고, 시간이 없는 내용은 페이지 탭에서 찾을 수 있습니다."),
     ...references.map(({ source, sections }) => el("article", { class: "overview reference" },

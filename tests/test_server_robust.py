@@ -102,3 +102,39 @@ def test_toc_titles_keep_the_spacing_of_the_work_name():
     # 받아쓰기가 '운수 좋은 날'을 '운수 조은 날'로 적었을 때, 바로잡으면서 띄어쓰기를 지우지 않습니다.
     assert server._respell("운수 조은 날의 결말", "고1/운수 좋은 날") == "운수 좋은 날의 결말"
     assert server._respell("성의 꽃 감상", "고1/성에꽃") == "성에꽃 감상"
+
+
+def test_one_odd_summary_does_not_stop_the_lecture_list(two_lectures):
+    video_dir, data_dir, ids = two_lectures
+    refs = [{"title": "1강", "grade": "고1", "meta": ["가사"]},  # 손으로 고치다 모양이 바뀐 정리
+            {"title": "2강", "grade": "고1", "persons": ["김첨지: 인력거꾼"]}]
+    client = TestClient(create_app(video_dir, data_dir, None, refs), client=LAN)
+
+    for path in ["/api/videos", f"/api/videos/{ids[0]}", "/api/references", "/api/status", "/api/search?q=안녕하세요"]:
+        assert client.get(path).status_code == 200, path
+    assert [r["title"] for r in client.get("/api/references").json()] == ["2강"]
+
+
+def test_a_summary_with_only_fill_ins_gives_a_quiz_but_does_not_count_as_a_summary(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "고1").mkdir(parents=True)
+    (video_dir / "고1" / "청산별곡.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    save_analysis(data_dir, video_id, {"title": "고1/청산별곡", "duration": 2.0, "segments": SEGMENTS, "guide": None})
+    ref = {"title": "청산별곡", "grade": "고1", "fillins": [{"passage": "청산", "answer_line": "청산에   살어리랏다  "}]}
+    client = TestClient(create_app(video_dir, data_dir, None, [ref]), client=LAN)
+
+    assert client.get("/api/videos").json()[0]["guide"] is False  # 목록에 '요점 정리' 배지를 달지 않음
+    assert client.get("/api/status").json()["summary"] == 0
+    assert client.get(f"/api/videos/{video_id}").json()["references"][0]["quiz"]  # 빈칸 문제는 퀴즈로 그대로
+
+
+def test_mac_file_names_are_listed_like_any_other(tmp_path):
+    import unicodedata
+    video_dir = tmp_path / "videos"
+    (video_dir / "고1").mkdir(parents=True)
+    (video_dir / "고1" / unicodedata.normalize("NFD", "제망매가.mp4")).write_bytes(b"x")  # 맥에서 옮긴 이름(자모로 나뉨)
+
+    title = find_videos(video_dir)[0]["title"]
+
+    assert title == "고1/제망매가"  # 학생이 친 '제망매가'로 찾을 수 있게

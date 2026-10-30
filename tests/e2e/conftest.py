@@ -44,6 +44,8 @@ TEACHER_REF = {"title": "성난 풀잎", "grade": "고2",
                "features": [{"text": "긴 항목 " + "가" * 260}, {"text": "둘째 특징"}, {"text": "셋째 특징"}],
                "fillins": [{"passage": "풀잎은 무엇을 상징하나?", "answer_line": "풀잎은   민중  을 상징한다"}]}
 REFS.append(TEACHER_REF)
+# 빈칸 문제만 있는 정리: 청산별곡 강의에는 요점 정리 없이 퀴즈만 나갑니다.
+REFS.append({"title": "청산별곡", "grade": "고1", "fillins": [{"passage": "청산", "answer_line": "청산에   살어리랏다  "}]})
 TEACHER_KEY = "e2e-teacher-key"
 
 LECTURES = {  # 영상 경로 → 분석 파일 내용(None이면 분석 전)
