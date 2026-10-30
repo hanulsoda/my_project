@@ -169,6 +169,26 @@ def test_academy_network_addresses_need_no_pass(make_client, address):
     assert client.get("/api/videos").status_code == 200
 
 
+@pytest.mark.parametrize("forwarded", ["proxy_add_x_forwarded_for", "121.130.20.30:443"],
+                         ids=["header-value-typed-without-dollar", "address-with-port"])
+def test_unreadable_proxy_address_counts_as_internet(make_client, forwarded):
+    # 시놀로지 머리글 값을 $ 없이 적거나 프록시가 포트를 붙여 보내도, 인터넷에 문이 열리지 않게 합니다.
+    keyless, _ = make_client(entry_secret="", client=PROXY)
+    gated, _ = make_client(client=PROXY)
+
+    assert keyless.get("/api/videos", headers={"x-forwarded-for": forwarded}).status_code == 403
+    assert gated.get("/api/videos", headers={"x-forwarded-for": forwarded}).status_code == 401
+
+
+def test_every_forwarded_for_line_is_read(make_client):
+    # 머리글이 두 줄로 와도 맨 마지막 주소(프록시가 붙인 실제 접속 주소)를 봅니다.
+    client, _ = make_client(client=PROXY)
+
+    res = client.get("/api/videos", headers=[("x-forwarded-for", "192.168.0.7"), ("x-forwarded-for", HOME[0])])
+
+    assert res.status_code == 401
+
+
 def test_records_moved_from_home_can_be_claimed_at_the_academy(make_client):
     home, _ = make_client()
     home.get(f"/enter?{entry_query(int(time.time()) + 300)}")
@@ -191,6 +211,12 @@ def test_site_url_must_be_a_web_address(site_url):
     # 입장이 막힌 화면의 "학원 사이트로 가기" 링크가 됩니다.
     with pytest.raises(SystemExit):
         entry_settings({"ENTRY_SECRET": SECRET, "SITE_URL": site_url})
+
+
+def test_short_secret_is_refused_even_without_require_entry():
+    # 짧은 비밀 키는 쉽게 풀려서, 넣었다면 언제나 32자 이상이어야 합니다.
+    with pytest.raises(SystemExit):
+        entry_settings({"ENTRY_SECRET": "abc"})
 
 
 @pytest.mark.parametrize("flag", ["1", "true", "yes"])

@@ -78,7 +78,8 @@ def _where(request) -> str:
     DS918+ 역방향 프록시가 X-Forwarded-For 맨 오른쪽에 붙인 주소가 실제 접속 주소입니다(그 앞의 주소는 학생이
     마음대로 넣을 수 있음). 프록시를 거쳤는데 실제 주소를 알려 주지 않으면(설정 빠뜨림) 인터넷으로 봅니다.
     """
-    forwarded = request.headers.get("x-forwarded-for")
+    # 머리글이 여러 줄로 오면 이어 붙여 봅니다(uvicorn과 같은 방식).
+    forwarded = ",".join(request.headers.getlist("x-forwarded-for"))
     if forwarded:
         host = forwarded.split(",")[-1].strip()
     elif request.headers.get("x-forwarded-proto"):
@@ -88,7 +89,8 @@ def _where(request) -> str:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        return "unknown"
+        # 프록시가 보낸 주소를 읽을 수 없으면(머리글 값 잘못 적음, 포트가 붙음 등) 인터넷으로 봅니다.
+        return "internet" if forwarded else "unknown"
     return "lan" if address.is_private or address in _VPN else "internet"
 
 
@@ -861,6 +863,8 @@ def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
     # "1"뿐 아니라 "true"·"yes"도 켜진 것으로 봅니다. 꺼진 것으로 잘못 읽으면 인터넷에 그대로 열리기 때문입니다.
     if env.get("REQUIRE_ENTRY", "").strip() not in ("", "0") and len(secret) < MIN_SECRET_LEN:
         raise SystemExit(f"ENTRY_SECRET(입장 링크 비밀 키)가 없거나 {MIN_SECRET_LEN}자보다 짧아서 서버를 시작하지 않습니다.")
+    if 0 < len(secret) < MIN_SECRET_LEN:  # 짧은 키는 쉽게 풀려서 넣었다면 언제나 막습니다
+        raise SystemExit(f"ENTRY_SECRET(입장 링크 비밀 키)가 {MIN_SECRET_LEN}자보다 짧아서 서버를 시작하지 않습니다.")
     site_url = env.get("SITE_URL", "").strip()
     # 입장이 막힌 화면의 "학원 사이트로 가기" 링크가 되므로 웹 주소만 받습니다.
     if site_url and not re.match(r"https?://", site_url, re.I):
