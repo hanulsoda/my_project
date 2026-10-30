@@ -665,7 +665,7 @@ def test_ask_rejects_bad_requests(setup):
     assert calls == []
 
 
-def test_ask_reports_ai_failure_clearly(tmp_path):
+def test_ask_reports_ai_failure_clearly(tmp_path, caplog):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
     (video_dir / "1강.mp4").write_bytes(b"x")
@@ -676,10 +676,12 @@ def test_ask_reports_ai_failure_clearly(tmp_path):
         raise TypeError("Could not resolve authentication method")  # API 키가 없을 때 SDK가 내는 오류
 
     client = TestClient(create_app(video_dir, data_dir, broken_answer))
-    res = client.post(f"/api/videos/{video_id}/ask", json={"question": "질문"})
+    with caplog.at_level("ERROR"):
+        res = client.post(f"/api/videos/{video_id}/ask", json={"question": "질문"})
 
     assert res.status_code == 502
-    assert "authentication" in res.json()["detail"]
+    assert res.json()["detail"] == "AI 답변을 받지 못했습니다. 잠시 뒤 다시 해 주세요."  # 학생에게 내부 오류를 보이지 않음
+    assert "authentication" in caplog.text  # 선생님은 서버 로그에서 원인을 봄
 
 
 def test_student_server_does_not_take_questions():
