@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from academy.library import find_videos, load_analysis, save_analysis, save_frame
+from academy.library import find_videos, load_analysis, save_analysis
 
 
 def touch(path):
@@ -34,6 +34,18 @@ def test_video_ids_are_stable_and_url_safe(tmp_path):
     assert all(i.isalnum() and i.isascii() for i in first)
 
 
+def test_skips_nas_recycle_bin_thumbnail_and_hidden_folders_and_files(tmp_path):
+    touch(tmp_path / "1강.mp4")
+    touch(tmp_path / "#recycle" / "지운 강의.mp4")  # 시놀로지 휴지통
+    touch(tmp_path / "@eaDir" / "1강.mp4" / "SYNOVIDEO_VIDEO_SCREENSHOT.mp4")  # 시놀로지 썸네일
+    touch(tmp_path / ".숨김" / "3강.mp4")
+    touch(tmp_path / "수학" / "._4강.mp4")  # 맥이 남기는 숨김 파일
+    touch(tmp_path / "수학" / "4강.mp4")
+    touch(tmp_path / "창비" / "#지구 #소통.mp4")  # 이름이 #으로 시작하는 진짜 강의(NAS에 실제로 있음)
+
+    assert [v["title"] for v in find_videos(tmp_path)] == ["1강", "수학/4강", "창비/#지구 #소통"]
+
+
 def test_missing_video_dir_gives_empty_list(tmp_path):
     assert find_videos(tmp_path / "없음") == []
 
@@ -47,44 +59,18 @@ def test_save_and_load_analysis(tmp_path):
     assert load_analysis(tmp_path / "data", "없는영상") is None
 
 
-def test_interrupted_save_keeps_previous_analysis(tmp_path, monkeypatch):
-    save_analysis(tmp_path, "abc", {"title": "원래 내용"})
-    real_write_text = Path.write_text
+def test_a_save_cut_off_midway_keeps_the_previous_analysis(tmp_path, monkeypatch):
+    save_analysis(tmp_path, "abc", {"title": "예전 분석"})
+    real = Path.write_text
 
-    def write_half_then_fail(self, text, *args, **kwargs):  # 저장 도중 네트워크가 끊긴 상황
-        real_write_text(self, text[: len(text) // 2], *args, **kwargs)
-        raise OSError("연결 끊김")
+    def cut_off(self, text, **kwargs):  # 쓰는 도중 작업이 끊기거나 디스크가 찬 경우
+        real(self, text[:5], **kwargs)
+        raise OSError("디스크가 가득 참")
 
-    monkeypatch.setattr(Path, "write_text", write_half_then_fail)
+    monkeypatch.setattr(Path, "write_text", cut_off)
     with pytest.raises(OSError):
-        save_analysis(tmp_path, "abc", {"title": "새 내용", "segments": [{"start": 0, "end": 1, "text": "안녕"}]})
+        save_analysis(tmp_path, "abc", {"title": "새 분석"})
     monkeypatch.undo()
 
-    assert load_analysis(tmp_path, "abc") == {"title": "원래 내용"}
-
-
-def test_save_frame_writes_jpeg_under_frames_dir(tmp_path):
-    save_frame(tmp_path, "abc", 60, b"\xff\xd8x")
-
-    assert (tmp_path / "frames" / "abc" / "60.jpg").read_bytes() == b"\xff\xd8x"
-    assert list((tmp_path / "frames" / "abc").iterdir()) == [tmp_path / "frames" / "abc" / "60.jpg"]
-
-
-def test_skips_nas_trash_thumbnails_and_hidden_files(tmp_path):
-    touch(tmp_path / "수학" / "1강.mp4")
-    touch(tmp_path / "#recycle" / "수학" / "지난학기 3강.mp4")  # 시놀로지 휴지통
-    touch(tmp_path / "수학" / "@eaDir" / "1강.mp4" / "SYNOPHOTO_FILM_M.mp4")  # 시놀로지 썸네일
-    touch(tmp_path / "수학" / "._1강.mp4")  # 맥이 만드는 숨김 파일
-    touch(tmp_path / ".숨김" / "2강.mp4")
-
-    assert [v["title"] for v in find_videos(tmp_path)] == ["수학/1강"]
-
-
-def test_skips_broken_shortcuts_but_keeps_working_ones(tmp_path):
-    touch(tmp_path / "원본" / "1강.mp4")
-    (tmp_path / "강의").mkdir()
-    (tmp_path / "강의" / "1강.mp4").symlink_to(tmp_path / "원본" / "1강.mp4")  # 바로가기
-    (tmp_path / "강의" / "2강.mp4").symlink_to(tmp_path / "지운영상.mp4")  # 원본이 지워진 바로가기
-    (tmp_path / "강의" / "폴더이름.mp4").mkdir()  # 이름만 영상인 폴더
-
-    assert [v["title"] for v in find_videos(tmp_path)] == ["강의/1강", "원본/1강"]
+    # 서버가 읽는 파일은 늘 온전한 이전 분석이거나 새 분석입니다.
+    assert load_analysis(tmp_path, "abc") == {"title": "예전 분석"}

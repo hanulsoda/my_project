@@ -1,13 +1,9 @@
 """Claude API로 요점 정리·퀴즈를 만들고, 학생 질문에 답합니다."""
 
-import base64
 import json
 import os
-import re
-from collections.abc import Sequence
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5-5")
-BOARD_TIME = re.compile(r"\d+(:\d{1,2}){1,2}")
 
 GUIDE_PROMPT = """당신은 학원 강의를 학생용 학습 자료로 정리하는 선생님입니다.
 강의 받아쓰기 대본이 주어집니다. 각 줄 앞의 [분:초]는 그 말이 나온 시점입니다.
@@ -19,14 +15,37 @@ GUIDE_PROMPT = """당신은 학원 강의를 학생용 학습 자료로 정리�
   start는 그 설명이 시작되는 대본 줄의 시점을 "분:초" 형식 그대로 적습니다.
   points에는 학생이 복습할 때 꼭 알아야 할 핵심 내용을 2~5개, 각각 한 문장으로 적습니다.
   공식, 정의, 예제 풀이 순서처럼 시험에 나올 만한 내용을 우선합니다.
-  board에는 그 챕터의 판서가 가장 잘 보이는 화면 사진의 시점을 "분:초"로 적습니다. 판서가 보이는 사진이 없으면 빈 문자열입니다.
-- 대본 뒤에 "[분:초] 화면" 표시와 함께 강의 화면 사진이 붙어 있을 수 있습니다. 사진에 보이는 판서(칠판·태블릿에 쓴
-  수식, 도표, 정리)를 읽어 요점에 반영하고, 수식은 x² + 2x + 1 처럼 텍스트로 옮겨 적으세요.
 - quiz: 강의 내용만으로 풀 수 있는 4지선다 문제 5개. answer는 정답 보기의 번호(0부터 시작).
   explanation에는 왜 그 답인지 한두 문장으로, time에는 관련 설명이 나오는 시점("분:초")을 적습니다.
 - corrections: 대본에서 잘못 들린 용어를 바로잡는 목록. wrong에는 대본에 나온 표기 그대로, right에는 올바른 표기를 적습니다.
   강의 주제상 확실히 틀린 용어만 적고(예: '격률'을 '경률'로 받아쓴 경우), 두 글자 이상이어야 합니다.
-  대본 전체에서 그대로 바꾸므로, 맞게 쓰인 다른 말까지 바뀔 수 있는 표기는 넣지 마세요. 없으면 빈 목록입니다."""
+  대본 전체에서 그대로 바꾸므로, 맞게 쓰인 다른 말까지 바뀔 수 있는 표기는 넣지 마세요. 없으면 빈 목록입니다.
+- page_labels: 화면 글자가 주어질 때만 채우고, 없으면 빈 목록입니다.
+- overview, glossary, edits: 학원 요점 정리가 주어질 때만 채우고, 없으면 빈 목록입니다."""
+
+SCREEN_NOTE = """
+
+화면 글자도 함께 주어집니다. 선생님이 수업 중 띄운 교재·판서를 글자 인식(OCR)으로 읽은 것이고, [분:초]는 그 화면이 처음 나온 시점입니다.
+- 용어·작품명·작가명의 표기는 대본보다 화면 글자를 우선해 바로잡으세요.
+- 말로는 하지 않고 화면에만 있는 핵심 내용(정의, 표, 예시 등)도 요점 정리와 퀴즈에 넣을 수 있습니다.
+- 화면 글자에는 프로그램 메뉴 같은 잡음과 잘못 읽힌 글자가 섞여 있으니, 강의 내용과 관련된 것만 쓰세요.
+- 챕터와 퀴즈의 시점은 계속 대본 줄의 시점을 쓰세요.
+- page_labels: 화면 글자의 [분:초] 묶음마다 하나씩, 학생이 자기 교재에서 그 화면을 찾을 수 있는 짧은 이름표(20자 안팎).
+  start는 그 묶음의 [분:초]를 그대로 적습니다. 화면에 인쇄된 교재 쪽 번호가 보이면 "170쪽 · 꺼삐딴 리 지문"처럼
+  쪽수를 앞에 적고, 안 보이면 "(2) 운율 형성 방법"처럼 단원·소제목만 적습니다. PDF 프로그램 위쪽의 "11 / 200" 같은
+  표시는 파일 안의 순서라 교재 쪽수와 다를 수 있으니 쪽수로 쓰지 마세요."""
+
+REFERENCE_NOTE = """
+
+학원이 이미 만든 요점 정리(학원 요점 정리)도 주어집니다. 교재 PDF에서 자동으로 뽑은 것이라 엉뚱한 내용, 잘린 문장,
+중복이 섞여 있을 수 있습니다.
+- points는 학원 요점 정리의 항목과 표현을 최대한 그대로 쓰고, 각 항목을 강의에서 그것을 설명하는 시점의 챕터에 넣으세요.
+  강의에서 다루지 않은 항목은 가장 관련 있는 챕터에 넣습니다.
+- 대본·화면 글자와 맞지 않거나 추출 오류로 보이는 항목은 고치거나 빼고, 그 내역을 edits에 적으세요.
+  before는 원래 항목, after는 고친 항목(뺐으면 빈 문자열), reason은 한 문장입니다.
+- overview: 학원 요점 정리의 개요(갈래·성격·주제·배경·제재 등)를 name/value로 적고, 오류는 고쳐서 적습니다.
+- glossary: 학원 요점 정리의 어휘 가운데 강의를 이해하는 데 필요한 것을 term/meaning으로 적습니다.
+- 퀴즈를 만들 때 학원 요점 정리의 빈칸 문제도 참고하세요."""
 
 GUIDE_SCHEMA = {
     "type": "object",
@@ -38,9 +57,8 @@ GUIDE_SCHEMA = {
                 "start": {"type": "string"},
                 "title": {"type": "string"},
                 "points": {"type": "array", "items": {"type": "string"}},
-                "board": {"type": "string"},
             },
-            "required": ["start", "title", "points", "board"],
+            "required": ["start", "title", "points"],
             "additionalProperties": False,
         }},
         "quiz": {"type": "array", "items": {
@@ -61,8 +79,33 @@ GUIDE_SCHEMA = {
             "required": ["wrong", "right"],
             "additionalProperties": False,
         }},
+        "page_labels": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"start": {"type": "string"}, "label": {"type": "string"}},
+            "required": ["start", "label"],
+            "additionalProperties": False,
+        }},
+        "overview": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
+            "required": ["name", "value"],
+            "additionalProperties": False,
+        }},
+        "glossary": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"term": {"type": "string"}, "meaning": {"type": "string"}},
+            "required": ["term", "meaning"],
+            "additionalProperties": False,
+        }},
+        "edits": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"before": {"type": "string"}, "after": {"type": "string"},
+                           "reason": {"type": "string"}},
+            "required": ["before", "after", "reason"],
+            "additionalProperties": False,
+        }},
     },
-    "required": ["summary", "chapters", "quiz", "corrections"],
+    "required": ["summary", "chapters", "quiz", "corrections", "page_labels", "overview", "glossary", "edits"],
     "additionalProperties": False,
 }
 
@@ -111,38 +154,37 @@ def _ask_claude(client, **request) -> str:
     return "".join(b.text for b in response.content if b.type == "text")
 
 
-def _board_frame(text: str, frames: Sequence[tuple[int, bytes]]) -> int | None:
-    """모델이 고른 "분:초"를 보낸 장면 중 가장 가까운 장면의 초로. 형식이 틀리면 사진 없음."""
-    if not frames or not BOARD_TIME.fullmatch(text.strip()):
-        return None
-    t = parse_time(text)
-    return min((seconds for seconds, _ in frames), key=lambda seconds: abs(seconds - t))
+def make_study_guide(client, title: str, segments: list[dict], screens: list[dict] | None = None,
+                     references: list[str] | None = None) -> dict:
+    """screens는 페이지마다 {"start": 초, "text": [화면 글자 줄]}. 있으면 근거로 함께 보내고 페이지 이름표를 받습니다.
 
-
-def make_study_guide(client, title: str, segments: list[dict],
-                     frames: Sequence[tuple[int, bytes]] = ()) -> dict:
-    content = [{"type": "text", "text": f"강의 제목: {title}\n\n<대본>\n{transcript_text(segments)}\n</대본>"}]
-    for seconds, jpeg in frames:
-        content += [{"type": "text", "text": f"[{fmt_time(seconds)}] 화면"},
-                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                                 "data": base64.b64encode(jpeg).decode()}}]
+    references는 학원이 이미 만든 작품별 요점 정리 글. 있으면 그 항목을 다듬어 쓰고 고친 내역(edits)을 받습니다.
+    """
+    content = f"강의 제목: {title}\n\n<대본>\n{transcript_text(segments)}\n</대본>"
+    if screens:
+        content += "\n\n<화면 글자>\n" + "\n\n".join(
+            f"[{fmt_time(s['start'])}]\n" + "\n".join(s["text"]) for s in screens) + "\n</화면 글자>"
+    if references:
+        content += "\n\n<학원 요점 정리>\n" + "\n\n".join(references) + "\n</학원 요점 정리>"
+    system = GUIDE_PROMPT + (SCREEN_NOTE if screens else "") + (REFERENCE_NOTE if references else "")
     text = _ask_claude(
         client,
         max_tokens=16000,
         output_config={"effort": "high", "format": {"type": "json_schema", "schema": GUIDE_SCHEMA}},
-        system=GUIDE_PROMPT,
+        system=system,
         messages=[{"role": "user", "content": content}],
     )
     guide = json.loads(text)
     for chapter in guide["chapters"]:
         chapter["start"] = parse_time(chapter["start"])
-        chapter["board"] = _board_frame(chapter["board"], frames)
     guide["chapters"].sort(key=lambda c: c["start"])
     guide["quiz"] = [q for q in guide["quiz"] if 0 <= q["answer"] < len(q["choices"])]
     for q in guide["quiz"]:
         q["time"] = parse_time(q["time"])
     guide["corrections"] = [c for c in guide["corrections"]
                             if len(c["wrong"]) >= 2 and c["wrong"] != c["right"]]
+    for label in guide["page_labels"]:
+        label["start"] = parse_time(label["start"])
     return guide
 
 
@@ -152,7 +194,7 @@ def answer_question(client, title: str, segments: list[dict], question: str,
         question = f"(지금 [{fmt_time(current_time)}] 장면을 보면서 질문합니다)\n{question}"
     return _ask_claude(
         client,
-        max_tokens=4000,  # 질문 한 번 비용의 상한. 쉽고 짧게 답하라고 했으니 충분합니다.
+        max_tokens=8000,
         output_config={"effort": "medium"},
         # 같은 영상에 대한 질문이 이어지면 대본 부분은 캐시에서 싸게 읽힙니다.
         system=[{"type": "text",

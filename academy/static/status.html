@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>강의 현황</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-title" content="학습 플레이어">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
+</head>
+<body class="library" data-view="page">
+  <main class="app">
+    <header class="content-head"><a class="back" href="./">강의</a><div class="heading"><h1>강의 현황</h1><p id="view-sub" class="sub"></p></div></header>
+    <nav class="sidebar" aria-label="보관함과 폴더"></nav>
+    <div class="content-body"><div class="list-page">
+    <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 페이지만 순서로 하나에만 셉니다.</p>
+    <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
+    <section id="teacher">
+      <h2>이번 주 강의 지정 (선생님)</h2>
+      <p class="notice">고른 강의는 모든 학생의 사이드바 맨 위에 '이번 주 강의'로 나옵니다. 바꾸려면 선생님 열쇠가 필요하고, 넣은 열쇠는 이 브라우저에 기억합니다.</p>
+      <form id="key-form" class="note-form" hidden>
+        <input id="teacher-key" type="password" autocomplete="off" aria-label="선생님 열쇠" placeholder="선생님 열쇠">
+        <button type="submit">열쇠 넣기</button>
+      </form>
+      <div id="picker" class="picker" hidden>
+        <label for="pick-note">학생에게 한마디 (넣지 않아도 됨)</label>
+        <input id="pick-note" maxlength="200" placeholder="예: 기말 대비로 이 강의부터 보세요">
+        <ol id="pick-list" class="notes"></ol>
+        <input id="pick-search" type="search" aria-label="강의 찾아 더하기" placeholder="강의 찾아 더하기 (예: 홍계월전)">
+        <ul id="pick-found" class="notes"></ul>
+        <div class="quiz-actions"><button type="button" id="pick-save" class="retry">저장</button><button type="button" id="key-forget" class="more">이 브라우저에서 열쇠 지우기</button></div>
+      </div>
+      <p id="pick-status" class="notice" aria-live="polite"></p>
+      <p><a href="fixes.html">학원 정리 고치기 →</a> 학생이 보는 학원 정리의 틀린 항목을 고치거나 숨깁니다(같은 선생님 열쇠).</p>
+    </section>
+    <h2>자동 목차 진행</h2>
+    <p id="toc" class="notice"></p>
+    <progress id="toc-bar" max="1" value="0" aria-label="자동 목차 진행률"></progress>
+    <section id="usage" hidden>
+      <h2>이용 통계 (최근 30일)</h2>
+      <p id="usage-summary" class="notice"></p>
+      <ol id="usage-top" class="plain"></ol>
+      <h3 class="usage-week-title">요일별 강의 열기 (최근 4주)</h3>
+      <div id="usage-week" class="bars usage-bars"></div>
+      <p class="notice">학생 이름과 기기 주소는 남기지 않습니다. 플레이어에서 강의를 연 시각과, 기기를 알아볼 수 없게 바꾼 번호만 셉니다.</p>
+    </section>
+    <section id="quiz-stats" hidden>
+      <h2>많이 틀리는 문제 (최근 30일)</h2>
+      <p id="quiz-summary" class="notice"></p>
+      <ol id="quiz-hardest" class="plain"></ol>
+      <p class="notice">기기마다 처음 푼 결과만 셉니다(다시 푼 것은 빼고). 세 기기 넘게 풀고 한 번이라도 틀린 문제를 정답률이 낮은 순서로 보여 줍니다. 빈칸 문제는 학생이 '알았어요·몰랐어요'로 스스로 고른 결과입니다.</p>
+    </section>
+    <section id="ops" hidden>
+      <h2>운영 기록</h2>
+      <dl id="ops-lines" class="stats"></dl>
+    </section>
+    <h2>분석되지 않은 강의</h2>
+    <ul id="unanalyzed" class="plain"></ul>
+    </div></div>
+  </main>
+  <script src="common.js"></script>
+  <script>
+    const $ = (elementId) => document.getElementById(elementId);
+    let videos = [], chosen = [];  // chosen: 고른 강의 [{id, title}]
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => {
+      videos = list;
+      fillSidebar(videos, { here: "" });
+      if ($("pick-search").value) $("pick-search").oninput();  // 강의 목록이 오기 전에 찾기 칸에 쓴 경우
+    });
+
+    // ---- 선생님: 이번 주 강의 지정(열쇠는 X-Teacher-Key로 보내고, 틀리면 지우고 다시 묻습니다) ----
+    const teacherKey = () => store.get("teacher-key") || "";
+    const showTeacher = () => { $("key-form").hidden = !!teacherKey(); $("picker").hidden = !teacherKey(); };
+    $("key-form").onsubmit = (e) => {
+      e.preventDefault();
+      if (!$("teacher-key").value.trim()) return;
+      store.set("teacher-key", $("teacher-key").value.trim());
+      $("teacher-key").value = "";
+      showTeacher();
+    };
+    $("key-forget").onclick = () => { localStorage.removeItem("teacher-key"); showTeacher(); };
+    function renderChosen() {
+      const grade = (l) => {  // 대상 학년(없으면 모든 학년)
+        const select = el("select", { "aria-label": `${l.title} 대상 학년`, onchange: () => { l.grade = select.value; } },
+          ...["", "중1", "중2", "중3", "고1", "고2", "고3"].map((g) => el("option", { value: g }, g || "모든 학년")));
+        select.value = l.grade || "";
+        return select;
+      };
+      $("pick-list").replaceChildren(...chosen.map((l, i) => el("li", {}, el("span", { class: "note-text" }, l.title), grade(l),
+        el("button", { type: "button", class: "delete", "aria-label": `${l.title} 빼기`,
+                       onclick: () => { chosen.splice(i, 1); renderChosen(); } }, "빼기"))));
+      if (!chosen.length) $("pick-list").append(el("li", { class: "notice" }, "아직 고른 강의가 없습니다. 아래에서 찾아 더하세요."));
+    }
+    $("pick-search").oninput = () => {
+      const words = $("pick-search").value.toLowerCase().split(/\s+/).filter(Boolean);
+      const found = words.length ? videos.filter((v) => words.every((w) => v.title.toLowerCase().includes(w))
+                                                      && !chosen.some((c) => c.id === v.id)).slice(0, 10) : [];
+      $("pick-found").replaceChildren(...found.map((v) => el("li", {}, el("span", { class: "note-text" }, v.title),
+        el("button", { type: "button", class: "delete", "aria-label": `${v.title} 더하기`,
+                       onclick: () => { chosen.push({ id: v.id, title: v.title }); renderChosen(); $("pick-search").oninput(); } }, "더하기"))));
+    };
+    $("pick-save").onclick = async () => {
+      const res = await fetch("/api/picks", { method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() },
+                                              body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value,
+                                                                     grades: Object.fromEntries(chosen.map((l) => [l.id, l.grade || ""])) }) });
+      if (res.status === 429) return void ($("pick-status").textContent = "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
+      if (res.status === 403) {
+        localStorage.removeItem("teacher-key");
+        showTeacher();
+        $("pick-status").textContent = "선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.";
+        return;
+      }
+      $("pick-status").textContent = res.ok ? "저장했습니다. 학생 화면에 바로 나옵니다." : "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.";
+      if (res.ok) { picksLoad = null; fillSidebar(videos, { here: "" }); }
+    };
+    fetch("/api/picks").then((r) => r.json()).then((picks) => {
+      chosen = picks.lectures;
+      $("pick-note").value = picks.note || "";
+      renderChosen();
+    });
+    showTeacher();
+    fetch("/api/status").then((r) => r.json()).then((s) => {
+      const rows = [["전체 강의", s.total], ["분석 끝남", s.analyzed], ["Claude 요점 정리", s.guide], ["학원 정리", s.summary],
+                    ["자동 목차", s.toc], ["페이지만", s.pages], ["분석 안 됨", s.total - s.analyzed]];
+      document.getElementById("counts").replaceChildren(...rows.flatMap(([name, n]) => [el("dt", {}, name), el("dd", {}, n.toLocaleString())]));
+      // 쓸 수 없는 답이 나와 빈 목차로 남긴 강의도 처리한 것으로 셉니다.
+      const { target, done, last_3_days: recent } = s.toc_progress;
+      // 최근 3일 속도로 남은 날을 어림합니다. 밤 작업 마지막 기록이 '…멈춥니다'(팬·NAS 문제로 멈춤)면 어림하지 않습니다.
+      // 매일 아침의 정상 종료 기록은 '멈춤'이라 여기에 걸리지 않습니다.
+      const pace = s.ops?.night?.includes("멈춥니다") ? "지금은 밤 작업이 멈춰 있습니다(아래 운영 기록 참고)."
+        : recent ? `최근 3일 동안 ${recent.toLocaleString()}개(하루 약 ${Math.round(recent / 3)}개) 만들어, 이대로면 약 ${Math.ceil((target - done) / (recent / 3))}일 더 걸립니다.`
+        : "최근 3일 동안 만든 목차가 없습니다(밤 작업이 멈춰 있을 수 있습니다).";
+      document.getElementById("toc").textContent = `대상(Claude 요점 정리가 없는 강의) ${target.toLocaleString()}개 중 `
+        + `${done.toLocaleString()}개 처리 (${target ? Math.floor(done / target * 100) : 100}%), 남은 강의 ${(target - done).toLocaleString()}개. ${pace}`;
+      const bar = document.getElementById("toc-bar");
+      bar.max = target || 1;
+      bar.value = done;
+      if (s.ops) {  // 서버에 로그 폴더(LOG_DIR)를 알려 준 경우에만 옵니다
+        const lines = [["마지막 백업", s.ops.backup], ["밤 작업", s.ops.night], ["새 강의 분석", s.ops.new_videos]];
+        document.getElementById("ops-lines").replaceChildren(...lines.flatMap(([name, line]) => [el("dt", {}, name), el("dd", {}, line || "기록 없음")]));
+        document.getElementById("ops").hidden = false;
+      }
+      if (s.quiz) {
+        document.getElementById("quiz-summary").textContent = s.quiz.answered
+          ? `학생들이 처음 푼 문제 ${s.quiz.answered.toLocaleString()}번`
+          : "아직 기록이 없습니다. 학생이 퀴즈를 풀면 그때부터 셉니다.";
+        document.getElementById("quiz-hardest").replaceChildren(...s.quiz.hardest.map((q) => el("li", {},
+          el("strong", {}, `정답률 ${Math.round((q.right / q.attempts) * 100)}%`), ` (${q.attempts}명 중 ${q.right}명) · `,
+          el("a", { href: `watch.html?id=${q.id}` }, q.title.split("/").pop()), ` · ${q.question.length > 120 ? `${q.question.slice(0, 120)}…` : q.question}`)));
+        document.getElementById("quiz-stats").hidden = false;
+      }
+      if (s.usage) {  // 이용 통계: 많이 연 강의 10개(기기 수 순)와 요일별 열기
+        const u = s.usage, day = (iso) => new Date(`${iso}T00:00`).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+        document.getElementById("usage-summary").textContent = u.since
+          ? `강의를 연 횟수 ${u.opens.toLocaleString()}번 · 기기 ${u.devices.toLocaleString()}대 · ${day(u.since)}부터 기록`
+          : "아직 기록이 없습니다. 학생이 플레이어에서 강의를 열면 그때부터 셉니다.";
+        document.getElementById("usage-top").replaceChildren(...u.top.map((t) => el("li", {},
+          el("a", { href: `watch.html?id=${t.id}` }, t.title), ` · 기기 ${t.devices}대 · ${t.opens}번`)));
+        const top = Math.max(1, ...u.weekdays);
+        document.getElementById("usage-week").replaceChildren(...u.weekdays.map((n, i) => el("span", { class: "day" },
+          el("span", { class: "bar", "aria-hidden": "true" }, el("span", { style: `height: ${Math.round((n / top) * 100)}%` })),
+          el("span", { class: "label", "aria-hidden": "true" }, "월화수목금토일"[i]),
+          el("span", { class: "sr-only" }, `${"월화수목금토일"[i]}요일 ${n}번`))));
+        document.getElementById("usage").hidden = false;
+      }
+      document.getElementById("unanalyzed").replaceChildren(...(s.unanalyzed.length
+        ? s.unanalyzed.map((title) => el("li", {}, title)) : [el("li", { class: "notice" }, "없습니다.")]));
+    });
+  </script>
+</body>
+</html>

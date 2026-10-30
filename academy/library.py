@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 from pathlib import Path
 
 # 브라우저에서 바로 재생되는 형식만 다룹니다.
@@ -19,20 +18,20 @@ def _lecture_order(path: Path):
 def find_videos(video_dir: Path) -> list[dict]:
     found = []
     for folder, dirs, files in os.walk(video_dir):
-        # 시놀로지 휴지통(#recycle)·썸네일(@eaDir)과 숨김 폴더·파일(.으로 시작)은 강의가 아닙니다.
-        # 폴더는 아예 들어가지 않습니다(영상마다 썸네일 폴더가 있어 다 훑으면 느림).
-        dirs[:] = [d for d in dirs if d[0] not in ".@#"]
-        found += [Path(folder) / name for name in files
-                  if name[0] not in ".@#" and Path(name).suffix.lower() in VIDEO_EXTS
-                  and (Path(folder) / name).is_file()]  # 원본이 지워진 바로가기는 빼기
+        # NAS 휴지통·스냅숏(#recycle, #snapshot)·시스템 폴더(@eaDir 썸네일 등)와 숨김 폴더·파일(.으로 시작)은 강의가 아닙니다.
+        # 썸네일 폴더는 영상마다 있어서 아예 들어가지 않아야 빨리 훑습니다.
+        # '#지구 #소통'처럼 #으로 시작하는 진짜 강의도 있어 #은 그 두 폴더만 뺍니다.
+        dirs[:] = [d for d in dirs if d[0] not in ".@" and d not in ("#recycle", "#snapshot")]
+        found += [Path(folder) / name for name in files if not name.startswith(".")]
     videos = []
     for path in sorted(found, key=_lecture_order):
-        rel = path.relative_to(video_dir).as_posix()
-        videos.append({
-            "id": hashlib.sha1(rel.encode()).hexdigest()[:12],
-            "title": rel.rsplit(".", 1)[0],
-            "path": path,
-        })
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTS:  # is_file: 원본이 지워진 바로가기는 뺍니다
+            rel = path.relative_to(video_dir).as_posix()
+            videos.append({
+                "id": hashlib.sha1(rel.encode()).hexdigest()[:12],
+                "title": rel.rsplit(".", 1)[0],
+                "path": path,
+            })
     return videos
 
 
@@ -46,20 +45,7 @@ def load_analysis(data_dir: Path, video_id: str) -> dict | None:
 def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     path = Path(data_dir) / f"{video_id}.json"
-    tmp = path.with_suffix(".tmp")
-    # 임시 파일에 다 쓴 뒤 바꿔치기해서, 저장 중에 끊겨도 기존 파일은 멀쩡하게 남깁니다.
+    # 새 파일에 다 쓴 뒤 바꿔치기해서, 서버가 반쯤 쓰인 파일을 읽거나 저장 도중 끊겨 분석이 망가지지 않게 합니다.
+    tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
-
-
-def clear_frames(data_dir: Path, video_id: str) -> None:
-    shutil.rmtree(Path(data_dir) / "frames" / video_id, ignore_errors=True)
-
-
-def save_frame(data_dir: Path, video_id: str, seconds: int, jpeg: bytes) -> None:
-    folder = Path(data_dir) / "frames" / video_id
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{seconds}.jpg"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_bytes(jpeg)
-    os.replace(tmp, path)
+    tmp.replace(path)

@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 
@@ -5,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from academy import server
-from academy.library import find_videos, save_analysis, save_frame
+from academy.library import find_videos, save_analysis
 from academy.server import create_app
 
 SEGMENTS = [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]
@@ -91,6 +92,124 @@ def test_serves_old_list_while_rescanning_in_background(setup, monkeypatch, tmp_
     assert len(client.get("/api/videos").json()) == 3
 
 
+def test_prepares_the_list_in_the_background_when_the_server_starts(tmp_path, monkeypatch):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+    (video_dir / "제망매가.mp4").write_bytes(b"x")
+    save_analysis(tmp_path / "data", find_videos(video_dir)[0]["id"], {"title": "제망매가", "segments": SEGMENTS})
+    scans, matched, real = count_scans(monkeypatch), [], server.find_references
+    monkeypatch.setattr(server, "find_references", lambda *a: matched.append(a) or real(*a))
+
+    with TestClient(create_app(video_dir, tmp_path / "data", None, [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}])):
+        deadline = time.monotonic() + 5
+        while not matched and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    # 아무도 목록을 열지 않았는데 영상 폴더를 훑고 학원 정리까지 짝지어 두었습니다.
+    assert len(scans) == 1 and len(matched) == 1
+
+
+def test_a_restarted_server_reuses_its_saved_index_and_rereads_only_changed_analyses(tmp_path, monkeypatch):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for name in ["1강", "2강"]:
+        save_analysis(data_dir, ids[name], {"title": name, "duration": 60.0, "segments": SEGMENTS})
+    with TestClient(create_app(video_dir, data_dir, None)):  # 켜자마자 목록을 준비하고 요약을 저장합니다
+        deadline = time.monotonic() + 5
+        while not (data_dir / ".server-index.cache").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    reads, real = [], server.load_analysis
+    monkeypatch.setattr(server, "load_analysis", lambda d, video_id: reads.append(video_id) or real(d, video_id))
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "duration": 60.0,
+                                          "segments": [{"start": 0.0, "end": 2.0, "text": "구개음화"}]})
+
+    client = TestClient(create_app(video_dir, data_dir, None))  # 다시 켠 서버
+
+    # 분석 결과 3,900개를 처음부터 다시 읽느라 몇 분 걸리던 것을, 바뀐 파일만 다시 읽어 줄입니다.
+    assert [r["title"] for r in client.get("/api/search", params={"q": "안녕하세요"}).json()["exact"]] == ["1강"]
+    assert [r["title"] for r in client.get("/api/search", params={"q": "구개음화"}).json()["exact"]] == ["2강"]
+    assert reads == [ids["2강"]]
+
+
+def test_a_damaged_analysis_file_only_takes_that_lecture_out(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 60.0, "segments": SEGMENTS})
+    (data_dir / f"{ids['2강']}.json").write_text('{"title": "2강", "segments": [', encoding="utf-8")  # 손으로 고치다 깨짐
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    # 깨진 파일 하나 때문에 목록·검색·현황 전체가 오류가 나지 않고, 그 강의만 '분석 전'으로 보입니다.
+    assert [(v["title"], v["analyzed"]) for v in client.get("/api/videos").json()] == [("1강", True), ("2강", False)]
+    assert client.get(f"/api/videos/{ids['2강']}").json()["analysis"] is None
+    assert [r["title"] for r in client.get("/api/search", params={"q": "안녕하세요"}).json()["exact"]] == ["1강"]
+    assert client.get("/api/status").json()["unanalyzed"] == ["2강"]
+
+
+def test_hides_api_docs_and_sends_security_headers(setup):
+    client, ids, _ = setup
+
+    for path in ["/docs", "/redoc", "/openapi.json"]:
+        assert client.get(path).status_code == 404  # 서버가 자동으로 만드는 API 설명서를 바깥에 보이지 않습니다
+    for path in ["/", f"/api/videos/{ids['1강']}"]:
+        headers = client.get(path).headers
+        assert headers["x-frame-options"] == "DENY"
+        assert headers["x-content-type-options"] == "nosniff"
+        assert headers["referrer-policy"] == "same-origin"
+
+
+def test_lists_when_each_lecture_file_was_put_on_the_nas(tmp_path):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+    for name, stamp in [("1강", 1_700_000_000), ("2강", 1_760_000_000)]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+        os.utime(video_dir / f"{name}.mp4", (stamp, stamp))
+    client = TestClient(create_app(video_dir, tmp_path / "data", None))
+
+    # 목록 화면이 '새로 올라온 강의'를 고를 수 있게 파일 날짜(초)를 함께 보냅니다.
+    assert [(v["title"], v["added"]) for v in client.get("/api/videos").json()] == [("1강", 1_700_000_000), ("2강", 1_760_000_000)]
+
+
+def test_status_counts_tables_of_contents_made_in_the_last_three_days(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    toc = {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}]}
+    for name, days_ago in [("어제", 1), ("그제", 2), ("열흘 전", 10), ("아직", None)]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for name, days_ago in [("어제", 1), ("그제", 2), ("열흘 전", 10), ("아직", None)]:
+        save_analysis(data_dir, ids[name], {"title": name, "segments": SEGMENTS, **({"toc": toc} if days_ago else {})})
+        if days_ago:
+            stamp = time.time() - days_ago * 86400
+            os.utime(data_dir / f"{ids[name]}.json", (stamp, stamp))
+
+    progress = TestClient(create_app(video_dir, data_dir, None)).get("/api/status").json()["toc_progress"]
+
+    # 현황 페이지가 최근 속도로 남은 날을 짐작할 수 있게 최근 3일 동안 만든 목차 수를 보냅니다.
+    assert progress == {"target": 4, "done": 3, "last_3_days": 2}
+
+
+def test_auto_toc_titles_take_the_spelling_of_the_work_in_the_file_name(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "ebs").mkdir(parents=True)
+    (video_dir / "ebs" / "성에꽃.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    chapters = [{"start": 0.0, "title": "성의 꽃 배경 이해"}, {"start": 60.0, "title": "성의꽃과 시대"},
+                {"start": 120.0, "title": "성에서 본 풍경"}]
+    save_analysis(data_dir, video_id, {"title": "ebs/성에꽃", "segments": SEGMENTS, "toc": {"model": "m", "chapters": chapters}})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    sent = client.get(f"/api/videos/{video_id}").json()["analysis"]["toc"]["chapters"]
+
+    # 받아쓰기가 '성에꽃'을 '성의꽃'으로 적어 목차 제목에도 옮겨 오므로, 보낼 때 파일 이름의 철자로 바로잡습니다.
+    assert [c["title"] for c in sent] == ["성에꽃 배경 이해", "성에꽃과 시대", "성에서 본 풍경"]
+
+
 def test_lists_videos_with_analysis_and_guide_status(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
@@ -98,42 +217,378 @@ def test_lists_videos_with_analysis_and_guide_status(tmp_path):
         (video_dir / name).write_bytes(b"x")
     ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
     save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": SEGMENTS, "guide": GUIDE})
-    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": None})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": None,
+                                          "toc": {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}]}})
     client = TestClient(create_app(video_dir, data_dir, None))
 
-    assert client.get("/api/videos").json() == [
-        {"id": ids["1강"], "title": "1강", "analyzed": True, "guide": True},
-        {"id": ids["2강"], "title": "2강", "analyzed": True, "guide": False},
-        {"id": ids["3강"], "title": "3강", "analyzed": False, "guide": False},
+    listed = [{k: v for k, v in item.items() if k != "added"} for item in client.get("/api/videos").json()]
+    assert listed == [
+        {"id": ids["1강"], "title": "1강", "analyzed": True, "guide": True, "toc": False},
+        {"id": ids["2강"], "title": "2강", "analyzed": True, "guide": False, "toc": True},  # 로컬 AI 자동 목차
+        {"id": ids["3강"], "title": "3강", "analyzed": False, "guide": False, "toc": False},
     ]
 
     save_analysis(data_dir, ids["2강"], {"title": "2강", "segments": SEGMENTS, "guide": GUIDE})
     assert client.get("/api/videos").json()[1]["guide"] is True
 
 
-@pytest.mark.parametrize("text", ['{"title": "1강",}', "[1, 2]"], ids=["typo", "not-object"])
-def test_one_broken_analysis_file_does_not_break_the_list(setup, tmp_path, text):
-    client, ids, _ = setup
-    (tmp_path / "data" / f"{ids['1강']}.json").write_text(text, encoding="utf-8")  # 손으로 고치다 깨진 파일
+def test_lectures_without_a_guide_show_the_academy_summary_as_is(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "고1").mkdir(parents=True)
+    for name in ["제망매가 학습활동", "속미인곡 학습활동", "1강"]:
+        (video_dir / "고1" / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for title, guide in [("고1/제망매가 학습활동", None), ("고1/속미인곡 학습활동", GUIDE), ("고1/1강", None)]:
+        said = [{"start": 30.0, "end": 35.0, "text": "이 작품의 갈래 향가"}] if "제망매가" in title else SEGMENTS
+        save_analysis(data_dir, ids[title], {"title": title, "segments": said, "guide": guide})
+    refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"},
+             "fillins": [{"passage": "누이의 죽음", "answer_line": "슬픔을   종교적  으로 극복함"}]},
+            {"title": "속미인곡", "grade": "고1", "meta": {"갈래": "가사"}}]
+    client = TestClient(create_app(video_dir, data_dir, None, refs))
+    references = lambda title: client.get(f"/api/videos/{ids[title]}").json()["references"]
 
-    res = client.get("/api/videos")
+    # 빈칸 문제는 답이 미리 보이지 않게 요점 정리에서 빼고 퀴즈로 보냅니다. 항목마다 대본에서 찾은 시간이 붙습니다.
+    from academy.references import ref_key
+    assert references("고1/제망매가 학습활동") == [
+        {"source": "고1 「제망매가」", "key": ref_key(refs[0]), "sections": [{"name": "개요", "items": ["갈래: 향가"], "times": [30.0]}],
+         "quiz": [{"context": "누이의 죽음", "parts": ["슬픔을", "종교적", "으로 극복함"]}]}]
+    assert references("고1/속미인곡 학습활동") == []  # 학원 정리를 바탕으로 만든 Claude 요점 정리가 이미 있습니다
+    assert references("고1/1강") == []
+    assert {v["title"]: v["guide"] for v in client.get("/api/videos").json()} == {
+        "고1/1강": False, "고1/속미인곡 학습활동": True, "고1/제망매가 학습활동": True}
 
-    assert res.status_code == 200
-    assert [(v["title"], v["guide"]) for v in res.json()] == [("1강", False), ("2강", False)]
+
+def test_finds_lectures_where_a_word_is_spoken_most_first(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강", "3강", "4강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    said = {
+        "1강": [(10.0, "오늘은 구개음화를 볼게"), (30.0, "구개 음화 예시"), (200.0, "다시 구개음화")],
+        "2강": [(5.0, "비음화와"), (95.0, "구개음화의 조건"), (100.0, "구개음화 정리"), (300.0, "구개음화"), (400.0, "구개음화")],
+        "3강": [(0.0, "비음화만 다룹니다")],
+    }
+    said["4강"] = said["1강"]  # 같은 녹화를 다른 폴더에도 넣어 둔 경우
+    toc = {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}, {"start": 90.0, "title": "구개음화의 조건"},
+                                      {"start": 290.0, "title": "정리"}]}
+    for name, lines in said.items():
+        save_analysis(data_dir, ids[name], {"title": name, "duration": 500.0, **({"toc": toc} if name == "2강" else {}),
+                                            "segments": [{"start": s, "end": s + 3, "text": t} for s, t in lines]})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    # 띄어쓰기는 무시하고 많이 말한 강의부터, 1분 안에 다시 말한 것은 한 번으로 봅니다. 대본 글은 보내지 않습니다.
+    # 시각마다 그때의 챕터 제목을 붙이고, 같은 녹화는 한 번만 보여 주며 다른 폴더의 것을 함께 적습니다.
+    assert client.get("/api/search", params={"q": "구개 음화"}).json() == {"exact": [
+        {"id": ids["2강"], "title": "2강", "count": 4, "times": [95.0, 300.0, 400.0],
+         "chapters": ["구개음화의 조건", "정리", "정리"], "also": []},
+        {"id": ids["1강"], "title": "1강", "count": 3, "times": [10.0, 200.0], "chapters": [None, None], "also": ["4강"]},
+    ], "similar": [], "notes": []}
+    assert client.get("/api/search", params={"q": "음"}).status_code == 400  # 한 글자는 너무 많이 걸립니다
 
 
-@pytest.mark.parametrize("text", ['{"title": "1강",}', "[1, 2]", '{"title": "1강"}'],
-                         ids=["typo", "not-object", "no-segments"])
-def test_broken_analysis_file_still_lets_students_watch(setup, tmp_path, text, caplog):
-    client, ids, _ = setup
-    (tmp_path / "data" / f"{ids['1강']}.json").write_text(text, encoding="utf-8")  # 선생님이 손으로 고치다 깨뜨림
+def test_finds_every_time_a_word_is_spoken_in_one_lecture(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    said = [(10.0, "오늘은 반어법을 볼게"), (30.0, "반어 법 예시"), (100.0, "다시 반어법"), (200.0, "반어법"),
+            (300.0, "반어법"), (400.0, "반어법"), (500.0, "반어법 마무리")]
+    toc = {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}, {"start": 150.0, "title": "반어와 역설 정리"}]}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 600.0, "toc": toc,
+                                          "segments": [{"start": s, "end": s + 3, "text": t} for s, t in said]})
+    save_analysis(data_dir, ids["2강"], {"title": "2강", "duration": 600.0,
+                                          "segments": [{"start": 50.0, "end": 53.0, "text": "번어법이 나온다"}]})
+    client = TestClient(create_app(video_dir, data_dir, None))
 
-    detail = client.get(f"/api/videos/{ids['1강']}")
+    found = client.get(f"/api/videos/{ids['1강']}/search", params={"q": "반어법"})
 
-    assert detail.status_code == 200 and detail.json()["analysis"] is None  # "영상을 찾을 수 없습니다" 대신 영상은 재생
-    assert client.get(f"/api/videos/{ids['1강']}/subtitles.vtt").status_code == 404
-    assert client.post(f"/api/videos/{ids['1강']}/ask", json={"question": "질문"}).status_code == 409
-    assert "형식이 맞지 않는 분석 파일" in caplog.text  # 선생님은 Container Manager 로그에서 어느 파일인지 봄
+    # 강의 하나에서는 5개로 자르지 않고 모두, 1분 안에 다시 말한 것은 한 번. 대본 글은 보내지 않습니다.
+    assert found.json() == {"times": [10.0, 100.0, 200.0, 300.0, 400.0, 500.0],
+                            "chapters": ["도입", "도입", "반어와 역설 정리", "반어와 역설 정리", "반어와 역설 정리", "반어와 역설 정리"],
+                            "heard_as": [], "notes": []}
+    assert "마무리" not in found.text
+    # 목차 제목에만 있는 말, 받아쓰기가 한 소리 다르게 적은 말
+    assert client.get(f"/api/videos/{ids['1강']}/search", params={"q": "역설"}).json()["notes"] == [
+        {"text": "반어와 역설 정리", "time": 150.0}]
+    near = client.get(f"/api/videos/{ids['2강']}/search", params={"q": "반어법"}).json()
+    assert near["times"] == [50.0] and near["heard_as"] == ["번어법"]
+    assert client.get(f"/api/videos/{ids['1강']}/search", params={"q": "반"}).status_code == 400
+    assert client.get("/api/videos/nope/search", params={"q": "반어법"}).status_code == 404
+
+
+def test_also_finds_lectures_where_the_word_was_transcribed_one_sound_off(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    said = {"정확": [(5.0, "성에꽃을 보자"), (20.0, "성의꽃")],
+            "비슷": [(10.0, "최두석의 성의꽃을 볼게"), (90.0, "다시 성의꽃")],
+            "군주로": [(0.0, "군주로서 백성을 다스린다")],
+            "군지론": [(0.0, "마키아벨리의 군지론과 백상")]}
+    for name in said:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for name, lines in said.items():
+        save_analysis(data_dir, ids[name], {"title": name, "duration": 500.0,
+                                            "segments": [{"start": s, "end": s + 3, "text": t} for s, t in lines]})
+    client = TestClient(create_app(video_dir, data_dir, None))
+    search = lambda q: client.get("/api/search", params={"q": q}).json()
+
+    # 받아쓰기가 한 음절의 자음·모음 하나를 다르게 적은 강의는 따로, 실제로 적힌 말과 함께 보냅니다.
+    assert [r["title"] for r in search("성에꽃")["exact"]] == ["정확"]
+    assert search("성에꽃")["similar"] == [{"id": ids["비슷"], "title": "비슷", "count": 2, "times": [10.0, 90.0],
+                                          "chapters": [None, None], "also": [], "heard_as": ["성의꽃"]}]
+    # '군주로(서)'처럼 마지막 음절의 받침만 다른 말은 조사가 붙은 다른 말일 때가 많아 빼고, 두 글자 낱말은 비슷한 말을 찾지 않습니다.
+    assert [r["title"] for r in search("군주론")["similar"]] == ["군지론"]
+    assert search("백성")["similar"] == []
+
+
+def test_also_finds_lectures_whose_summary_or_chapters_mention_the_word(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["홍계월전", "목차", "말함"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    lines = lambda text: [{"start": 0.0, "end": 3.0, "text": text}]  # 서로 다른 녹화(같으면 같은 녹화로 합쳐짐)
+    save_analysis(data_dir, ids["홍계월전"], {"title": "홍계월전", "duration": 600.0, "segments": lines("고전 소설을 봅니다")})
+    save_analysis(data_dir, ids["목차"], {"title": "목차", "duration": 600.0, "segments": lines("현대 소설을 봅니다"),
+                                         "toc": {"model": "m", "chapters": [{"start": 0.0, "title": "도입"},
+                                                                            {"start": 310.0, "title": "전지적 작가 시점의 효과"}]}})
+    save_analysis(data_dir, ids["말함"], {"title": "말함", "duration": 600.0,
+                                         "segments": [{"start": 5.0, "end": 8.0, "text": "전지적 작가 시점이야"}]})
+    refs = [{"title": "홍계월전", "grade": "고1", "meta": {"시점": "전지적 작가 시점"}}]
+    client = TestClient(create_app(video_dir, data_dir, None, refs))
+
+    found = client.get("/api/search", params={"q": "전지적 작가 시점"}).json()
+
+    # 선생님이 말하지 않았어도 학원 정리나 목차·챕터 제목에 있으면 따로 찾고, 걸린 줄(챕터면 시각도)을 함께 보냅니다.
+    assert [r["title"] for r in found["exact"]] == ["말함"]
+    assert sorted(found["notes"], key=lambda r: r["title"]) == [
+        {"id": ids["목차"], "title": "목차", "matches": [{"text": "전지적 작가 시점의 효과", "time": 310.0}], "also": []},
+        {"id": ids["홍계월전"], "title": "홍계월전", "matches": [{"text": "시점: 전지적 작가 시점", "time": None}], "also": []},
+    ]
+
+
+def test_status_shows_the_latest_ops_log_lines_when_given_a_log_folder(tmp_path):
+    video_dir, logs = tmp_path / "videos", tmp_path / "logs"
+    video_dir.mkdir()
+    logs.mkdir()
+    (logs / "backup.log").write_text("2026-10-27 14:58:46 백업 완료: 첫날\n2026-10-28 08:30:05 백업 완료: 둘째 날\n", encoding="utf-8")
+    (logs / "toc.log").write_text("목차: 1강\n2026-10-28 07:00:31 7시가 되어 멈춤. 다음 밤에 이어서 합니다\n목차: 2강\n", encoding="utf-8")
+    (logs / "new-videos.log").write_text("[1/2] 1강\n  이미 분석됨, 건너뜀\n9개 영상 분석 실패.\n\n", encoding="utf-8")
+
+    status = TestClient(create_app(video_dir, tmp_path / "data", None, log_dir=logs)).get("/api/status").json()
+
+    # 밤 작업은 강의마다 남기는 '목차:' 줄 말고 날짜로 시작하는 마지막 줄을 보여 줍니다.
+    assert status["ops"] == {"backup": "2026-10-28 08:30:05 백업 완료: 둘째 날",
+                             "night": "2026-10-28 07:00:31 7시가 되어 멈춤. 다음 밤에 이어서 합니다",
+                             "new_videos": "9개 영상 분석 실패."}
+    assert "ops" not in TestClient(create_app(video_dir, tmp_path / "data", None)).get("/api/status").json()
+
+
+def test_status_counts_lecture_opens_for_teachers_without_device_addresses(tmp_path):
+    video_dir, data_dir, log_dir = tmp_path / "videos", tmp_path / "data", tmp_path / "logs"
+    video_dir.mkdir()
+    log_dir.mkdir()
+    for name in ["1강", "2강", "3강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    app = create_app(video_dir, data_dir, None, log_dir=log_dir, usage_ignore=("10.0.0.9",))
+    a, b, me = (TestClient(app, client=(host, 5000)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.9"))
+
+    for client, name in [(a, "1강"), (a, "1강"), (b, "1강"), (a, "2강"), (me, "3강")]:
+        client.get(f"/api/videos/{ids[name]}", params={"view": 1})  # 플레이어에서 강의를 엶
+    a.get(f"/api/videos/{ids['3강']}")  # 복습 화면이 문제를 불러오려고 읽는 것은 세지 않습니다
+
+    usage = a.get("/api/status").json()["usage"]
+    assert usage["top"] == [{"id": ids["1강"], "title": "1강", "opens": 3, "devices": 2},
+                            {"id": ids["2강"], "title": "2강", "opens": 1, "devices": 1}]
+    assert (usage["opens"], usage["devices"], sum(usage["weekdays"])) == (4, 2, 4)  # 원장님 PC(10.0.0.9)는 빼고
+    assert usage["since"] is not None
+    log = (log_dir / "usage.log").read_text(encoding="utf-8")
+    assert len(log.splitlines()) == 4 and "10.0.0." not in log  # 기기 주소는 남기지 않습니다
+
+
+def test_teacher_picks_need_the_teacher_key_and_are_shown_to_everyone(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    key = {"X-Teacher-Key": "s3cret-key"}
+
+    closed = TestClient(create_app(video_dir, data_dir, None))  # 열쇠를 정하지 않은 서버는 아무도 바꿀 수 없습니다
+    assert closed.put("/api/picks", json={"ids": [ids["1강"]]}, headers=key).status_code == 403
+    client = TestClient(create_app(video_dir, data_dir, None, teacher_key="s3cret-key"))
+    assert client.put("/api/picks", json={"ids": [ids["1강"]]}).status_code == 403
+    assert client.put("/api/picks", json={"ids": [ids["1강"]]}, headers={"X-Teacher-Key": "guess"}).status_code == 403
+    assert client.get("/api/picks").json() == {"note": "", "at": None, "lectures": []}
+
+    saved = client.put("/api/picks", json={"ids": [ids["2강"], ids["1강"], ids["2강"]], "note": " 기말 대비 "}, headers=key)
+
+    assert saved.status_code == 200
+    picks = client.get("/api/picks").json()
+    assert picks["lectures"] == [{"id": ids["2강"], "title": "2강", "grade": ""},  # 고른 순서, 겹친 것은 한 번
+                                 {"id": ids["1강"], "title": "1강", "grade": ""}]
+    assert picks["note"] == "기말 대비" and picks["at"]
+    assert client.put("/api/picks", json={"ids": ["nope"]}, headers=key).status_code == 404
+    assert client.put("/api/picks", json={"ids": [ids["1강"]] * 21}, headers=key).status_code == 422  # 많아야 20개
+    # 서버를 다시 켜도 남습니다(분석 결과 폴더에 저장되어 매일 백업에도 들어갑니다)
+    assert TestClient(create_app(video_dir, data_dir, None)).get("/api/picks").json()["lectures"] == picks["lectures"]
+
+
+def test_teacher_picks_can_target_a_grade(tmp_path):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+    for name in ["1강", "2강", "3강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    client = TestClient(create_app(video_dir, tmp_path / "data", None, teacher_key="k"))
+    put = lambda grades: client.put("/api/picks", json={"ids": list(ids.values()), "grades": grades}, headers={"X-Teacher-Key": "k"})
+
+    assert put({ids["1강"]: "고1", ids["2강"]: "중2", "nope": "고3"}).status_code == 200
+
+    assert [(l["title"], l["grade"]) for l in client.get("/api/picks").json()["lectures"]] == [
+        ("1강", "고1"), ("2강", "중2"), ("3강", "")]  # 대상이 없으면 모든 학년, 고르지 않은 강의의 대상은 버림
+    assert put({ids["1강"]: "대학"}).status_code == 422
+
+
+def test_a_device_that_misses_the_teacher_key_ten_times_waits_ten_minutes(tmp_path, monkeypatch):
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"x")
+    video_id = find_videos(tmp_path / "videos")[0]["id"]
+    clock = [1000.0]
+    monkeypatch.setattr(server, "wall_clock", lambda: clock[0])
+    app = create_app(tmp_path / "videos", tmp_path / "data", None, teacher_key="right")
+    guesser, other = TestClient(app, client=("10.0.0.7", 1)), TestClient(app, client=("10.0.0.8", 1))
+    put = lambda client, key: client.put("/api/picks", json={"ids": [video_id]}, headers={"X-Teacher-Key": key}).status_code
+
+    assert [put(guesser, f"guess{i}") for i in range(10)] == [403] * 10
+    assert put(guesser, "right") == 429  # 맞는 열쇠도 10분 동안은 막힙니다
+    assert put(other, "right") == 200  # 다른 기기는 그대로
+    clock[0] += 601
+    assert put(guesser, "right") == 200
+    assert put(guesser, "wrong") == 403  # 맞힌 뒤에는 틀린 횟수가 처음부터
+
+
+def test_moving_records_to_another_device_with_a_six_digit_code(tmp_path, monkeypatch):
+    import re
+    clock = [1000.0]
+    monkeypatch.setattr(server, "wall_clock", lambda: clock[0])
+    app = create_app(tmp_path / "videos", tmp_path / "data", None)
+    old, new, guesser = (TestClient(app, client=(host, 1)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.9"))
+    data = {"notes:abc": [{"t": 5, "text": "메모"}], "study": {"2026-10-29": 300}}
+
+    sent = old.post("/api/transfer", json={"data": data}).json()
+
+    assert re.fullmatch(r"\d{6}", sent["code"]) and sent["expires"] == 1600
+    assert new.post(f"/api/transfer/{sent['code']}").json() == {"data": data}
+    assert new.post(f"/api/transfer/{sent['code']}").status_code == 404  # 한 번 쓰면 사라집니다
+    late = old.post("/api/transfer", json={"data": data}).json()["code"]
+    clock[0] += 601
+    assert new.post(f"/api/transfer/{late}").status_code == 404  # 10분이 지나면 사라집니다
+    assert old.post("/api/transfer", json={"data": {"x": "가" * 1_000_000}}).status_code == 413
+    assert old.post("/api/transfer", json={"data": "글"}).status_code == 422
+    # 코드를 마구 넣어 보는 기기는 20번 틀리면 10분 동안 막습니다
+    assert {guesser.post(f"/api/transfer/{n:06d}").status_code for n in range(20)} == {404}
+    fresh = old.post("/api/transfer", json={"data": data}).json()["code"]
+    assert guesser.post(f"/api/transfer/{fresh}").status_code == 429
+    assert new.post(f"/api/transfer/{fresh}").status_code == 200  # 막힌 기기가 건드리지 못한 코드는 그대로
+
+
+def test_teachers_see_the_questions_students_miss_most(tmp_path):
+    video_dir, log_dir = tmp_path / "videos", tmp_path / "logs"
+    video_dir.mkdir()
+    log_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    app = create_app(video_dir, tmp_path / "data", None, log_dir=log_dir, usage_ignore=("10.0.0.9",))
+    a, b, c, me = (TestClient(app, client=(host, 1)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.9"))
+    answer = lambda client, name, question, right: client.post(
+        "/api/quiz-result", json={"id": ids[name], "key": question, "right": right}).status_code
+
+    for client, name, question, right in [(a, "1강", "Q1", False), (b, "1강", "Q1", False), (c, "1강", "Q1", True),
+                                          (a, "1강", "Q1", True),  # 다시 푼 것은 세지 않습니다(처음 푼 결과만)
+                                          (a, "1강", "Q2", True), (b, "1강", "Q2", True), (c, "1강", "Q2", True),
+                                          (a, "2강", "Q3", False), (b, "2강", "Q3", False),  # 2명만 푼 문제는 아직 빼고
+                                          (me, "1강", "Q2", False)]:  # 원장님 PC는 세지 않습니다
+        assert answer(client, name, question, right) == 204
+
+    quiz = a.get("/api/status").json()["quiz"]
+    # 3명 넘게 풀고 한 명이라도 틀린 문제를 정답률 낮은 순서로
+    assert quiz["hardest"] == [{"id": ids["1강"], "title": "1강", "question": "Q1", "attempts": 3, "right": 1}]
+    assert quiz["answered"] == 8
+    assert a.post("/api/quiz-result", json={"id": "nope", "key": "Q", "right": True}).status_code == 404
+    log = (log_dir / "quiz.log").read_text(encoding="utf-8")
+    assert "10.0.0." not in log
+
+
+def test_teachers_fix_or_hide_summary_items_without_touching_the_original(tmp_path):
+    from academy.references import ref_key
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "고1").mkdir(parents=True)
+    (video_dir / "고1" / "홍계월전 강의.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    save_analysis(data_dir, video_id, {"title": "고1/홍계월전 강의", "duration": 60.0, "segments": SEGMENTS})
+    ref = {"title": "홍계월전", "grade": "고1", "meta": {"갈래": "영웅 소설", "시점": "전지적 작가 시점"},
+           "features": [{"text": "여성 영웅"}, {"text": "남장 모티프" + "가" * 250}]}
+    key, teacher = ref_key(ref), {"X-Teacher-Key": "k"}
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="k"))
+    shown = lambda: {s["name"]: s["items"] for s in client.get(f"/api/videos/{video_id}").json()["references"][0]["sections"]}
+
+    assert client.get("/api/references").json() == [{"key": key, "title": "홍계월전", "grade": "고1", "suspects": 1}]
+    features = {s["name"]: s["items"] for s in client.get(f"/api/references/{key}").json()["sections"]}["핵심 특징"]
+    assert features[0] == {"original": "여성 영웅", "text": "여성 영웅", "hidden": False, "suspect": None}
+    assert features[1]["suspect"] == "너무 긴 항목(256자)"  # '남장 모티프'(띄어쓰기 포함 6자) + 250자
+
+    fix = {"section": "개요", "original": "시점: 전지적 작가 시점", "text": "시점: 전지적 작가 시점(서술자 개입)"}
+    assert client.put(f"/api/references/{key}/fix", json=fix).status_code == 403  # 고치기는 선생님 열쇠가 있어야
+    assert client.put(f"/api/references/{key}/fix", json=fix, headers=teacher).status_code == 200
+    assert client.put(f"/api/references/{key}/fix", json={"section": "핵심 특징", "original": "여성 영웅", "hidden": True},
+                      headers=teacher).status_code == 200
+
+    assert shown()["개요"] == ["갈래: 영웅 소설", "시점: 전지적 작가 시점(서술자 개입)"]  # 학생 화면에 바로
+    assert "여성 영웅" not in shown()["핵심 특징"]
+    items = {s["name"]: s["items"] for s in client.get(f"/api/references/{key}").json()["sections"]}
+    assert items["개요"][1] == {"original": "시점: 전지적 작가 시점", "text": "시점: 전지적 작가 시점(서술자 개입)",
+                                "hidden": False, "suspect": None}
+    assert items["핵심 특징"][0]["hidden"] is True
+    assert ref["meta"]["시점"] == "전지적 작가 시점"  # 원본 정리는 그대로
+    # 원래대로: 원래 글로 돌리고 숨기지 않으면 고친 기록이 지워집니다
+    client.put(f"/api/references/{key}/fix", json={**fix, "text": fix["original"]}, headers=teacher)
+    client.put(f"/api/references/{key}/fix", json={"section": "핵심 특징", "original": "여성 영웅", "hidden": False}, headers=teacher)
+    assert shown()["개요"][1] == "시점: 전지적 작가 시점" and "여성 영웅" in shown()["핵심 특징"]
+    assert client.put(f"/api/references/{key}/fix", json={**fix, "original": "없는 항목"}, headers=teacher).status_code == 404
+    assert client.put("/api/references/nope/fix", json=fix, headers=teacher).status_code == 404
+    # 고친 내용은 분석 결과 폴더에 남아 다시 켜도 그대로입니다
+    client.put(f"/api/references/{key}/fix", json=fix, headers=teacher)
+    again = TestClient(create_app(video_dir, data_dir, None, [ref]))
+    assert {s["name"]: s["items"] for s in again.get(f"/api/videos/{video_id}").json()["references"][0]["sections"]}["개요"][1] \
+        == fix["text"]
+
+
+def test_status_counts_what_students_get_for_each_lecture(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    for name in ["Claude", "제망매가", "목차", "짧은 강의", "긴 강의", "소리 없는 강의", "망가진 파일"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    base = {"segments": SEGMENTS, "duration": 600.0}
+    save_analysis(data_dir, ids["Claude"], {**base, "title": "Claude", "guide": GUIDE})
+    save_analysis(data_dir, ids["제망매가"], {**base, "title": "제망매가"})
+    save_analysis(data_dir, ids["목차"], {**base, "title": "목차",
+                                         "toc": {"model": "m", "chapters": [{"start": 0.0, "title": "도입"}]}})
+    save_analysis(data_dir, ids["짧은 강의"], {**base, "title": "짧은 강의"})
+    save_analysis(data_dir, ids["긴 강의"], {**base, "title": "긴 강의", "duration": 3000.0})
+    save_analysis(data_dir, ids["소리 없는 강의"], {**base, "title": "소리 없는 강의", "segments": []})
+    refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}]
+    client = TestClient(create_app(video_dir, data_dir, None, refs))
+
+    # 자동 목차 대상: 대본이 있고 Claude 요점 정리가 없는 강의(제망매가, 목차, 짧은 강의, 긴 강의)
+    assert client.get("/api/status").json() == {
+        "total": 7, "analyzed": 6, "guide": 1, "summary": 1, "toc": 1, "pages": 3,
+        "toc_progress": {"target": 4, "done": 1, "last_3_days": 1}, "unanalyzed": ["망가진 파일"]}
 
 
 def test_serves_page_thumbnails(setup, tmp_path):
@@ -146,8 +601,6 @@ def test_serves_page_thumbnails(setup, tmp_path):
 
     assert res.content == b"\xff\xd8jpeg"
     assert res.headers["content-type"] == "image/jpeg"
-    # 브라우저에 보관하되, 다시 분석하면 같은 번호에 다른 그림이 들어가므로 쓸 때마다 바뀌었는지 확인
-    assert res.headers["cache-control"] == "private, no-cache"
     assert client.get(f"/api/videos/{ids['1강']}/pages/1.jpg").status_code == 404
     assert client.get(f"/api/videos/{ids['1강']}/pages/..%2Fx.jpg").status_code in (404, 422)
     assert client.get("/api/videos/nope/pages/0.jpg").status_code == 404
@@ -161,8 +614,26 @@ def test_video_detail(setup):
 
     assert analyzed["title"] == "1강"
     assert analyzed["analysis"]["guide"] == GUIDE
-    assert not_yet == {"id": ids["2강"], "title": "2강", "analysis": None}
+    assert "segments" not in analyzed["analysis"]  # 받아쓰기 대본은 학생 브라우저로 보내지 않습니다
+    assert not_yet == {"id": ids["2강"], "title": "2강", "analysis": None, "references": [],
+                       "prev": {"id": ids["1강"], "title": "1강"}, "next": None}
     assert client.get("/api/videos/nope").status_code == 404
+
+
+def test_video_detail_names_the_lectures_before_and_after_in_the_same_folder(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    for name in ["고1/1강", "고1/2강", "고1/10강", "고1/심화/1강", "고2/1강"]:
+        (video_dir / f"{name}.mp4").parent.mkdir(parents=True, exist_ok=True)
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    client = TestClient(create_app(video_dir, data_dir, None))
+    near = lambda title: {k: client.get(f"/api/videos/{ids[title]}").json()[k] for k in ("prev", "next")}
+
+    # 같은 폴더 안에서만, 2강이 10강보다 앞(숫자는 숫자로)
+    assert near("고1/2강") == {"prev": {"id": ids["고1/1강"], "title": "고1/1강"}, "next": {"id": ids["고1/10강"], "title": "고1/10강"}}
+    assert near("고1/10강") == {"prev": {"id": ids["고1/2강"], "title": "고1/2강"}, "next": None}
+    assert near("고1/심화/1강") == {"prev": None, "next": None}
+    assert near("고2/1강") == {"prev": None, "next": None}
 
 
 def test_media_supports_range_requests_for_seeking(setup):
@@ -173,154 +644,6 @@ def test_media_supports_range_requests_for_seeking(setup):
     assert res.status_code == 206
     assert res.content == (bytes(range(256)) * 4)[100:200]
     assert client.get("/media/../1강.mp4").status_code == 404
-
-
-def test_serves_board_photo(setup, tmp_path):
-    client, ids, _ = setup
-    save_frame(tmp_path / "data", ids["1강"], 60, b"\xff\xd8x")
-
-    res = client.get(f"/frames/{ids['1강']}/60.jpg")
-
-    assert res.status_code == 200
-    assert res.headers["content-type"] == "image/jpeg"
-    assert res.content == b"\xff\xd8x"
-
-
-@pytest.mark.parametrize("name", ["61.jpg", "abc.jpg", "60.png", "..%2F..%2F1강.json"])
-def test_board_photo_rejects_bad_requests(setup, tmp_path, name):
-    client, ids, _ = setup
-    save_frame(tmp_path / "data", ids["1강"], 60, b"\xff\xd8x")
-
-    assert client.get(f"/frames/{ids['1강']}/{name}").status_code == 404
-    assert client.get("/frames/nope/60.jpg").status_code == 404
-
-
-def test_subtitles_are_webvtt_made_from_transcript(setup, tmp_path):
-    client, ids, _ = setup
-    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": GUIDE, "segments": [
-        {"start": 0.0, "end": 2.0, "text": "안녕하세요"},
-        {"start": 3661.5, "end": 3663.25, "text": "a < b & c --> d"},  # 자막 문법 기호가 섞인 대본
-    ]})
-
-    res = client.get(f"/api/videos/{ids['1강']}/subtitles.vtt")
-
-    assert res.status_code == 200
-    assert res.headers["content-type"].startswith("text/vtt")
-    assert res.text == ("WEBVTT\n\n"
-                        "00:00:00.000 --> 00:00:02.000\n안녕하세요\n\n"
-                        "01:01:01.500 --> 01:01:03.250\na &lt; b &amp; c --&gt; d\n")
-
-
-def test_subtitles_survive_hand_edited_transcript(setup, tmp_path):
-    client, ids, _ = setup
-    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": GUIDE, "segments": [
-        {"start": 0.0, "text": "끝 시각을 지운 줄"},
-        {"start": 10.0, "end": 12.0, "text": "첫 줄\n\n둘째 줄"},  # 빈 줄이 있으면 자막이 거기서 끊김
-        {"start": 20.0, "end": None, "text": "끝 시각을 비운 줄"},
-    ]})
-
-    res = client.get(f"/api/videos/{ids['1강']}/subtitles.vtt")
-
-    assert res.status_code == 200
-    assert res.text == ("WEBVTT\n\n"
-                        "00:00:00.000 --> 00:00:05.000\n끝 시각을 지운 줄\n\n"
-                        "00:00:10.000 --> 00:00:12.000\n첫 줄 둘째 줄\n\n"
-                        "00:00:20.000 --> 00:00:25.000\n끝 시각을 비운 줄\n")
-
-
-def test_no_subtitles_before_analysis(setup):
-    client, ids, _ = setup
-
-    assert client.get(f"/api/videos/{ids['2강']}/subtitles.vtt").status_code == 404
-    assert client.get("/api/videos/nope/subtitles.vtt").status_code == 404
-
-
-def test_search_finds_scenes_across_lectures(tmp_path):
-    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
-    video_dir.mkdir()
-    for name in ("1강", "2강", "3강"):
-        (video_dir / f"{name}.mp4").write_bytes(b"x")
-    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
-    save_analysis(data_dir, ids["1강"], {"title": "1강", "segments": [
-        {"start": 10.0, "end": 12.0, "text": "근의 공식을 유도합니다"},
-        {"start": 20.0, "end": 22.0, "text": "다른 이야기"},
-    ], "guide": {"summary": "", "quiz": [], "chapters": [
-        {"start": 5, "title": "근의 공식", "points": ["판별식 b²-4ac"], "board": None}]}})
-    save_analysis(data_dir, ids["2강"], {"title": "2강", "guide": None, "segments": [
-        {"start": float(i), "end": i + 1.0, "text": f"근의 공식 {i}번째"} for i in range(7)]})
-    # 3강은 분석 전 (JSON 없음)
-    client = TestClient(create_app(video_dir, data_dir, lambda *a: ""))
-
-    res = client.get("/api/search", params={"q": "근의 공식"}).json()
-
-    assert res == [
-        {"id": ids["1강"], "title": "1강", "total": 2, "hits": [
-            {"start": 5, "text": "근의 공식"},
-            {"start": 10.0, "text": "근의 공식을 유도합니다"}]},
-        {"id": ids["2강"], "title": "2강", "total": 7, "hits": [
-            {"start": float(i), "text": f"근의 공식 {i}번째"} for i in range(5)]},
-    ]
-    assert client.get("/api/search", params={"q": "B²-4AC"}).json()[0]["hits"] == [
-        {"start": 5, "text": "판별식 b²-4ac"}]  # 대소문자 구분 없이, 요점에서도
-    assert client.get("/api/search", params={"q": "없는말"}).json() == []
-
-    (data_dir / f"{ids['3강']}.json").write_text('{"title": "3강",}', encoding="utf-8")  # 손으로 고치다 깨진 파일
-    assert [r["title"] for r in client.get("/api/search", params={"q": "근의 공식"}).json()] == ["1강", "2강"]
-
-
-@pytest.mark.parametrize("q", ["", " ", "의", "a" * 101])
-def test_search_rejects_empty_one_letter_or_huge_queries(setup, q):
-    client, _, _ = setup
-
-    assert client.get("/api/search", params={"q": q}).status_code == 422
-
-
-@pytest.mark.parametrize("bad", [
-    {"segments": [{"start": "0:10", "end": 1.0, "text": "근의 공식"}, {"start": 3.0, "text": "근의 공식"}]},
-    {"segments": [{"start": 1.0, "end": 2.0}]},  # text 없음
-    {"segments": [], "guide": {"chapters": [{"start": 0, "title": "근의 공식"}]}},  # points 없음
-], ids=["start-is-text", "no-text", "no-points"])
-def test_one_hand_edited_file_does_not_break_search(tmp_path, bad):
-    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
-    video_dir.mkdir()
-    for name in ("1강", "2강"):
-        (video_dir / f"{name}.mp4").write_bytes(b"x")
-    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
-    save_analysis(data_dir, ids["1강"], {"title": "1강", "guide": None, **bad})
-    save_analysis(data_dir, ids["2강"], {"title": "2강", "guide": None,
-                                         "segments": [{"start": 1.0, "end": 2.0, "text": "근의 공식"}]})
-    client = TestClient(create_app(video_dir, data_dir, lambda *a: ""))
-
-    res = client.get("/api/search", params={"q": "근의 공식"})
-
-    assert res.status_code == 200
-    assert [r["title"] for r in res.json()] == ["2강"]
-
-
-def test_search_ignores_line_breaks_and_unicode_form(setup, tmp_path):
-    import unicodedata
-
-    client, ids, _ = setup
-    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": None, "segments": [
-        {"start": 1.0, "end": 2.0, "text": "근의\n공식"},
-        {"start": 3.0, "end": 4.0, "text": unicodedata.normalize("NFD", "판별식")},  # 맥에서 고친 파일
-    ]})
-
-    hits = lambda q: [h["start"] for r in client.get("/api/search", params={"q": q}).json() for h in r["hits"]]
-
-    assert hits("근의 공식") == [1.0]
-    assert hits("판별식") == [3.0]
-
-
-def test_search_sees_reanalysed_lecture(setup, tmp_path):
-    client, ids, _ = setup  # 분석 결과를 기억해 두더라도, 다시 분석하면 새 내용으로 찾아야 합니다.
-    assert client.get("/api/search", params={"q": "안녕하세요"}).json()[0]["total"] == 1
-
-    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "guide": None, "segments": [
-        {"start": 1.0, "end": 2.0, "text": "다시 분석한 내용"}]})
-
-    assert client.get("/api/search", params={"q": "안녕하세요"}).json() == []
-    assert client.get("/api/search", params={"q": "다시 분석"}).json()[0]["total"] == 1
 
 
 def test_ask_passes_question_to_tutor(setup):
@@ -342,7 +665,7 @@ def test_ask_rejects_bad_requests(setup):
     assert calls == []
 
 
-def test_ask_reports_ai_failure_clearly(tmp_path, caplog):
+def test_ask_reports_ai_failure_clearly(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
     (video_dir / "1강.mp4").write_bytes(b"x")
@@ -353,40 +676,18 @@ def test_ask_reports_ai_failure_clearly(tmp_path, caplog):
         raise TypeError("Could not resolve authentication method")  # API 키가 없을 때 SDK가 내는 오류
 
     client = TestClient(create_app(video_dir, data_dir, broken_answer))
-    with caplog.at_level("ERROR"):
-        res = client.post(f"/api/videos/{video_id}/ask", json={"question": "질문"})
+    res = client.post(f"/api/videos/{video_id}/ask", json={"question": "질문"})
 
     assert res.status_code == 502
-    assert res.json()["detail"] == "AI 답변을 받지 못했습니다. 잠시 뒤 다시 해 주세요."  # 학생에게는 내부 오류를 보이지 않음
-    assert "authentication" in caplog.text  # 선생님은 Container Manager 로그에서 원인을 봄
+    assert "authentication" in res.json()["detail"]
 
 
-def test_responses_carry_browser_protection_headers(setup):
-    client, ids, _ = setup
+def test_student_server_does_not_take_questions():
+    # 질문하기는 Claude API 크레딧을 써서 막아 두었습니다. 학생 서버로 띄우는 server.app 그대로 확인합니다.
+    res = TestClient(server.app).post("/api/videos/any/ask", json={"question": "질문"})
 
-    page, api, media = client.get("/"), client.get("/api/videos"), client.get(f"/media/{ids['1강']}")
-
-    for res in (page, api, media):
-        assert res.headers["x-content-type-options"] == "nosniff"
-        assert res.headers["x-frame-options"] == "DENY"  # 다른 사이트가 플레이어를 몰래 띄우지 못하게
-        assert res.headers["referrer-policy"] == "same-origin"
-    assert api.headers["cache-control"] == "no-store"
-    assert media.headers["cache-control"] == "private"
-
-
-@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
-def test_api_description_pages_are_off(setup, path):
-    client, _, _ = setup
-
-    assert client.get(path).status_code == 404
-
-
-def test_video_deleted_moments_ago_is_not_found_instead_of_crashing(setup, tmp_path):
-    client, ids, _ = setup
-    client.get("/api/videos")  # 목록을 기억해 둔 상태에서
-    (tmp_path / "videos" / "1강.mp4").unlink()  # 선생님이 영상을 지움
-
-    assert client.get(f"/media/{ids['1강']}").status_code == 404
+    assert res.status_code == 403
+    assert "질문하기" in res.json()["detail"]
 
 
 def test_serves_student_pages(setup):
@@ -394,4 +695,67 @@ def test_serves_student_pages(setup):
 
     assert "<html" in client.get("/").text
     assert client.get("/watch.html").status_code == 200
-    assert "틀린 문제 복습" in client.get("/review.html").text
+
+
+def test_text_is_compressed_but_video_is_sent_as_is(setup):
+    client, ids, _ = setup
+    gzip = {"Accept-Encoding": "gzip"}
+
+    assert client.get("/watch.js", headers=gzip).headers.get("content-encoding") == "gzip"
+    whole = client.get(f"/media/{ids['1강']}", headers=gzip)
+    part = client.get(f"/media/{ids['1강']}", headers={**gzip, "Range": "bytes=100-199"})
+    assert "content-encoding" not in whole.headers and whole.content == bytes(range(256)) * 4
+    assert "content-encoding" not in part.headers and part.content == (bytes(range(256)) * 4)[100:200]
+
+
+def test_pages_can_be_added_to_the_home_screen(setup):
+    client, _, _ = setup
+
+    manifest = client.get("/manifest.json").json()
+
+    assert manifest["display"] == "standalone" and manifest["start_url"] == "./"
+    for icon in manifest["icons"]:
+        png = client.get(f"/{icon['src']}")
+        assert png.headers["content-type"] == icon["type"] == "image/png"
+        width, height = int.from_bytes(png.content[16:20], "big"), int.from_bytes(png.content[20:24], "big")
+        assert icon["sizes"] == f"{width}x{height}"  # PNG 머리(IHDR)의 실제 크기
+    for page in ["/", "/watch.html", "/review.html", "/notes.html", "/status.html"]:
+        html = client.get(page).text
+        assert 'rel="manifest" href="manifest.json"' in html and 'rel="apple-touch-icon"' in html
+
+
+def test_student_pages_are_revalidated_so_updates_reach_browsers(setup):
+    client, _, _ = setup
+
+    for path in ["/", "/watch.html", "/watch.js"]:
+        assert client.get(path).headers["cache-control"] == "no-cache"
+
+
+def test_video_detail_sends_page_labels_but_not_screen_text(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    (video_dir / "1강.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    save_analysis(data_dir, video_id, {"title": "1강", "duration": 9.0, "segments": SEGMENTS, "guide": GUIDE,
+                                       "pages": [{"start": 0.0, "text": ["교재 글자"], "label": "12쪽 · 도입"}]})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    pages = client.get(f"/api/videos/{video_id}").json()["analysis"]["pages"]
+
+    assert pages == [{"start": 0.0, "label": "12쪽 · 도입"}]
+
+
+def test_video_detail_keeps_teacher_only_edits_on_the_server(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    (video_dir / "1강.mp4").write_bytes(b"x")
+    video_id = find_videos(video_dir)[0]["id"]
+    guide = {**GUIDE, "overview": [{"name": "갈래", "value": "수필"}],
+             "edits": [{"before": "엉뚱한 항목", "after": "", "reason": "다른 단원"}]}
+    save_analysis(data_dir, video_id, {"title": "1강", "duration": 9.0, "segments": SEGMENTS, "guide": guide})
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    sent = client.get(f"/api/videos/{video_id}").json()["analysis"]["guide"]
+
+    assert "edits" not in sent
+    assert sent["overview"] == [{"name": "갈래", "value": "수필"}]

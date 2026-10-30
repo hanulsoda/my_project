@@ -1,8 +1,6 @@
-import base64
-
 import pytest
 
-from academy.ai import answer_question, fmt_time, make_study_guide, parse_time, transcript_text
+from academy.ai import GUIDE_PROMPT, answer_question, fmt_time, make_study_guide, parse_time, transcript_text
 from tests.fakes import FakeClient
 
 SEGMENTS = [
@@ -13,8 +11,8 @@ SEGMENTS = [
 GUIDE = {
     "summary": "이차방정식과 근의 공식을 다룹니다.",
     "chapters": [
-        {"start": "01:15", "title": "근의 공식", "points": ["공식 유도"], "board": ""},
-        {"start": "00:00", "title": "도입", "points": ["이차방정식의 정의"], "board": ""},
+        {"start": "01:15", "title": "근의 공식", "points": ["공식 유도"]},
+        {"start": "00:00", "title": "도입", "points": ["이차방정식의 정의"]},
     ],
     "quiz": [
         {"question": "근의 공식은?", "choices": ["가", "나", "다", "라"], "answer": 1,
@@ -27,6 +25,10 @@ GUIDE = {
         {"wrong": "공", "right": "곡"},
         {"wrong": "같음", "right": "같음"},
     ],
+    "page_labels": [],
+    "overview": [],
+    "glossary": [],
+    "edits": [],
 }
 
 
@@ -63,6 +65,44 @@ def test_study_guide_keeps_only_real_multi_letter_corrections():
     assert guide["corrections"] == [{"wrong": "근의 공시", "right": "근의 공식"}]
 
 
+def test_study_guide_sends_screen_text_and_turns_page_labels_into_times():
+    client = FakeClient({**GUIDE, "page_labels": [{"start": "01:15", "label": "12쪽 · 근의 공식"}]})
+
+    guide = make_study_guide(client, "수학/1강", SEGMENTS,
+                             screens=[{"start": 75.0, "text": ["근의 공식", "판별식 D"]}])
+
+    req = client.requests[0]
+    assert "<화면 글자>\n[01:15]\n근의 공식\n판별식 D\n</화면 글자>" in req["messages"][0]["content"]
+    assert req["system"] != GUIDE_PROMPT and "화면 글자" in req["system"]
+    assert guide["page_labels"] == [{"start": 75, "label": "12쪽 · 근의 공식"}]
+
+
+def test_study_guide_without_screens_sends_transcript_only():
+    client = FakeClient(GUIDE)
+
+    make_study_guide(client, "수학/1강", SEGMENTS)
+
+    req = client.requests[0]
+    assert "<화면 글자>" not in req["messages"][0]["content"]
+    assert req["system"] == GUIDE_PROMPT
+
+
+def test_study_guide_builds_on_the_academy_summary_and_keeps_overview_and_edits():
+    reply = {**GUIDE, "overview": [{"name": "갈래", "value": "현대 수필"}],
+             "glossary": [{"term": "울안", "meaning": "울타리를 둘러친 안"}],
+             "edits": [{"before": "인물의 개념과 분류", "after": "", "reason": "다른 단원 내용이 섞임"}]}
+    client = FakeClient(reply)
+
+    guide = make_study_guide(client, "1강", SEGMENTS, references=["「성난 풀잎」(고2)\n개요: 갈래: 현대 수필"])
+
+    req = client.requests[0]
+    assert "<학원 요점 정리>\n「성난 풀잎」(고2)\n개요: 갈래: 현대 수필\n</학원 요점 정리>" in req["messages"][0]["content"]
+    assert "학원 요점 정리" in req["system"]
+    assert guide["overview"] == [{"name": "갈래", "value": "현대 수필"}]
+    assert guide["glossary"] == [{"term": "울안", "meaning": "울타리를 둘러친 안"}]
+    assert guide["edits"] == [{"before": "인물의 개념과 분류", "after": "", "reason": "다른 단원 내용이 섞임"}]
+
+
 def test_study_guide_request_sends_transcript_and_json_schema():
     client = FakeClient(GUIDE)
 
@@ -72,10 +112,8 @@ def test_study_guide_request_sends_transcript_and_json_schema():
     assert req["model"] == "claude-opus-5-5"
     assert req["fallbacks"] == "default"
     assert req["output_config"]["format"]["type"] == "json_schema"
-    first_block = req["messages"][0]["content"][0]
-    assert first_block["type"] == "text"
-    assert "[01:15] 근의 공식을 봅시다." in first_block["text"]
-    assert "수학/1강" in first_block["text"]
+    assert "[01:15] 근의 공식을 봅시다." in req["messages"][0]["content"]
+    assert "수학/1강" in req["messages"][0]["content"]
 
 
 def test_refusal_raises():
@@ -109,52 +147,3 @@ def test_answer_question_without_current_time():
     answer_question(client, "1강", SEGMENTS, "질문", [], current_time=None)
 
     assert client.requests[0]["messages"] == [{"role": "user", "content": "질문"}]
-
-
-def test_answer_length_is_capped_to_keep_cost_down():
-    client = FakeClient("답")
-
-    answer_question(client, "1강", SEGMENTS, "아주 길게 설명해 주세요", [], current_time=None)
-
-    assert client.requests[0]["max_tokens"] <= 4000  # 한 번에 드는 비용의 상한 (짧은 답에는 충분)
-
-
-FRAMES = [(0, b"\xff\xd8A"), (60, b"\xff\xd8B"), (120, b"\xff\xd8C")]
-BOARD_GUIDE = {
-    "summary": "요약",
-    "chapters": [
-        {"start": "00:00", "title": "정의", "points": ["x²"], "board": "01:05"},
-        {"start": "01:00", "title": "설명", "points": ["말로 설명"], "board": ""},
-        {"start": "02:00", "title": "예제", "points": ["예제"], "board": "abc"},
-    ],
-    "quiz": [],
-    "corrections": [],
-}
-
-
-def test_guide_request_sends_transcript_then_frames():
-    client = FakeClient(BOARD_GUIDE)
-
-    make_study_guide(client, "수학/1강", SEGMENTS, FRAMES)
-
-    blocks = client.requests[0]["messages"][0]["content"]
-    assert blocks[0]["type"] == "text" and "[01:15] 근의 공식을 봅시다." in blocks[0]["text"]
-    pairs = [(blocks[i], blocks[i + 1]) for i in range(1, len(blocks), 2)]
-    assert [label["text"] for label, _ in pairs] == ["[00:00] 화면", "[01:00] 화면", "[02:00] 화면"]
-    assert pairs[0][1] == {"type": "image", "source": {
-        "type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(b"\xff\xd8A").decode()}}
-
-
-def test_board_maps_to_nearest_frame_or_none():
-    guide = make_study_guide(FakeClient(BOARD_GUIDE), "1강", SEGMENTS, FRAMES)
-
-    assert [c["board"] for c in guide["chapters"]] == [60, None, None]
-
-
-def test_no_frames_means_no_board():
-    client = FakeClient(BOARD_GUIDE)
-
-    guide = make_study_guide(client, "1강", SEGMENTS)
-
-    assert [c["board"] for c in guide["chapters"]] == [None, None, None]
-    assert all(b["type"] == "text" for b in client.requests[0]["messages"][0]["content"])

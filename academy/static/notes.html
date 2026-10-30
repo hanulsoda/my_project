@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>내 메모</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-title" content="학습 플레이어">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
+</head>
+<body class="library" data-view="page">
+  <main class="app">
+    <header class="content-head"><a class="back" href="./">강의</a><div class="heading"><h1>내 메모</h1><p id="view-sub" class="sub"></p></div></header>
+    <nav class="sidebar" aria-label="보관함과 폴더"></nav>
+    <div class="content-body"><div id="notes-page" class="list-page"><p class="notice">불러오는 중…</p></div></div>
+  </main>
+  <script src="common.js"></script>
+  <script>
+    // 강의마다 notes:<영상 번호>에 저장된 메모·북마크를 강의별로 모아 봅니다. 시간을 누르면 그 장면부터 봅니다.
+    const box = document.getElementById("notes-page");
+    let titles = new Map(), videos = [];
+
+    function render() {
+      const lists = savedLists("notes:");
+      fillSidebar(videos, { here: "notes.html" });  // 지우면 사이드바의 메모 수도 바뀝니다
+      document.getElementById("view-sub").textContent = lists.length ? `강의 ${lists.length}개 · 메모 ${lists.reduce((n, l) => n + l.items.length, 0)}개` : "";
+      if (!lists.length) {
+        box.replaceChildren(el("p", { class: "notice" }, "아직 메모가 없습니다. 강의를 보다가 메모 탭에서 기억할 장면을 추가하세요."));
+        return;
+      }
+      const name = (id) => titles.get(id) || "목록에 없는 강의";  // 지워졌거나 옮겨진 강의의 메모도 버리지 않고 보여 줍니다
+      lists.sort((a, b) => name(a.id).localeCompare(name(b.id), "ko"));
+      box.replaceChildren(...lists.map(({ id, items }) => el("section", { class: "review-lecture" },
+        el("h2", {}, titles.has(id) ? el("a", { href: `watch.html?id=${id}` }, name(id)) : name(id)),
+        el("ul", { class: "notes" }, ...items.map((n, i) => el("li", {},
+          el("a", { class: "time", href: `watch.html?id=${id}&t=${Math.floor(n.t)}` }, fmt(n.t)),
+          el("span", { class: "note-text" }, n.text || "🔖 북마크"),
+          el("button", {
+            class: "delete",
+            "aria-label": `${fmt(n.t)} 메모 삭제`,
+            onclick: () => { items.splice(i, 1); store.set(`notes:${id}`, items); render(); },
+          }, "삭제")))))));
+    }
+
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => [])
+      .then((list) => { videos = list; titles = new Map(videos.map((v) => [v.id, v.title])); render(); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+from academy.references import find_references, ref_key, reference_quiz, reference_sections, reference_text, suspects
+
+POEM = {"title": "1-1.(2)성난 풀잎", "grade": "고2", "meta": {"갈래": "현대 수필", "주제": "자연의 순리"},
+        "features": [{"num": "①", "text": "도덕경을 인용함"}],
+        "stages": [{"label": "전개", "bullets": ["풀독이 오름", "고추밭"]}],
+        "fillins": [{"no": "Q1", "passage": "글쓴이가 깨달은 것은?", "answer_line": "자연의 순리"}],
+        "words": [{"w": "울안", "pos": "명사", "def": "울타리를 둘러친 안"}]}
+SAME_WORK_OTHER_GRADE = {**POEM, "grade": "중3"}
+SHORT = {"title": "눈", "grade": "고1", "meta": {"갈래": "시"}}
+GRAMMAR = {"title": "4-1.음운의 변동", "grade": "고1", "meta": {"갈래": "시"}}
+
+
+def test_matches_work_titles_in_the_video_file_name_and_prefers_the_folder_grade():
+    refs = [SAME_WORK_OTHER_GRADE, POEM, GRAMMAR]
+
+    found = find_references("고2출판사별/지학사/[이해완성] 1-1.(2)성난 풀잎 요점정리", [], refs)
+
+    assert [r["source"] for r in found] == ["고2 「성난 풀잎」"]
+
+
+def test_short_titles_and_unnamed_videos_match_only_works_quoted_on_screen():
+    refs = [SHORT, POEM, GRAMMAR]
+
+    assert find_references("ebs/2019년/눈물의 바다", [], refs) == []
+    found = find_references("보강/녹화_2024_01_20", ["김수영, 「눈」", "다음 시간: 음운의 변동"], refs)
+
+    assert [r["source"] for r in found] == ["고1 「눈」"]
+
+
+def test_reference_text_lists_every_part_of_the_summary():
+    text = reference_text(POEM)
+
+    for part in ["「성난 풀잎」(고2)", "갈래: 현대 수필", "도덕경을 인용함", "전개: 풀독이 오름 / 고추밭",
+                 "글쓴이가 깨달은 것은? → 자연의 순리", "울안(명사): 울타리를 둘러친 안"]:
+        assert part in text
+
+
+def test_found_summaries_come_in_sections_for_showing_as_is():
+    found = find_references("고2/성난 풀잎 강의", [], [POEM])
+
+    assert found[0]["sections"] == [
+        {"name": "개요", "items": ["갈래: 현대 수필", "주제: 자연의 순리"]},
+        {"name": "핵심 특징", "items": ["도덕경을 인용함"]},
+        {"name": "구조", "items": ["전개: 풀독이 오름 / 고추밭"]},
+        {"name": "빈칸 문제", "items": ["글쓴이가 깨달은 것은? → 자연의 순리"]},
+        {"name": "어휘", "items": ["울안(명사): 울타리를 둘러친 안"]},
+    ]
+
+
+def test_summaries_are_cleaned_of_pdf_extraction_leftovers():
+    messy = {"title": "노새 두 마리", "grade": "고1", "meta": {"갈래": "단편 \n소설"},
+             "features": [{"text": "평소에 \n말수가 적은 아버지"}, {"text": "평소에 말수가 적은 아버지"},
+                          {"text": "1인칭 관찰자 시점\n\n1-2.노새 두 마리\nI410-UCI(KEPA)201"},
+                          {"text": "인물이 왜 그랬는\n지\x01 생각해 봄"}],
+             "stages": [{"label": "전개", "bullets": []}, {"label": "결말", "bullets": ["노새가 된 아버지"]}]}
+
+    assert reference_sections(messy) == [
+        {"name": "개요", "items": ["갈래: 단편 소설"]},
+        {"name": "핵심 특징", "items": ["평소에 말수가 적은 아버지", "1인칭 관찰자 시점", "인물이 왜 그랬는지 생각해 봄"]},
+        {"name": "구조", "items": ["결말: 노새가 된 아버지"]},
+    ]
+
+
+def test_fill_in_questions_hide_the_blanks_marked_by_double_spaces():
+    ref = {"title": "노새 두 마리", "grade": "고1", "fillins": [
+        {"no": "Q1", "passage": "아버지는 연탄을 나른다.", "answer_line": "아버지의 직업은   연탄배달부  이고,   과묵한  성격이다."},
+        {"no": "Q2", "passage": "이 글의 주제는?", "answer_line": "가난한 삶의 애환"}]}
+
+    assert reference_quiz(ref) == [
+        {"context": "아버지는 연탄을 나른다.", "parts": ["아버지의 직업은", "연탄배달부", "이고,", "과묵한", "성격이다."]},
+        {"context": "이 글의 주제는?", "parts": ["", "가난한 삶의 애환", ""]},  # 빈칸 표시가 없으면 답 전체를 가립니다
+    ]
+
+
+def test_fill_in_questions_repeated_in_the_summary_are_asked_once():
+    same = {"no": "Q1", "passage": "평국은 규중에 홀로 있었다.", "answer_line": "평국은   여성  이다."}
+    ref = {"title": "홍계월전", "grade": "고1", "fillins": [same, {**same, "no": "Q5"}]}  # PDF에서 뽑다가 두 번 들어감
+
+    assert len(reference_quiz(ref)) == 1
+
+
+def test_word_questions_ask_for_the_meaning_among_other_words_of_the_same_work():
+    ref = {"title": "노새 두 마리", "grade": "고1",
+           "words": [{"w": f"낱말{i}", "pos": "명사", "def": f"뜻{i}"} for i in range(5)]}
+
+    quiz = reference_quiz(ref)
+
+    assert len(quiz) == 5
+    first = quiz[0]
+    assert first["question"] == "‘낱말0’의 뜻으로 알맞은 것은?"
+    assert len(set(first["choices"])) == 4 and set(first["choices"]) <= {f"뜻{i}" for i in range(5)}
+    assert first["choices"][first["answer"]] == "뜻0"
+    assert first["explanation"] == "낱말0(명사): 뜻0"
+    assert reference_quiz(ref) == quiz  # 열 때마다 같은 문제·순서
+
+
+def test_no_word_questions_when_too_few_words_to_make_four_choices():
+    ref = {"title": "노새 두 마리", "grade": "고1",
+           "words": [{"w": f"낱말{i}", "pos": "명사", "def": f"뜻{i}"} for i in range(3)]}
+
+    assert reference_quiz(ref) == []
+
+
+def test_a_work_whose_name_is_part_of_another_matched_work_is_dropped():
+    longer = {"title": "관점과 형식을 비교하며 읽기", "grade": "중3", "meta": {"갈래": "시"}}
+    shorter = {"title": "비교하며 읽기", "grade": "중3", "meta": {"갈래": "시"}}
+
+    found = find_references("중등부/천재(박)/관점과 형식을 비교하며 읽기 요점정리", [], [shorter, longer])
+
+    assert [r["source"] for r in found] == ["중3 「관점과 형식을 비교하며 읽기」"]
+
+
+def test_school_level_in_the_folder_picks_the_matching_grade_when_no_grade_number():
+    high = {"title": "동백꽃", "grade": "고1", "meta": {"갈래": "시"}}
+    middle = {"title": "동백꽃", "grade": "중2", "meta": {"갈래": "시"}}
+
+    found = find_references("중등부/천재(노)/1단원 동백꽃 정리", [], [high, middle])
+
+    assert [r["source"] for r in found] == ["중2 「동백꽃」"]
+
+
+def test_summaries_carry_a_stable_key_and_flag_items_a_teacher_should_check():
+    long = "가" * 260
+    ref = {"title": "1-1.(2)성난 풀잎", "grade": "고2", "meta": {"갈래": "현대 수필"},
+           "features": [{"text": long}, {"text": "짧은 특징"}],
+           "stages": [{"label": "발단", "bullets": []}, {"label": "전개", "bullets": ["가", "나", "다", "라"]},
+                      {"label": "결말", "bullets": []}]}
+
+    found = find_references("고2/성난 풀잎 강의", [], [ref])
+
+    assert found[0]["key"] == ref_key(ref) and len(ref_key(ref)) == 10
+    assert ref_key(ref) != ref_key({**ref, "grade": "고1"})  # 같은 작품도 학년이 다르면 다른 정리
+    # 학생에게 보이는 항목 가운데(깨진 기호·머리글 꼬리·중복·빈 단계는 이미 자동으로 정리) 선생님이 볼 만한 것
+    assert suspects(ref) == {"핵심 특징": {long: "너무 긴 항목(260자)"},
+                             "구조": {"전개: 가 / 나 / 다 / 라": "한 단계에 내용이 몰림(빈 단계: 발단, 결말)"}}
+    assert suspects({**ref, "features": [{"text": "짧은 특징"}], "stages": []}) == {}
+
+
+def test_summaries_with_only_a_title_are_not_used():
+    empty = {"title": "공감하며 소통하기", "grade": "고1", "meta": {}, "features": [], "stages": []}
+
+    assert find_references("2022개정/고1/공감하며 소통하기", [], [empty]) == []

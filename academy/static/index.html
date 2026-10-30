@@ -5,80 +5,313 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>강의 목록</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-title" content="학습 플레이어">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 </head>
-<body>
-  <header class="top"><h1>강의 목록</h1></header>
-  <main class="list-page">
-    <form id="search-form" class="list-search" role="search">
-      <!-- autocomplete=off: 뒤로 왔을 때 검색어만 남고 결과는 없는 어긋난 화면이 되지 않게 -->
-      <input id="search" type="search" maxlength="100" autocomplete="off" placeholder="모든 강의에서 찾기 (예: 근의 공식)">
-    </form>
-    <div id="results" class="search-results" hidden></div>
-    <p id="review" hidden></p>
-    <p id="empty" class="notice" hidden>아직 올라온 강의가 없습니다.</p>
-    <ul id="videos" class="video-list"></ul>
+<body class="library" data-view="home">
+  <main class="app">
+    <header class="content-head">
+      <a class="back" href="#">강의</a>
+      <div class="heading"><h1 id="view-title">강의</h1><p id="view-sub" class="sub"></p></div>
+      <form id="tools" class="tools" role="search">
+        <input id="search" type="search" aria-label="강의 찾기">
+        <div class="seg scope" role="group" aria-label="찾을 곳">
+          <button type="button" id="scope-title" aria-pressed="true">제목</button>
+          <button type="button" id="scope-spoken" aria-pressed="false">선생님 말</button>
+        </div>
+        <label class="switch-label"><input type="checkbox" id="guide-only" class="switch" role="switch"> 요점 정리만</label>
+        <div class="seg layout" role="group" aria-label="보기">
+          <button type="button" id="view-list" aria-pressed="true" aria-label="목록 보기" title="목록 보기"><span class="icon i-list" aria-hidden="true"></span></button>
+          <button type="button" id="view-grid" aria-pressed="false" aria-label="그림 보기" title="그림 보기"><span class="icon i-grid" aria-hidden="true"></span></button>
+        </div>
+        <select id="sort" aria-label="정렬"><option value="name">이름순</option><option value="new">최근 올라온 순</option></select>
+      </form>
+    </header>
+    <nav class="sidebar" aria-label="보관함과 폴더"></nav>
+    <div class="content-body">
+      <p id="found-status" class="sr-only" aria-live="polite"></p>
+      <section id="found" hidden></section>
+      <section id="recent" hidden><h2>이어 보기</h2><ul id="recent-list" class="video-list"></ul></section>
+      <section id="new" hidden><h2>새로 올라온 강의</h2><ul id="new-list" class="video-list"></ul></section>
+      <p id="empty" class="notice" hidden></p>
+      <div id="folders"></div>
+    </div>
   </main>
   <script src="common.js"></script>
   <script>
-    // 퀴즈에서 틀린 문제가 남아 있으면 모아 풀기로 가는 버튼
-    const wrongCount = wrongLists().reduce((n, w) => n + w.questions.length, 0);
-    if (wrongCount) {
-      const review = document.getElementById("review");
-      review.append(el("a", { class: "review-link", href: "review.html" }, `틀린 문제 복습 (${wrongCount}문제)`));
-      review.hidden = false;
+    // 강의 목록: 왼쪽 사이드바(보관함·폴더)에서 고르면 오른쪽에 그 강의들이 나옵니다(맥 Finder처럼).
+    // 고른 화면은 주소에 남아(#f/폴더, #v/recent·new) 뒤로 가기·새로 고침·플레이어의 '‹ 폴더'로 돌아옵니다.
+    // 휴대폰에서는 사이드바가 첫 화면이고, 폴더를 누르면 그 폴더 화면으로 들어갑니다.
+    const $ = (elementId) => document.getElementById(elementId);
+    const search = $("search"), guideOnly = $("guide-only");
+    const norm = (text) => text.toLowerCase().replace(/\s+/g, "");
+    // 검색어·찾을 곳·스위치는 강의를 보고 돌아와도 그대로 있도록 브라우저에 기억합니다.
+    const saved = store.get("list") || {};
+    search.value = saved.q || "";
+    guideOnly.checked = !!saved.guideOnly;
+    let scope = saved.scope === "spoken" ? "spoken" : "title";
+    let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
+    $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
+    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value });
+    let folders = [], total = 0, loaded = false, showingFound = false, side = null;
+    const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
+
+    function current() {  // 주소에서 지금 화면 {kind: home|recent|new|folder, name}
+      let hash = "";
+      try { hash = decodeURIComponent(location.hash.slice(1)); } catch {}
+      if (hash.startsWith("f/")) return { kind: "folder", name: hash.slice(2) };
+      return { kind: ["v/recent", "v/new"].includes(hash) ? hash.slice(2) : "home" };
     }
 
-    // 모든 강의의 대본·요점에서 찾고, 누르면 그 장면부터 봅니다.
-    const results = document.getElementById("results"), list = document.getElementById("videos");
-    const say = (text) => results.replaceChildren(el("p", { class: "notice" }, text));
-    const form = document.getElementById("search-form");
-    // 검색칸을 비우면(× 버튼 포함) 바로 강의 목록으로 돌아갑니다.
-    document.getElementById("search").oninput = (e) => { if (!e.target.value.trim()) form.requestSubmit(); };
-    let searchSeq = 0, pending = null;
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      const q = document.getElementById("search").value.trim();
-      if (q && q === pending) return;  // 같은 말을 찾는 중에 Enter를 또 눌러도 다시 보내지 않습니다.
-      const seq = ++searchSeq;
-      pending = null;
-      results.hidden = !q;
-      list.hidden = !!q;
-      if (!q) return results.replaceChildren();
-      if (q.length < 2) return say("두 글자 이상 입력해 주세요.");
-      say("찾는 중…");
-      pending = q;
-      try {
-        const res = await reloadIfLoggedOut(await fetch(`/api/search?q=${encodeURIComponent(q)}`));
-        if (!res.ok) throw new Error();
-        const found = await res.json();
-        if (seq !== searchSeq) return;  // 그사이 다른 말로 찾았으면 늦게 온 옛 결과는 버립니다.
-        if (!found.length) return say(`"${q}"을(를) 강의에서 찾지 못했습니다.`);
-        results.replaceChildren(...found.map((r) => el("section", { class: "result" },
-          el("h2", {}, r.title),
-          el("ul", {}, ...r.hits.map((h) => el("li", {},
-            el("a", { class: "hit", href: `watch.html?id=${r.id}&t=${Math.floor(h.start)}` },
-              el("span", { class: "time" }, fmt(h.start)), " ", ...highlight(h.text, q.toLowerCase()))))),
-          r.total > r.hits.length ? el("p", { class: "more" }, `외 ${r.total - r.hits.length}곳`) : "")));
-      } catch {
-        if (seq === searchSeq) say("검색하지 못했습니다. 잠시 뒤 다시 해 주세요.");
-      } finally {
-        if (seq === searchSeq) pending = null;
+    function setScope(next) {
+      scope = next;
+      for (const [id, s] of [["scope-title", "title"], ["scope-spoken", "spoken"]]) $(id).setAttribute("aria-pressed", String(s === scope));
+      search.placeholder = PLACEHOLDER[scope];
+      if (scope === "title") showingFound = false;
+      save();
+    }
+
+    // 낱말마다 제목(폴더 경로 포함)에 들어 있으면 보여 줍니다. 띄어쓰기와 낱말 순서는 상관없습니다.
+    function render() {
+      if (!loaded) return;
+      const view = current();
+      const words = scope === "title" ? search.value.trim().split(/\s+/).filter(Boolean).map(norm) : [];
+      const searching = words.length > 0;
+      // 폴더 화면: 맨 위 폴더(2022개정)든 하위 폴더(2022개정/고1/미래엔)든 그 경로 아래 강의
+      const top = view.kind === "folder" ? view.name.split("/")[0] : null;
+      const inPath = (item) => searching || !view.name.includes("/") || item.title.startsWith(`${view.name}/`);
+      let shown = 0, underPath = 0;
+      for (const folder of folders) {
+        const mine = !showingFound && (searching || folder.name === top);
+        if (mine && (!searching || folder.keys.some((key) => words.every((w) => key.includes(w))))) folder.build();
+        let inFolder = 0;
+        for (const group of folder.groups) {
+          let inGroup = 0;
+          for (const item of group.items) {
+            const here = mine && inPath(item);
+            underPath += here;
+            const hit = here && words.every((w) => item.key.includes(w)) && (!guideOnly.checked || item.guide);
+            item.li.hidden = !hit;
+            inGroup += hit;
+          }
+          group.box.hidden = !inGroup;
+          inFolder += inGroup;
+        }
+        folder.box.hidden = !inFolder;
+        folder.head.hidden = !searching;  // 여러 폴더에서 찾을 때만 폴더 이름을 위에 붙입니다
+        shown += inFolder;
       }
+      for (const [path, a] of side.folders) {
+        if (view.kind === "folder" && view.name === path) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+      }
+      for (const a of document.querySelectorAll(".sidebar a[href^='#v/']")) {
+        if (a.getAttribute("href") === `#v/${view.kind}`) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+      }
+      const listing = !searching && !showingFound;
+      const recent = $("recent-list").children.length, fresh = $("new-list").children.length;
+      $("found").hidden = !showingFound;
+      $("recent").hidden = !(listing && recent && ["home", "recent"].includes(view.kind));
+      $("new").hidden = !(listing && fresh && ["home", "new"].includes(view.kind));
+      const folder = folders.find((f) => f.name === top), parts = view.kind === "folder" ? view.name.split("/") : [];
+      const [title, sub, empty] =
+        showingFound ? ["선생님 말에서 찾기", `‘${search.value.trim()}’`, ""]
+        : searching ? ["찾기 결과", `강의 ${shown.toLocaleString()}개 · ‘${search.value.trim()}’`, shown ? "" : "제목으로 찾은 강의가 없습니다."]
+        : folder ? [parts.at(-1), `${parts.length > 1 ? `${parts.slice(0, -1).join(" › ")} · ` : ""}강의 ${underPath.toLocaleString()}개`
+                    + (folder.seen && parts.length === 1 ? ` · ${folder.seen}개 봄` : ""),
+                    shown ? "" : guideOnly.checked ? "이 폴더에는 요점 정리가 있는 강의가 없습니다." : "이 폴더에는 강의가 없습니다."]
+        : view.kind === "recent" ? ["이어 보기", "다 보지 않은 강의를 최근에 본 순서로", recent ? "" : "다 보지 않은 강의가 없습니다."]
+        : view.kind === "new" ? ["새로 올라온 강의", "최근 14일 안에 올라온 강의", fresh ? "" : "최근 14일 안에 올라온 강의가 없습니다."]
+        : ["강의", `강의 ${total.toLocaleString()}개`, !total ? "아직 올라온 강의가 없습니다." : recent || fresh ? "" : "왼쪽에서 폴더를 고르세요."];
+      $("view-title").textContent = title;
+      $("view-sub").textContent = sub;
+      $("empty").textContent = empty;
+      $("empty").hidden = !empty;
+      document.body.dataset.view = searching || showingFound ? "search" : view.kind;
+      save();
+    }
+
+    function lectureLink(v, sub) {
+      const parts = v.title.split("/"), name = parts.pop();
+      const pos = store.get(`pos:${v.id}`), score = store.get(`score:${v.id}`);  // score: 퀴즈 4지선다를 끝까지 푼 마지막 점수
+      const progress = !pos ? [] : pos.t >= pos.d - 5 ? [el("span", { class: "done" }, "다 봄")]
+        : [el("span", { class: "progress" }, el("span", { class: "bar", "aria-hidden": "true" },
+            el("span", { style: `width: ${Math.round((pos.t / pos.d) * 100)}%` })), `${fmt(pos.t)}까지`)];
+      // 첫 교재 화면을 작게(화면에 보일 때만 불러옴). 그림이 없으면 같은 크기의 빈 칸으로 줄을 맞춥니다.
+      const blank = () => el("span", { class: "thumb" });
+      const thumb = v.analyzed ? el("img", { class: "thumb", src: `/api/videos/${v.id}/pages/0.jpg`, alt: "", loading: "lazy",
+                                             onerror: (e) => e.target.replaceWith(blank()) }) : blank();
+      return el("a", { href: `watch.html?id=${v.id}` }, thumb,
+        el("span", { class: "video-text" }, el("span", { class: "video-title" }, name),
+          el("span", { class: "video-sub" }, sub ?? parts.join(" · "))),
+        el("span", { class: "meta" },
+          el("span", { class: v.guide ? "badge ready" : "badge" }, v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "페이지" : "분석 전"),
+          ...(score ? [`퀴즈 ${score.right}/${score.total}`] : []), ...progress));
+    }
+
+    search.oninput = () => {
+      if (scope === "spoken" && !search.value.trim()) showingFound = false;
+      render();
+    };
+    guideOnly.onchange = render;
+    $("scope-title").onclick = () => { setScope("title"); render(); search.focus(); };
+    $("scope-spoken").onclick = () => { setScope("spoken"); render(); search.focus(); };
+    document.querySelector(".content-head .back").onclick = () => {  // 휴대폰: 찾던 것도 지우고 첫 화면으로
+      search.value = "";
+      showingFound = false;
+      render();
+    };
+    const reveal = () => { if (current().kind === "folder") side.reveal(current().name); };  // 고른 하위 폴더가 사이드바에 보이게
+    window.onhashchange = () => { reveal(); render(); scrollTo(0, 0); };
+    setScope(scope);
+
+    function setLayout(next) {
+      layout = next;
+      $("view-list").setAttribute("aria-pressed", String(layout === "list"));
+      $("view-grid").setAttribute("aria-pressed", String(layout === "grid"));
+      document.querySelector(".content-body").classList.toggle("grid", layout === "grid");
+      save();
+    }
+    $("view-list").onclick = () => setLayout("list");
+    $("view-grid").onclick = () => setLayout("grid");
+    setLayout(layout);
+
+    // 정렬: 묶음(고1·고2 등) 안에서 이름순(목록 그대로, '2강 < 10강') 또는 NAS에 최근 올라온 순
+    function sortItems(groups = folders.flatMap((f) => f.groups)) {
+      const byNew = $("sort").value === "new";
+      for (const group of groups) {
+        group.ul.append(...[...group.items].sort((a, b) => (byNew ? b.added - a.added : 0) || a.index - b.index).map((item) => item.li));
+      }
+    }
+    $("sort").onchange = () => { sortItems(); save(); };
+
+    // 키보드: 찾기 칸에서 ↓로 첫 강의, 목록에서 ↑↓(그림 보기는 ←→ 옆, ↑↓ 한 줄), Enter로 열기
+    const lectureLinks = () => [...document.querySelectorAll(".content-body .video-list a")].filter((a) => a.offsetParent);
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" && !e.isComposing && lectureLinks().length) { e.preventDefault(); lectureLinks()[0].focus(); }
+    });
+    document.querySelector(".content-body").addEventListener("keydown", (e) => {
+      const a = e.target.closest(".video-list a");
+      if (!a || e.altKey || e.ctrlKey || e.metaKey) return;
+      const links = lectureLinks(), i = links.indexOf(a);
+      const row = layout === "grid" ? getComputedStyle(a.closest(".video-list")).gridTemplateColumns.split(" ").length : 1;
+      const step = { ArrowDown: row, ArrowUp: -row, ...(layout === "grid" ? { ArrowRight: 1, ArrowLeft: -1 } : {}) }[e.key];
+      const next = e.key === "Home" ? links[0] : e.key === "End" ? links.at(-1) : step ? links[i + step] : undefined;
+      if (!step && !["Home", "End"].includes(e.key)) return;
+      e.preventDefault();
+      if (next) next.focus(); else if (e.key === "ArrowUp" && i - row < 0) search.focus();  // 맨 위에서 ↑는 찾기 칸으로
+    });
+
+    // 선생님 말에서 찾기: 선생님이 그 낱말을 말한 강의와 시각(받아쓰기 대본에서 찾음)
+    $("tools").onsubmit = async (e) => {
+      e.preventDefault();
+      if (scope === "title") return;  // 제목은 입력하는 대로 걸러 보여 줍니다
+      const q = search.value.trim(), box = $("found");
+      showingFound = true;
+      render();
+      box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
+      const status = $("found-status");  // 결과 전체 대신 수만 화면 읽기 프로그램에 알립니다
+      status.textContent = "찾는 중";
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const found = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        box.replaceChildren(el("p", { class: "notice" }, found.detail || "찾지 못했습니다."));
+        status.textContent = found.detail || "찾지 못했습니다.";
+        return;
+      }
+      status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개, 학원 정리·목차 ${found.notes.length}개 찾음`;
+      // 묶음마다 30개씩 보여 주고 '더 보기'로 이어서 보여 줍니다.
+      const paged = (list, item) => {
+        const ul = el("ul", { class: "found-list" }), more = el("button", { type: "button", class: "more" });
+        let shown = 0;
+        const step = () => {
+          ul.append(...list.slice(shown, shown + 30).map(item));
+          shown += 30;
+          more.hidden = shown >= list.length;
+          more.textContent = `더 보기 (남은 강의 ${list.length - shown}개)`;
+        };
+        more.onclick = step;
+        step();
+        return [ul, more];
+      };
+      const spoken = (r) => el("li", {},
+        el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+        ...r.times.flatMap((t, i) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` },
+          fmt(t), ...(r.chapters[i] ? [` · ${r.chapters[i]}`] : [])), " "]),
+        el("span", { class: "meta" }, `${r.count}번`),
+        ...(r.heard_as ? [el("p", { class: "also" }, `받아 적힌 말: ${r.heard_as.map((w) => `‘${w}’`).join(", ")}`)] : []),
+        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []));
+      const noted = (r) => el("li", {},
+        el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+        ...r.matches.flatMap((m) => m.time == null
+          ? [el("p", { class: "also" }, m.text)]
+          : [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(m.time)}` }, `${fmt(m.time)} · ${m.text}`), " "]),
+        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []));
+      box.replaceChildren(
+        el("h2", {}, `‘${q}’: 선생님이 말한 강의 ${found.exact.length}개 (많이 말한 순)`),
+        el("p", { class: "notice" }, "선생님 말을 받아 적은 글에서 찾습니다. 시각을 누르면 그 장면부터 봅니다."),
+        ...paged(found.exact, spoken),
+        ...(found.similar.length ? [
+          el("h2", {}, `비슷한 말로 받아 적힌 강의 ${found.similar.length}개`),
+          el("p", { class: "notice" }, "받아쓰기가 소리 하나를 다르게 적은 곳입니다. 다른 낱말일 수도 있으니 적힌 말을 확인하세요."),
+          ...paged(found.similar, spoken)] : []),
+        ...(found.notes.length ? [
+          el("h2", {}, `학원 정리·목차에 나오는 강의 ${found.notes.length}개`),
+          el("p", { class: "notice" }, "선생님 말에서는 찾지 못했지만 학원 요점 정리나 목차에 적혀 있는 강의입니다."),
+          ...paged(found.notes, noted)] : []));
     };
 
-    fetch("/api/videos").then(reloadIfLoggedOut).then((r) => r.json()).then((videos) => {
-      document.getElementById("empty").hidden = videos.length > 0;
+    fetch("/api/videos").then((r) => r.json()).then((videos) => {
+      total = videos.length;
+      side = fillSidebar(videos, { prefix: "" });
+      $("recent-list").replaceChildren(...recentVideos(videos).map((v) => el("li", {}, lectureLink(v))));
+      const day = (seconds) => new Date(seconds * 1000).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+      $("new-list").replaceChildren(...freshVideos(videos).map((v) => el("li", {},
+        lectureLink(v, `${v.title.split("/").slice(0, -1).join(" · ")} · ${day(v.added)} 올라옴`))));
+      const byFolder = new Map();
       for (const v of videos) {
-        const pos = store.get(`pos:${v.id}`);
-        const watched = !pos ? "" : pos.t >= pos.d - 5 ? "다 봄" : `${fmt(pos.t)}까지 봄`;
-        document.getElementById("videos").append(el("li", {},
-          el("a", { href: `watch.html?id=${v.id}` },
-            el("span", { class: "video-title" }, v.title),
-            el("span", { class: "meta" },
-              el("span", { class: v.analyzed ? "badge ready" : "badge" },
-                v.guide ? "요점 정리" : v.analyzed ? "대본·페이지" : "분석 전"),
-              watched))));
+        const cut = v.title.indexOf("/");
+        const name = cut < 0 ? "기타" : v.title.slice(0, cut);
+        if (!byFolder.has(name)) byFolder.set(name, []);
+        byFolder.get(name).push({ v, rest: cut < 0 ? [v.title] : v.title.slice(cut + 1).split("/") });
       }
+      folders = [...byFolder].map(([name, list]) => {
+        // 폴더 안에서는 다음 단계(고1·고2 등)로 묶고, 줄에는 위치(고1 · 모의고사)와 작품 이름을 나눠 적습니다.
+        const byGroup = new Map();
+        for (const entry of list) {
+          const group = entry.rest.length > 1 ? entry.rest[0] : "";
+          if (!byGroup.has(group)) byGroup.set(group, []);
+          byGroup.get(group).push(entry);
+        }
+        const head = el("h2", { class: "folder-name" }, name);
+        const box = el("section", { class: "folder", "aria-label": name }, head);
+        $("folders").append(box);
+        // 이 브라우저에서 보기 시작한 강의 수(시청 위치가 저장된 강의)
+        const seen = list.filter(({ v }) => (store.get(`pos:${v.id}`)?.t || 0) > 5).length;
+        // 강의 줄(요소 약 8개씩, 모두 합치면 3만 개 넘음)은 그 폴더를 열거나 찾기에 걸릴 때 처음 만듭니다: 휴대폰 첫 화면이 가볍게
+        const folder = { name, box, head, seen, groups: [], keys: list.map(({ v }) => norm(v.title)), built: false };
+        folder.build = () => {
+          if (folder.built) return;
+          folder.built = true;
+          folder.groups = [...byGroup].map(([group, entries]) => {
+            const ul = el("ul", { class: "video-list" });
+            const items = entries.map(({ v, rest }, index) => {
+              const li = el("li", {}, lectureLink(v, rest.slice(0, -1).join(" · ")));
+              ul.append(li);
+              return { li, title: v.title, key: norm(v.title), guide: v.guide, added: v.added || 0, index };
+            });
+            return { box: el("div", { class: "group" }, ...(group ? [el("h3", {}, group)] : []), ul), ul, items };
+          });
+          box.append(...folder.groups.map((g) => g.box));
+          sortItems(folder.groups);
+        };
+        return folder;
+      });
+      loaded = true;
+      reveal();
+      render();
     });
   </script>
 </body>
