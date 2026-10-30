@@ -175,6 +175,8 @@ class PicksRequest(BaseModel):
     note: str = Field("", max_length=200)
     # 강의마다 대상 학년(없으면 모든 학년). 학생은 사이드바에서 자기 학년을 고르면 그 학년 것만 봅니다.
     grades: dict[str, Literal["", "중1", "중2", "중3", "고1", "고2", "고3"]] = Field(default_factory=dict)
+    # 화면을 열 때 받은 저장 시각. 그사이 다른 탭·선생님이 저장했으면 덮어쓰지 않고 409(보내지 않으면 확인하지 않음)
+    at: float | None = None
 
 
 def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=(),
@@ -360,11 +362,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     @app.get("/api/videos")
     def list_videos():
-        listed = []
+        listed, fixes = [], read_fixes()
         for v in current_library()["videos"]:
             status = analysis_status(v["id"])
             # Claude 요점 정리가 없어도 학원 요점 정리를 보여 줄 수 있으면 요점 정리가 있는 강의입니다.
-            status["guide"] = status["guide"] or (status["analyzed"] and bool(academy_summaries(v)))
+            status["guide"] = status["guide"] or (status["analyzed"] and bool(fixed(academy_summaries(v), fixes)))
             listed.append({"id": v["id"], "title": v["title"], "added": v.get("added", 0), **status})
         return listed
 
@@ -376,7 +378,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """
         word = _search_word(q)
         near = _near(word) if len(word) <= NEAR_MAX else None
-        exact, similar, notes = [], [], []
+        exact, similar, notes, fixes = [], [], [], read_fixes()
         for v in current_library()["videos"]:
             entry = analysis_entry(v["id"])
             if not entry:
@@ -388,16 +390,16 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 result, recording = found_at(v, entry, [m.start() for m in matches])
                 result["heard_as"] = [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
                 similar.append((result, recording))
-            elif lines := noted(v, entry, word):
+            elif lines := noted(v, entry, word, fixes):
                 notes.append(({"id": v["id"], "title": v["title"], "matches": lines[:3], "also": []},
                               (round(entry["duration"]), entry["text"][:150])))
         return {"exact": merge_copies(exact), "similar": merge_copies(similar), "notes": merge_copies(notes)}
 
-    def noted(v, entry, word):
+    def noted(v, entry, word, fixes):
         """말하지는 않았어도 목차·챕터 제목이나 학원 정리 항목에 낱말이 든 줄 [{"text", "time"}]"""
         lines = [(title, start) for start, title in entry["chapters"]]
         if not entry["guide"]:  # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니 챕터만 봅니다
-            lines += [(item, None) for r in fixed(academy_summaries(v)) for s in r["sections"] for item in s["items"]]
+            lines += [(item, None) for r in fixed(academy_summaries(v), fixes) for s in r["sections"] for item in s["items"]]
         return [{"text": text, "time": t} for text, t in lines if word in _norm(text)]
 
     def found_at(v, entry, positions, limit=5):
@@ -425,7 +427,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             matches = list(near.finditer(entry["text"]))
             at, heard = [m.start() for m in matches], [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
         found, _ = found_at(video, entry, at, limit=None)
-        return {"times": found["times"], "chapters": found["chapters"], "heard_as": heard, "notes": noted(video, entry, word)}
+        return {"times": found["times"], "chapters": found["chapters"], "heard_as": heard, "notes": noted(video, entry, word, read_fixes())}
 
     def merge_copies(found):
         merged, first = [], {}
@@ -477,13 +479,13 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         host = request.client.host if request.client else ""
         if not log_dir or host in usage_ignore or not may_log("quiz", host):
             return
+        # 한글도 \u 글자로 적습니다: 학생이 보낸 문제 글의 U+2028 같은 글자가 줄 바꿈으로 읽혀 가짜 줄이 생기지 않게
         with usage_lock, (Path(log_dir) / "quiz.log").open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": int(wall_clock()), "id": req.id, "k": req.key, "who": device(host), "right": req.right},
-                               ensure_ascii=False) + "\n")
+            f.write(json.dumps({"t": int(wall_clock()), "id": req.id, "k": req.key, "who": device(host), "right": req.right}) + "\n")
 
     def quiz_summary():
         first = {}  # (기기, 강의, 문제) → 처음 푼 결과: 다시 푼 것은 정답률을 흐리므로 세지 않습니다
-        for row in read_lines(Path(log_dir) / "quiz.log"):
+        for row in read_lines(Path(log_dir) / "quiz.log", "t", "who", "id", "k", "right"):
             if row["t"] >= wall_clock() - 30 * 86400:
                 first.setdefault((row["who"], row["id"], row["k"]), row["right"])
         tally = {}
@@ -497,20 +499,22 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         return {"answered": len(first), "hardest": [{"id": i, "title": titles.get(i, "(목록에 없는 강의)"), "question": k,
                                                      "attempts": n, "right": r} for n, r, i, k in hard[:10]]}
 
-    def read_lines(path):  # JSON 한 줄씩 쌓은 기록(쓰다 끊긴 줄은 건너뜀)
+    def read_lines(path, *keys):  # JSON 한 줄씩 쌓은 기록. 쓰다 끊긴 줄과 keys가 다 있는 객체가 아닌 줄은 건너뜁니다.
         rows = []
         try:
-            for line in path.read_text(encoding="utf-8").splitlines():
+            for line in path.read_text(encoding="utf-8").split("\n"):  # splitlines는 U+2028 등에서도 잘라 '\n'만
                 try:
-                    rows.append(json.loads(line))
+                    row = json.loads(line)
                 except ValueError:
-                    pass
+                    continue
+                if isinstance(row, dict) and all(k in row for k in keys):
+                    rows.append(row)
         except OSError:
             pass
         return rows
 
     def usage_summary():
-        rows = read_lines(Path(log_dir) / "usage.log")
+        rows = read_lines(Path(log_dir) / "usage.log", "t", "id", "who")
         now = wall_clock()
         month = [r for r in rows if r["t"] >= now - 30 * 86400]
         opens, devices = Counter(r["id"] for r in month), {}
@@ -548,6 +552,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def require_teacher(request):
         host = guard("key", request, 10, "선생님 열쇠를 여러 번 틀려 10분 동안 막았습니다")
         given = request.headers.get("x-teacher-key", "")
+        if not given:  # 열쇠를 넣기 전에 화면을 연 것은 틀린 것으로 세지 않습니다(인터넷에서 현황을 열 때마다 묻습니다)
+            raise HTTPException(403, "선생님 열쇠를 넣어 주세요")
         if not teacher_key or not secrets.compare_digest(given.encode(), teacher_key.encode()):
             missed("key", host)
             raise HTTPException(403, "선생님 열쇠가 맞지 않습니다")
@@ -589,12 +595,15 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             raise HTTPException(404, "코드가 없거나 시간이 지났습니다")
         return {"data": data}
 
+    def saved_picks():
+        try:
+            return json.loads(picks_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
     @app.get("/api/picks")
     def picks():
-        try:
-            saved = json.loads(picks_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            saved = {}
+        saved = saved_picks()
         by_id = current_library()["by_id"]
         return {"note": saved.get("note", ""), "at": saved.get("at"),
                 "lectures": [{"id": i, "title": by_id[i]["title"], "grade": saved.get("grades", {}).get(i, "")}
@@ -603,14 +612,15 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     @app.put("/api/picks")
     def set_picks(req: PicksRequest, request: Request):
         require_teacher(request)
-        for video_id in req.ids:
-            get_video(video_id)  # 없는 강의면 404
-        ids = list(dict.fromkeys(req.ids))
+        by_id = current_library()["by_id"]
+        ids = [i for i in dict.fromkeys(req.ids) if i in by_id]  # 화면을 연 뒤 NAS에서 빠진 강의는 버립니다
         grades = {i: g for i, g in req.grades.items() if i in ids and g}
         with picks_lock:  # 두 PC에서 동시에 저장해도 같은 임시 파일을 서로 지우지 않게
+            if "at" in req.model_fields_set and req.at != saved_picks().get("at"):
+                raise HTTPException(409, "다른 화면에서 먼저 바꿨습니다. 새로 고침해 바뀐 목록을 본 뒤 다시 저장해 주세요")
             picks_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = picks_path.with_name(picks_path.name + ".tmp")
-            tmp.write_text(json.dumps({"ids": ids, "grades": grades, "note": req.note.strip(), "at": int(wall_clock())},
+            tmp.write_text(json.dumps({"ids": ids, "grades": grades, "note": req.note.strip(), "at": wall_clock()},
                                       ensure_ascii=False), encoding="utf-8")
             tmp.replace(picks_path)
         return picks()
@@ -625,8 +635,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         except (OSError, ValueError):
             return {}
 
-    def fixed(summaries):
-        fixes = read_fixes()
+    def fixed(summaries, fixes=None):  # 목록·검색처럼 강의마다 부를 때는 fixes를 한 번 읽어 넘깁니다
+        fixes = read_fixes() if fixes is None else fixes
         out = []
         for r in summaries:
             sections = []
@@ -635,6 +645,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 items = [mine.get(i, {}).get("text", i) for i in s["items"] if not mine.get(i, {}).get("hidden")]
                 if items := [i for i in items if i]:
                     sections.append({**s, "items": items})
+            if r["sections"] and not sections:  # 선생님이 항목을 모두 숨긴 정리는 쓰지 않습니다(빈칸 문제·어휘 퀴즈도)
+                continue
             # 어휘 퀴즈는 원본 정리로 만들어서, 선생님이 숨기거나 뜻을 고친 낱말의 문제는 뺍니다
             # (숨긴 낱말을 묻거나 고치기 전의 틀린 뜻을 정답으로 내지 않게).
             words = fixes.get(r.get("key"), {}).get("어휘", {})
@@ -650,7 +662,12 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     @app.get("/api/references")
     def reference_list():
-        return [{"key": ref_key(r), "title": r["title"], "grade": r["grade"], "suspects": sum(len(v) for v in suspects(r).values())}
+        fixes = read_fixes()
+
+        def open_suspects(r):  # 선생님이 아직 고치거나 숨기지 않은 의심 항목
+            mine = fixes.get(ref_key(r), {})
+            return sum(1 for name, items in suspects(r).items() for item in items if not mine.get(name, {}).get(item))
+        return [{"key": ref_key(r), "title": r["title"], "grade": r["grade"], "suspects": open_suspects(r)}
                 for r in references if reference_sections(r)]
 
     @app.get("/api/references/{key}")
@@ -700,14 +717,14 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         counts = {"guide": 0, "summary": 0, "toc": 0, "pages": 0}
         target = done = recent = 0
         since = wall_clock() - 3 * 86400
-        unanalyzed = []
+        unanalyzed, fixes = [], read_fixes()
         videos = current_library()["videos"]
         for v in videos:
             entry = analysis_entry(v["id"])
             if not entry:
                 unanalyzed.append(v["title"])
                 continue
-            summary = not entry["guide"] and bool(academy_summaries(v))
+            summary = not entry["guide"] and bool(fixed(academy_summaries(v), fixes))
             counts["guide" if entry["guide"] else "summary" if summary else "toc" if entry["toc"] else "pages"] += 1
             # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 Claude 요점 정리가 없는 강의
             if not entry["guide"] and entry["times"]:
@@ -891,9 +908,12 @@ def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
 def _teacher_key(path):
     """선생님 열쇠 파일(TEACHER_KEY_FILE)의 글. 파일이 없거나 비었으면 None: 아무도 '이번 주 강의' 등을 바꿀 수 없습니다."""
     try:
-        return Path(path).read_text(encoding="utf-8").strip() or None if path else None
+        key = Path(path).read_text(encoding="utf-8").strip() or None if path else None
     except OSError:
         return None
+    if key and not all(" " <= c <= "~" for c in key):  # 브라우저는 머리글(X-Teacher-Key)에 한글 등을 보내지 못합니다
+        raise SystemExit(f"선생님 열쇠는 영문·숫자·기호로만 정해 주세요(한글은 쓸 수 없음): {path}")
+    return key
 
 
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
