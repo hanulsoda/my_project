@@ -1,5 +1,6 @@
 """강의 목록·틀린 문제 복습·기기 옮기기 화면(브라우저 테스트)"""
 
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
 
@@ -93,6 +94,27 @@ def test_review_skips_lectures_not_in_the_list_and_drops_removed_questions(page,
     assert asked == []  # 목록에 없는 강의는 서버에 묻지 않음(물을 때마다 서버가 NAS를 다시 훑음)
     assert stored(page, "wrong:aaaaaaaaaaaa")  # 강의가 돌아오면 다시 나오게 기록은 둠
     assert stored(page, f"wrong:{site.ids[ZMG]}") == []
+
+
+def test_review_shows_each_lectures_questions_as_soon_as_they_arrive(page, site):
+    zmg, act = site.ids[ZMG], site.ids[ZMG + " 학습활동"]
+    q = page.request.get(f"{site.url}/api/videos/{act}").json()["references"][0]["quiz"][0]
+    remember(page, site, {f"wrong:{zmg}": [{"k": "제망매가의 갈래는?", "stage": 0, "due": 0}],
+                          f"wrong:{act}": [{"k": q.get("question") or " ".join([q["context"], *q["parts"]]), "stage": 0, "due": 0}]})
+    held = {}
+    page.route(re.compile(r"/api/videos/[0-9a-f]{12}$"), lambda route: held.update({route.request.url[-12:]: route}))
+    page.goto(site.url + "/review.html")
+    while len(held) < 2:
+        page.wait_for_timeout(50)
+    first, second = page.evaluate("wrongLists([]).map((l) => l.id)")  # 화면에 그리는 순서
+
+    held[first].continue_()
+    expect(page.locator(".review-lecture")).to_have_count(1)  # 나머지를 기다리지 않고 바로 풀 수 있음
+    expect(page.locator("#review")).to_contain_text("불러오는 중")
+    held[second].abort()
+    expect(page.locator("#review")).to_contain_text("일부 강의를 불러오지 못했습니다")
+    expect(page.locator("#review")).not_to_contain_text("불러오는 중")
+    expect(page.locator(".review-lecture")).to_have_count(1)
 
 
 def test_a_position_saved_without_a_length_is_not_shown_as_watched(page, site):
