@@ -42,7 +42,7 @@ def test_each_mistake_is_named_in_korean(tmp_path, capsys):
     refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}, {"title": "관동별곡", "grade": "고1", "meta": ["가사"]}]
     env, ids = setup(tmp_path, refs=refs, key="선생님열쇠")
     (tmp_path / "data" / f"{ids[1]}.json").write_text('{"title": "2강",}', encoding="utf-8")  # 손으로 고치다 깨짐
-    env.update(ENTRY_SECRET="짧은키", LOG_DIR=str(tmp_path / "없는 폴더"))
+    env.update(ENTRY_SECRET="짧은키")
 
     found = " / ".join(problems(env))
 
@@ -50,9 +50,23 @@ def test_each_mistake_is_named_in_korean(tmp_path, capsys):
     assert "형식" in found and ids[1] in found  # 깨진 분석 파일
     assert "영문" in found  # 한글 열쇠
     assert "ENTRY_SECRET" in found
-    assert "로그 폴더" in found
     assert main(env) == 1
-    assert "문제 5개" in capsys.readouterr().out
+    assert "문제 4개" in capsys.readouterr().out
+
+
+def test_what_the_server_handles_by_itself_is_not_a_problem(tmp_path, monkeypatch):
+    refs = [{"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"}}, {"title": "제목만 남은 정리", "grade": "고1"}]
+    env, _ = setup(tmp_path, refs=refs)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    env.update(REFERENCES_FILE="~/refs.json", TEACHER_KEY_FILE="~/key",  # 서버는 ~를 집 폴더로 읽음
+               LOG_DIR=str(tmp_path / "아직 없는 로그"))  # 서버가 켜질 때 만듦
+    (tmp_path / "data" / "옛것.json").mkdir()  # 이름만 .json인 폴더도 점검을 멈추지 않음
+
+    found = checks(env)
+
+    assert [text for level, text in found if level == "문제"] == ["형식이 깨진 분석 파일 1개(손으로 고친 곳의 쉼표·따옴표 확인): 옛것.json"]
+    assert any(level == "참고" and "로그 폴더" in text for level, text in found)
+    assert any(level == "확인" and "학원 정리 1개" in text for level, text in found)  # 서버가 쓰는 수(제목만 남은 것은 뺌)
 
 
 def test_a_missing_video_folder_is_a_problem_and_optional_settings_are_notes(tmp_path):

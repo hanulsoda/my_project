@@ -49,7 +49,7 @@ def checks(env) -> list[tuple[str, str]]:
         for path in sorted(data_dir.glob("*.json")):
             try:
                 ok = isinstance(load_analysis(data_dir, path.stem), dict)
-            except ValueError:
+            except (OSError, ValueError):
                 ok = False
             if not ok:
                 broken.append(path.name)
@@ -72,22 +72,22 @@ def checks(env) -> list[tuple[str, str]]:
         say(NOTE, "학원 정리(REFERENCES_FILE)를 설정하지 않았습니다. 학원 정리 없이 씁니다")
     else:
         try:
-            refs = json.loads(Path(refs_file).read_text(encoding="utf-8"))
+            refs = json.loads(Path(refs_file).expanduser().read_text(encoding="utf-8"))
             if not isinstance(refs, list):
                 raise ValueError("정리 목록([...])이 아닙니다")
         except (OSError, ValueError) as e:
             say(PROBLEM, f"학원 정리 파일을 읽지 못했습니다: {refs_file} ({e}). 서버가 켜지지 않습니다")
         else:
-            skipped = _warnings(lambda: usable_references(refs))
-            usable = len(refs) - len(skipped)
-            say(OK, f"학원 정리: 학원 정리 {usable:,}개" + (f"(제목만 남은 것 등은 빼고 셈)" if skipped else ""))
+            usable = []
+            skipped = _warnings(lambda: usable.extend(usable_references(refs)))
+            say(OK, f"학원 정리: 학원 정리 {len(usable):,}개" + ("(제목만 남은 것 등은 빼고 셈)" if len(usable) < len(refs) else ""))
             if skipped:
                 say(PROBLEM, f"학원 정리 {len(skipped)}개를 건너뜀: " + " / ".join(skipped[:3]) + (" …" if len(skipped) > 3 else ""))
 
     key_file = env.get("TEACHER_KEY_FILE")
     if not key_file:
         say(NOTE, "선생님 열쇠(TEACHER_KEY_FILE)가 없어 아무도 '이번 주 강의'·학원 정리를 바꿀 수 없습니다")
-    elif not Path(key_file).is_file():
+    elif not Path(key_file).expanduser().is_file():
         say(PROBLEM, f"선생님 열쇠 파일이 없습니다: {key_file}")
     else:
         try:
@@ -111,7 +111,7 @@ def checks(env) -> list[tuple[str, str]]:
     if not log_dir:
         say(NOTE, "로그 폴더(LOG_DIR)가 없어 현황 화면에 이용 통계·운영 기록이 나오지 않습니다")
     elif not Path(log_dir).is_dir():
-        say(PROBLEM, f"로그 폴더가 없습니다: {log_dir}")
+        say(NOTE, f"로그 폴더가 아직 없습니다: {log_dir} (서버를 켜면 만듭니다)")
     else:
         say(OK, f"로그 폴더: {Path(log_dir).resolve()}")
 
