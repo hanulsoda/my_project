@@ -60,3 +60,15 @@ def test_a_word_without_a_part_of_speech_still_gets_its_time():
                 {"start": 42.0, "end": 50.0, "text": "울안은 울타리를 둘러친 안을 말해요"}]
 
     assert link_times(summaries, segments)[0]["sections"][0]["times"] == [42.0]
+
+
+def test_a_verb_listed_in_dictionary_form_links_to_its_spoken_form():
+    summaries = [{"source": "s", "quiz": [], "sections": [{"name": "어휘", "items": [
+        "포효하다(동사): 사납게 울부짖다", "바다(명사): 넓은 물", "회상하다(동사): 지난 일을 떠올리다"]}]}]
+    segments = [{"start": 0.0, "end": 5.0, "text": "바람이 붑니다"},
+                {"start": 30.0, "end": 35.0, "text": "호랑이가 포효하는 장면이에요"},
+                {"start": 60.0, "end": 65.0, "text": "화자가 어린 시절을 회상했죠"}]
+
+    times = link_times(summaries, segments)[0]["sections"][0]["times"]
+
+    assert times == [30.0, None, 60.0]  # '바다'는 '바'만으로 찾지 않음(두 글자 넘는 줄기만)

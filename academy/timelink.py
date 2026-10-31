@@ -20,6 +20,18 @@ def _grams(text):
     return {t[i:i + 3] for i in range(len(t) - 2)}
 
 
+def _spoken_forms(term):
+    """어휘 낱말을 강의에서 찾을 꼴. 사전형('포효하다')은 '포효하는·포효해·포효했다'처럼 말하므로 줄기로도 찾습니다.
+    줄기가 한 글자면(바다 → 바) 다른 말과 겹치기 쉬워 사전형 그대로만 찾습니다."""
+    forms = [term]
+    if term.endswith("다") and len(term) >= 3:
+        stem = term[:-1]
+        forms.append(stem)
+        if stem.endswith("하"):  # 하다 → 해·했(줄어든 꼴)
+            forms += [stem[:-1] + "해", stem[:-1] + "했"]
+    return forms
+
+
 def link_times(summaries, segments) -> list[dict]:
     """학원 정리 [{"source", "sections", "quiz"}]에 시간을 붙인 사본을 돌려줍니다.
 
@@ -31,9 +43,14 @@ def link_times(summaries, segments) -> list[dict]:
     window_grams = [set().union(*(_grams(s["text"]) for s in said)) for _, said in windows]
     df = Counter(g for grams in window_grams for g in grams)
 
+    said = [(s["start"], _norm(s["text"])) for s in segments]  # 띄어쓰기·기호를 뺀 대본 줄(낱말마다 다시 다듬지 않게)
+
     def word_time(item):
         term = _norm(item.split("(")[0])
-        return next((s["start"] for s in segments if len(term) >= 2 and term in _norm(s["text"])), None)
+        if len(term) < 2:
+            return None
+        forms = _spoken_forms(term)
+        return next((start for start, text in said if any(f in text for f in forms)), None)
 
     def sentence_time(item):
         if not windows:
