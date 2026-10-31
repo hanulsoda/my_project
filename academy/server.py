@@ -408,6 +408,20 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         exact: 그대로 말한 강의, similar: 그대로는 없고 받아쓰기가 한 소리 다르게 적은 말만 있는 강의(적힌 말과 함께)
         """
         word = _search_word(q)
+        current_library()
+        key = (word, library["at"], stamp(data_dir), stamp(fixes_path))
+        # 한 번에 하나씩 찾습니다(어차피 CPU를 나눠 써서 함께 돌려도 빠르지 않음). 수업 중 여러 학생이 같은 낱말을 찾으면
+        # 처음 찾은 결과를 함께 씁니다. 새 강의·분석 저장·정리 고치기가 있으면 다시 찾습니다.
+        with search_lock:
+            if key not in searches:
+                if len(searches) >= 64:
+                    searches.pop(next(iter(searches)))  # 가장 오래된 것부터
+                searches[key] = find_spoken(word)
+            return searches[key]
+
+    searches, search_lock = {}, Lock()
+
+    def find_spoken(word):
         near = _near(word) if len(word) <= NEAR_MAX else None
         maybe_near = _near_filter(word) if near else None  # 비슷한 말이 있을 수 없는 대본은 정규식을 돌리지 않음(결과는 같음)
         exact, similar, notes, fixes, fixes_at = [], [], [], read_fixes(), stamp(fixes_path)

@@ -85,3 +85,21 @@ def test_status_counts_quiz_answers_added_after_the_last_look(tmp_path):
     assert client.get("/api/status").json()["quiz"]["answered"] == 1
     answer("Q2")
     assert client.get("/api/status").json()["quiz"]["answered"] == 2
+
+
+def test_the_same_spoken_search_from_many_students_is_worked_out_once(tmp_path, monkeypatch):
+    import academy.server as server
+    video_dir, data_dir, ids = site(tmp_path)
+    said = [{"start": 0.0, "end": 2.0, "text": "반어법을 봅시다"}]
+    save_analysis(data_dir, ids[0], {"title": "1강", "duration": 2.0, "segments": said, "guide": None})
+    worked = []
+    real = server._near_filter
+    monkeypatch.setattr(server, "_near_filter", lambda word: worked.append(word) or real(word))
+    client = TestClient(create_app(video_dir, data_dir, None), client=LAN)
+
+    first = client.get("/api/search", params={"q": "반어법"}).json()
+    again = client.get("/api/search", params={"q": " 반어법 "}).json()  # 띄어쓰기만 다른 같은 낱말
+
+    assert first == again and len(worked) == 1  # 수업 중 여러 학생이 같은 낱말을 찾아도 한 번만 찾음
+    save_analysis(data_dir, ids[1], {"title": "2강", "duration": 3.0, "segments": said, "guide": None})  # 새 분석(다른 녹화)
+    assert len(client.get("/api/search", params={"q": "반어법"}).json()["exact"]) == 2
