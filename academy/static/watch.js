@@ -6,6 +6,32 @@ video.src = `/media/${id}`;
 // 영상을 보다가 통과가 끝나면 영상 요청이 401로 막힙니다. 서버에 한 번 물어 401이면 로그인 안내로 바뀝니다(common.js).
 video.addEventListener("error", () => fetch(`/api/videos/${id}`).catch(() => {}));
 
+// 인터넷이 30초쯤 끊기면 브라우저가 영상 받기를 그만두고(MEDIA_ERR_NETWORK), 다시 연결돼도 새로고침할 때까지 멈춰 있습니다.
+// 끊긴 자리를 기억해 두었다가 연결되면(또는 5초마다) 영상을 다시 받아 그 자리부터 이어서 봅니다.
+let lost = null, retry = null, stalled = false;  // stalled: 재생 중에 받기를 기다리며 멈춤
+video.addEventListener("waiting", () => { stalled = true; });
+video.addEventListener("playing", () => { stalled = false; });
+video.addEventListener("error", () => {
+  if (video.error?.code !== 2) return;
+  lost ??= { t: video.currentTime, play: stalled || !video.paused };
+  $("status").textContent = "인터넷 연결이 끊겼습니다. 다시 연결되면 이어서 봅니다…";
+  clearTimeout(retry);
+  retry = setTimeout(reconnect, 5000);
+});
+function reconnect() {
+  if (lost) video.load();
+}
+addEventListener("online", reconnect);
+video.addEventListener("loadedmetadata", () => {
+  if (!lost) return;
+  const { t, play } = lost;
+  lost = null;
+  clearTimeout(retry);
+  video.currentTime = t;
+  if (play) video.play().catch(() => {});
+  $("status").textContent = `다시 연결되어 ${fmt(t)}부터 이어서 봅니다.`;
+});
+
 let chapters = [];  // { start, title, card, bar }
 let pages = [];     // { start, item }
 let refItems = [];  // { start, item } 시간이 붙은 학원 정리 항목, 시간 순

@@ -216,3 +216,21 @@ def test_questions_keep_working_after_several_long_answers(page, site):
 
     expect(page.locator(".bubble.assistant").last).to_contain_text("질문하기는 지금 쓰지 않습니다")  # 422(기록이 너무 김)가 아님
     assert sent[-1]["history"][0]["role"] == "user"
+
+
+def test_the_video_picks_up_where_it_stopped_after_the_internet_comes_back(page, site):
+    open_player(page, site)
+    assert page.locator("video").get_attribute("playsinline") is not None  # 아이폰에서 전체 화면으로만 열리지 않게
+    go(page, 40)
+    page.evaluate(f"{VIDEO}.play()")
+    page.wait_for_function(f"!{VIDEO}.paused")
+    # 인터넷이 30초쯤 끊기면 브라우저가 영상 받기를 그만둡니다(MEDIA_ERR_NETWORK). 다시 연결돼도 그대로 멈춰 있던 것
+    page.evaluate("""() => { const v = document.querySelector('video');
+        Object.defineProperty(v, 'error', { get: () => ({ code: 2 }), configurable: true });
+        v.dispatchEvent(new Event('waiting')); v.pause(); v.dispatchEvent(new Event('error')); }""")
+    expect(page.locator("#status")).to_contain_text("인터넷 연결이 끊겼습니다")
+
+    page.evaluate("() => { delete document.querySelector('video').error; window.dispatchEvent(new Event('online')); }")
+
+    expect(page.locator("#status")).to_contain_text("40")
+    page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 40) < 3")
