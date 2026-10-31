@@ -21,7 +21,7 @@
   <script>
     // 강의마다 notes:<영상 번호>에 저장된 메모·북마크를 강의별로 모아 봅니다. 시간을 누르면 그 장면부터 봅니다.
     const box = document.getElementById("notes-page");
-    let titles = new Map(), videos = [];
+    let titles = new Map(), videos = [], listFailed = false;  // listFailed: 강의 목록을 받지 못함(서버를 다시 켜는 중 등)
 
     function render() {
       const lists = savedLists("notes:");
@@ -31,10 +31,12 @@
         box.replaceChildren(el("p", { class: "notice" }, "아직 메모가 없습니다. 강의를 보다가 메모 탭에서 기억할 장면을 추가하세요."));
         return;
       }
-      const name = (id) => titles.get(id) || "목록에 없는 강의";  // 지워졌거나 옮겨진 강의의 메모도 버리지 않고 보여 줍니다
+      // 지워졌거나 옮겨진 강의의 메모도 버리지 않고 보여 줍니다. 목록을 못 받았으면 이름만 모르고 강의로는 갈 수 있습니다.
+      const name = (id) => titles.get(id) || (listFailed ? "강의 이름을 불러오지 못함" : "목록에 없는 강의");
       lists.sort((a, b) => name(a.id).localeCompare(name(b.id), "ko"));
-      box.replaceChildren(...lists.map(({ id, items }) => el("section", { class: "review-lecture", "data-id": id },
-        el("h2", {}, titles.has(id) ? el("a", { href: `watch.html?id=${id}` }, name(id)) : name(id)),
+      box.replaceChildren(...(listFailed ? [el("p", { class: "notice" }, `강의 이름을 불러오지 못했습니다. ${OFFLINE}`)] : []),
+        ...lists.map(({ id, items }) => el("section", { class: "review-lecture", "data-id": id },
+        el("h2", {}, titles.has(id) || listFailed ? el("a", { href: `watch.html?id=${id}` }, name(id)) : name(id)),
         el("ul", { class: "notes" }, ...items.map((n, i) => el("li", {},
           el("a", { class: "time", href: `watch.html?id=${id}&t=${Math.floor(n.t)}` }, fmt(n.t)),
           el("span", { class: "note-text" }, n.text || "🔖 북마크"),
@@ -53,7 +55,7 @@
     // 다른 탭(플레이어 등)에서 메모를 더하거나 지우면 이 화면도 바로 다시 그립니다.
     addEventListener("storage", (e) => { if (e.key === null || e.key.startsWith("notes:")) render(); });
 
-    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => [])
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : Promise.reject())).catch(() => { listFailed = true; return []; })
       .then((list) => { videos = list; titles = new Map(videos.map((v) => [v.id, v.title])); render(); });
   </script>
 </body>

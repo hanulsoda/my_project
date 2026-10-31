@@ -251,3 +251,27 @@ def test_a_browser_that_cannot_save_says_so_and_keeps_the_typed_note(page, site)
     expect(page.locator("#note-text")).to_have_value("중요한 장면")  # 저장하지 못한 글을 지우지 않음
     page.click("#bookmark-btn")
     expect(page.locator("#status")).not_to_contain_text("북마크했습니다")
+
+
+def test_a_server_restart_is_not_shown_as_a_missing_lecture(page, site):
+    page.route("**/api/videos/*?view=1", lambda route: route.fulfill(
+        status=502, content_type="text/html", body="<html>502 Bad Gateway</html>"))
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+
+    expect(page.locator("#tab-guide")).to_contain_text("서버에 연결하지 못했습니다")
+    expect(page.locator("#title")).not_to_have_text("영상을 찾을 수 없습니다")
+
+    page.unroute("**/api/videos/*?view=1")
+    page.goto(f"{site.url}/watch.html?id=000000000000")  # 정말 없는 강의는 그대로
+    expect(page.locator("#title")).to_have_text("영상을 찾을 수 없습니다")
+
+
+def test_searching_this_lecture_offline_does_not_spin_forever(page, site):
+    open_player(page, site)
+    page.route("**/search?**", lambda route: route.abort("internetdisconnected"))
+    page.click("[data-tab=find]")
+
+    page.fill("#find-text", "반어법")
+    page.press("#find-text", "Enter")
+
+    expect(page.locator("#find-status")).to_contain_text("서버에 연결하지 못했습니다")

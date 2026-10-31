@@ -36,7 +36,7 @@
       <section id="found" hidden></section>
       <section id="recent" hidden><h2>이어 보기</h2><ul id="recent-list" class="video-list"></ul></section>
       <section id="new" hidden><h2>새로 올라온 강의</h2><ul id="new-list" class="video-list"></ul></section>
-      <p id="empty" class="notice" hidden></p>
+      <p id="empty" class="notice">불러오는 중…</p>
       <div id="folders"></div>
     </div>
   </main>
@@ -227,12 +227,13 @@
       box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
       const status = $("found-status");  // 결과 전체 대신 수만 화면 읽기 프로그램에 알립니다
       status.textContent = "찾는 중";
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-      const found = await res.json().catch(() => ({}));
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`).catch(() => null);
+      const found = res ? await res.json().catch(() => ({})) : {};
       if (seq !== searchSeq || !showingFound) return;  // 그사이 다른 말을 찾았거나 찾기를 닫았으면 이 결과는 버립니다
-      if (!res.ok) {
-        box.replaceChildren(el("p", { class: "notice" }, found.detail || "찾지 못했습니다."));
-        status.textContent = found.detail || "찾지 못했습니다.";
+      if (!res?.ok) {
+        const why = found.detail || (res && res.status < 500 ? "찾지 못했습니다." : OFFLINE);
+        box.replaceChildren(el("p", { class: "notice" }, why));
+        status.textContent = why;
         return;
       }
       status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개, 학원 정리·목차 ${found.notes.length}개 찾음`;
@@ -277,7 +278,7 @@
           ...paged(found.notes, noted)] : []));
     };
 
-    fetch("/api/videos").then((r) => r.json()).then((videos) => {
+    fetch("/api/videos").then((r) => (r.ok ? r.json() : Promise.reject())).then((videos) => {
       total = videos.length;
       side = fillSidebar(videos, { prefix: "" });
       $("recent-list").replaceChildren(...recentVideos(videos).map((v) => el("li", {}, lectureLink(v))));
@@ -327,7 +328,8 @@
       reveal();
       render();
       if (saved.found && saved.foundAt === location.hash && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
-    });
+    }, () => $("empty").replaceChildren(`${OFFLINE} `,
+      el("button", { type: "button", class: "retry", onclick: () => location.reload() }, "다시 불러오기")));
   </script>
 </body>
 </html>

@@ -55,8 +55,10 @@
     let countdown = null;
     $("send").onclick = async () => {
       const res = await fetch("/api/transfer", { method: "POST", headers: { "Content-Type": "application/json" },
-                                                 body: JSON.stringify({ data: collectRecords() }) });
-      if (!res.ok) return void ($("send-status").textContent = "코드를 만들지 못했습니다. 잠시 뒤 다시 해 주세요.");
+                                                 body: JSON.stringify({ data: collectRecords() }) }).catch(() => null);
+      if (!res?.ok) {
+        return void ($("send-status").textContent = res && res.status < 500 ? "코드를 만들지 못했습니다. 잠시 뒤 다시 해 주세요." : OFFLINE);
+      }
       const { code } = await res.json();
       // 서버는 코드를 10분 동안 둡니다. 남은 시간은 이 기기 시계로 받은 때부터 셉니다(기기 시계가 틀려도 맞게).
       const until = Date.now() + 600e3;
@@ -78,9 +80,10 @@
       e.preventDefault();
       const code = $("code-input").value.replace(/\D/g, "");
       if (code.length !== 6) return void ($("receive-status").textContent = "6자리 숫자를 넣어 주세요.");
-      const res = await fetch(`/api/transfer/${code}`, { method: "POST" });
-      if (!res.ok) {
-        $("receive-status").textContent = res.status === 429 ? "코드를 여러 번 틀려 10분 동안 막혔습니다."
+      const res = await fetch(`/api/transfer/${code}`, { method: "POST" }).catch(() => null);
+      if (!res?.ok) {
+        $("receive-status").textContent = !res || res.status >= 500 ? OFFLINE  // 그때는 코드가 아직 남아 있습니다
+          : res.status === 429 ? "코드를 여러 번 틀려 10분 동안 막혔습니다."
           : "코드가 없거나 시간이 지났습니다. 보내는 기기에서 다시 만들어 주세요.";
         return;
       }

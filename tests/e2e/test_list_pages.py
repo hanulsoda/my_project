@@ -262,3 +262,52 @@ def test_received_records_that_cannot_be_saved_are_not_reported_as_received(page
 
     expect(page.locator("#receive-status")).to_contain_text("저장하지 못했습니다")
     expect(page.locator("#receive-status")).not_to_contain_text("받았습니다")
+
+
+PROXY_502 = {"status": 502, "content_type": "text/html", "body": "<html><body>502 Bad Gateway</body></html>"}
+
+
+def test_the_list_says_when_the_server_cannot_be_reached_and_can_retry(page, site):
+    page.route("**/api/videos", lambda route: route.fulfill(**PROXY_502))  # 서버를 다시 켜는 동안(시놀로지가 502)
+    page.goto(site.url + "/")
+    expect(page.locator("#empty")).to_contain_text("서버에 연결하지 못했습니다")
+
+    page.unroute("**/api/videos")
+    page.click("#empty button")
+
+    expect(page.locator(".video-list a").first).to_be_attached()
+
+
+def test_searching_offline_does_not_spin_forever(page, site):
+    remember(page, site, {"list": {"scope": "spoken"}})
+    page.goto(site.url + "/")
+    expect(page.locator(".video-list a").first).to_be_attached()
+    page.route("**/api/search**", lambda route: route.abort("internetdisconnected"))
+
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+
+    expect(page.locator("#found")).to_contain_text("서버에 연결하지 못했습니다")
+
+
+def test_moving_records_offline_or_during_a_restart_says_what_happened(page, site):
+    page.goto(site.url + "/move.html")
+    page.route("**/api/transfer", lambda route: route.abort("internetdisconnected"))
+    page.click("#send")
+    expect(page.locator("#send-status")).to_contain_text("서버에 연결하지 못했습니다")
+
+    page.route("**/api/transfer/*", lambda route: route.fulfill(**PROXY_502))
+    page.fill("#code-input", "123456")
+    page.press("#code-input", "Enter")
+    expect(page.locator("#receive-status")).to_contain_text("서버에 연결하지 못했습니다")  # '코드가 없거나'가 아님
+
+
+def test_notes_keep_their_lecture_links_when_the_list_cannot_be_loaded(page, site):
+    vid = site.ids[ZMG]
+    remember(page, site, {f"notes:{vid}": [{"t": 10, "text": "메모"}]})
+    page.route("**/api/videos", lambda route: route.fulfill(**PROXY_502))
+    page.goto(site.url + "/notes.html")
+
+    expect(page.locator("#notes-page")).to_contain_text("서버에 연결하지 못했습니다")
+    expect(page.locator("#notes-page")).not_to_contain_text("목록에 없는 강의")
+    expect(page.locator(f'#notes-page h2 a[href="watch.html?id={vid}"]')).to_be_visible()

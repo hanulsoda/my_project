@@ -28,6 +28,9 @@ function fmt(seconds) {
   return h ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
 }
 
+// 서버를 다시 켜는 중(시놀로지가 502)이거나 인터넷이 끊겼을 때 보여 줄 말
+const OFFLINE = "서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 잠시 뒤 다시 해 주세요.";
+
 // 시청 위치와 메모는 학생 각자의 브라우저에 저장됩니다.
 const store = {
   get(key) {

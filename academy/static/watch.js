@@ -62,9 +62,13 @@ for (const tab of document.querySelectorAll(".tabs button")) {
 
 // ---- 데이터 불러오기 ----
 fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(선생님용 이용 통계)
-  .then((r) => (r.ok ? r.json() : Promise.reject()))
+  .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
   // 화면을 그리다 난 오류는 '영상 없음'으로 덮지 않습니다(브라우저 콘솔에 그대로 나옴).
-  .then(render, () => { $("title").textContent = "영상을 찾을 수 없습니다"; });
+  // 서버를 다시 켜는 중(502)이거나 인터넷이 끊긴 것을 '없는 강의'로 보이지 않게 404만 그렇게 알립니다.
+  .then(render, (status) => {
+    if (status === 404) $("title").textContent = "영상을 찾을 수 없습니다";
+    else $("tab-guide").replaceChildren(notice(`요점 정리를 불러오지 못했습니다. ${OFFLINE}`));
+  });
 
 function render({ title, analysis, references = [], prev = null, next = null }) {
   document.title = title;
@@ -439,10 +443,10 @@ $("find-form").onsubmit = async (e) => {
   e.preventDefault();
   const q = $("find-text").value.trim(), status = $("find-status"), list = $("find-results");
   status.textContent = "찾는 중…";
-  const res = await fetch(`/api/videos/${id}/search?q=${encodeURIComponent(q)}`);
-  const found = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    status.textContent = found.detail || "찾지 못했습니다.";
+  const res = await fetch(`/api/videos/${id}/search?q=${encodeURIComponent(q)}`).catch(() => null);
+  const found = res ? await res.json().catch(() => ({})) : {};
+  if (!res?.ok) {
+    status.textContent = found.detail || (res && res.status < 500 ? "찾지 못했습니다." : OFFLINE);
     list.replaceChildren();
     return;
   }
