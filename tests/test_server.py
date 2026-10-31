@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import time
@@ -446,6 +447,33 @@ def test_status_counts_lecture_opens_for_teachers_without_device_addresses(tmp_p
     assert usage["since"] is not None
     log = (log_dir / "usage.log").read_text(encoding="utf-8")
     assert len(log.splitlines()) == 4 and "10.0.0." not in log  # 기기 주소는 남기지 않습니다
+
+
+def test_status_reads_a_year_of_opens_from_the_last_month_and_then_only_new_lines(tmp_path):
+    from datetime import datetime
+    video_dir, data_dir, log_dir = tmp_path / "videos", tmp_path / "data", tmp_path / "logs"
+    video_dir.mkdir()
+    log_dir.mkdir()
+    (video_dir / "1강.mp4").write_bytes(b"x")
+    vid = find_videos(video_dir)[0]["id"]
+    now, log = time.time(), log_dir / "usage.log"
+    first = int(now - 400 * 86400)
+    old = [{"t": first + n * 30, "id": vid, "who": f"old{n % 50}"} for n in range(60000)]  # 1년 넘게 쌓인 기록(약 3MB)
+    recent = [{"t": int(now - d * 86400), "id": vid, "who": f"new{d}"} for d in (20, 10, 1)]
+    log.write_text("".join(json.dumps(r) + "\n" for r in old + recent) + '{"t": "어제", "id": "x", "who": "y"}\n',
+                   encoding="utf-8")  # 손으로 고친 줄
+    client = TestClient(create_app(video_dir, data_dir, None, log_dir=log_dir))
+    opens = lambda: client.get("/api/status").json()["usage"]
+
+    assert (opens()["opens"], opens()["since"]) == (3, datetime.fromtimestamp(first).strftime("%Y-%m-%d"))
+    with log.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"t": int(now), "id": vid, "who": "new0"}) + "\n" + '{"t": ')  # 다음 줄은 쓰는 중
+    assert opens()["opens"] == 4
+    with log.open("a", encoding="utf-8") as f:
+        f.write(f'{int(now)}, "id": "{vid}", "who": "new0"}}\n')
+    assert opens()["opens"] == 5
+    log.write_text(json.dumps({"t": int(now), "id": vid, "who": "a"}) + "\n", encoding="utf-8")  # 기록 파일을 새로 시작함
+    assert opens()["opens"] == 1
 
 
 def test_teacher_picks_need_the_teacher_key_and_are_shown_to_everyone(tmp_path):

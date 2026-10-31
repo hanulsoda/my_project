@@ -552,9 +552,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     def quiz_summary():
         first = {}  # (기기, 강의, 문제) → 처음 푼 결과: 다시 푼 것은 정답률을 흐리므로 세지 않습니다
-        for row in read_lines(Path(log_dir) / "quiz.log", "t", "who", "id", "k", "right"):
-            if row["t"] >= wall_clock() - 30 * 86400:
-                first.setdefault((row["who"], row["id"], row["k"]), row["right"])
+        for row in recent_rows("quiz.log", ("t", "who", "id", "k", "right"))[0]:
+            first.setdefault((row["who"], row["id"], row["k"]), row["right"])
         tally = {}
         for (_, video_id, key), right in first.items():
             seen = tally.setdefault((video_id, key), [0, 0])
@@ -566,34 +565,47 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         return {"answered": len(first), "hardest": [{"id": i, "title": titles.get(i, "(목록에 없는 강의)"), "question": k,
                                                      "attempts": n, "right": r} for n, r, i, k in hard[:10]]}
 
-    def read_lines(path, *keys):  # JSON 한 줄씩 쌓은 기록. 쓰다 끊긴 줄과 keys가 다 있는 객체가 아닌 줄은 건너뜁니다.
-        rows = []
-        try:
-            for line in path.read_text(encoding="utf-8").split("\n"):  # splitlines는 U+2028 등에서도 잘라 '\n'만
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(row, dict) and all(k in row for k in keys):
-                    rows.append(row)
-        except OSError:
-            pass
-        return rows
+    logs, logs_lock = {}, Lock()  # 기록 파일 이름 → 읽어 둔 것(파일, 읽은 곳, 맨 처음 시각, 최근 줄)
+
+    def recent_rows(name, keys, days=30):
+        """한 줄씩 덧붙이기만 하는 기록(시각 순)에서 최근 days일의 줄과 맨 처음 줄의 시각.
+        처음에는 최근 days일이 시작하는 곳을 찾아 거기부터, 그다음부터는 늘어난 만큼만 읽습니다
+        (1년 치 기록을 현황을 열 때마다 처음부터 읽으면 몇 초씩 걸리고 그동안 학생들의 요청도 느려짐)."""
+        since = wall_clock() - days * 86400
+        with logs_lock:
+            try:
+                with (Path(log_dir) / name).open("rb") as f:
+                    info = os.fstat(f.fileno())
+                    seen = logs.get(name)
+                    if not seen or seen["file"] != (info.st_dev, info.st_ino) or info.st_size < seen["at"]:
+                        first = next((row["t"] for row in (_log_row(line, keys) for line in f) if row), None)
+                        seen = logs[name] = {"file": (info.st_dev, info.st_ino), "first": first, "rows": [],
+                                             "at": _recent_start(f, info.st_size, since)}
+                    f.seek(seen["at"])
+                    chunk = f.read(info.st_size - seen["at"])
+            except OSError:
+                return [], None
+            done = chunk.rfind(b"\n") + 1  # 쓰는 중인 마지막 줄은 다 쓴 뒤에 읽습니다
+            seen["at"] += done
+            new = [row for row in (_log_row(line, keys) for line in chunk[:done].split(b"\n")) if row]
+            if seen["first"] is None and new:
+                seen["first"] = new[0]["t"]
+            seen["rows"] = [r for r in seen["rows"] + new if r["t"] >= since]
+            return seen["rows"], seen["first"]
 
     def usage_summary():
-        rows = read_lines(Path(log_dir) / "usage.log", "t", "id", "who")
+        month, first = recent_rows("usage.log", ("t", "id", "who"))
         now = wall_clock()
-        month = [r for r in rows if r["t"] >= now - 30 * 86400]
         opens, devices = Counter(r["id"] for r in month), {}
         for r in month:
             devices.setdefault(r["id"], set()).add(r["who"])
         titles = {v["id"]: v["title"] for v in current_library()["videos"]}
         top = sorted(opens, key=lambda i: (-len(devices[i]), -opens[i], titles.get(i, "")))[:10]
         weekdays = [0] * 7  # 월~일, 최근 4주
-        for r in rows:
+        for r in month:
             if r["t"] >= now - 28 * 86400:
                 weekdays[datetime.fromtimestamp(r["t"]).weekday()] += 1
-        return {"since": datetime.fromtimestamp(rows[0]["t"]).strftime("%Y-%m-%d") if rows else None,
+        return {"since": datetime.fromtimestamp(first).strftime("%Y-%m-%d") if first is not None else None,
                 "opens": len(month), "devices": len({r["who"] for r in month}), "weekdays": weekdays,
                 "top": [{"id": i, "title": titles.get(i, "(목록에 없는 강의)"), "opens": opens[i], "devices": len(devices[i])}
                         for i in top]}
@@ -916,6 +928,37 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     app.mount("/", RevalidatedStaticFiles(directory=STATIC_DIR, html=True))
     return app
+
+
+def _log_row(line, keys):
+    """기록 한 줄(JSON). 쓰다 끊긴 줄, keys가 다 있는 객체가 아닌 줄, 시각("t")이 숫자가 아닌 줄(손으로 고침)은 None.
+    줄은 '\n'에서만 나눕니다(splitlines는 학생이 보낸 글의 U+2028 등에서도 잘라 가짜 줄이 생김)."""
+    try:
+        row = json.loads(line)
+    except ValueError:
+        return None
+    return row if isinstance(row, dict) and all(k in row for k in keys) and type(row.get("t")) in (int, float) else None
+
+
+def _recent_start(f, size, since):
+    """시각 순 기록 파일에서 since 무렵의 줄부터 읽을 바이트 위치(조금 앞일 수 있음). 반씩 좁혀 찾습니다."""
+    lo, hi = 0, size
+    while hi - lo > 1 << 16:
+        mid = (lo + hi) // 2
+        f.seek(mid)
+        f.readline()  # 중간부터 읽은 줄은 버립니다
+        t = None
+        while t is None and f.tell() < hi:
+            row = _log_row(f.readline(), ("t",))
+            t = row["t"] if row else None
+        if t is None or t >= since:  # 모르면 앞쪽에서 찾습니다(덜 읽는 것보다 더 읽는 편이 안전)
+            hi = mid
+        else:
+            lo = mid
+    f.seek(lo)
+    if lo:
+        f.readline()  # lo가 걸친 줄은 그다음 줄보다 앞선 시각이라 버려도 됩니다
+    return f.tell()
 
 
 def _last_line(path, dated=False):
