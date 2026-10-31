@@ -134,6 +134,44 @@ def test_a_restarted_server_reuses_its_saved_index_and_rereads_only_changed_anal
     assert reads == [ids["2강"]]
 
 
+def test_search_sees_an_analysis_edited_in_place_within_a_minute(setup, monkeypatch, tmp_path):
+    client, ids, _ = setup
+    clock = fake_clock(monkeypatch)
+    search = lambda: [r["title"] for r in client.get("/api/search", params={"q": "안녕하세요"}).json()["exact"]]
+    assert search() == ["1강"]
+    # 메모장으로 그 자리에서 고침: 분석 폴더의 시각은 그대로입니다.
+    (tmp_path / "data" / f"{ids['1강']}.json").write_text(
+        '{"title": "1강", "duration": 2.0, "segments": [{"start": 0.0, "end": 2.0, "text": "고친 말"}]}', encoding="utf-8")
+
+    clock[0] += 61
+
+    assert search() == []  # 강의 안 찾기와 다르지 않게
+
+
+def test_a_word_already_searched_does_not_wait_behind_a_slow_search(setup, monkeypatch):
+    client, _, _ = setup
+    client.get("/api/search", params={"q": "안녕하세요"})
+    busy, real_near = threading.Event(), server._near
+
+    def slow_near(word, spaced=False):
+        if word == "느린말":
+            busy.set()
+            time.sleep(1)
+        return real_near(word, spaced)
+
+    monkeypatch.setattr(server, "_near", slow_near)
+    slow = threading.Thread(target=lambda: client.get("/api/search", params={"q": "느린말"}))
+    slow.start()
+    busy.wait(5)
+
+    started = time.monotonic()
+    found = client.get("/api/search", params={"q": "안녕하세요"}).json()
+    waited = time.monotonic() - started
+    slow.join()
+
+    assert [r["title"] for r in found["exact"]] == ["1강"] and waited < 0.5  # 찾아 둔 답은 줄 서지 않고 바로
+
+
 def test_a_damaged_analysis_file_only_takes_that_lecture_out(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()

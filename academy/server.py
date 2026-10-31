@@ -409,7 +409,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """
         word = _search_word(q)
         current_library()
-        key = (word, library["at"], stamp(data_dir), stamp(fixes_path))
+        # 1분마다도 다시 찾습니다: 분석 파일을 그 자리에서 고치면(메모장 등) 분석 폴더의 시각이 바뀌지 않습니다.
+        key = (word, library["at"], stamp(data_dir), stamp(fixes_path), int(monotonic() // 60))
+        found = searches.get(key)  # 찾아 둔 답은 다른 낱말을 찾는 동안 줄 서지 않고 바로 씁니다
+        if found is not None:
+            return found
         # 한 번에 하나씩 찾습니다(어차피 CPU를 나눠 써서 함께 돌려도 빠르지 않음). 수업 중 여러 학생이 같은 낱말을 찾으면
         # 처음 찾은 결과를 함께 씁니다. 새 강의·분석 저장·정리 고치기가 있으면 다시 찾습니다.
         with search_lock:
