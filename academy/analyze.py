@@ -9,6 +9,7 @@ import fcntl
 import os
 import sys
 import time
+import unicodedata
 from itertools import groupby
 from pathlib import Path
 
@@ -33,12 +34,13 @@ def run_lock(data_dir, part):
 
 
 def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(1, 1),
-                detect_pages=None, read_screens=None, find_references=None, settle_seconds=0) -> int:
+                detect_pages=None, read_screens=None, find_references=None, settle_seconds=0, probe=None) -> int:
     """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
 
     read_screens가 있으면 요점 정리를 만들 때 페이지마다 화면 글자를 읽어 근거로 함께 보냅니다.
     find_references(제목, 화면 글자 줄)는 짝지어지는 학원 요점 정리를 {"source", "text"} 목록으로 돌려줍니다.
     settle_seconds: 이보다 최근에 바뀐 영상은 복사 중일 수 있어 받아쓰지 않습니다(반쯤 받아쓴 것이 '분석됨'으로 남지 않게).
+    probe(영상 경로)는 영상 길이(초). 주면 폴더를 옮기거나 이름을 바꾼 강의를 알아보고 예전 분석을 이어 씁니다.
     """
     videos = find_videos(video_dir)
     if not videos:
@@ -49,13 +51,56 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
         print("이 묶음의 분석이 이미 돌고 있어 이번에는 하지 않습니다.")
         return 0
     try:
+        orphans = _orphans(data_dir, {v["id"] for v in videos}) if probe else []
         return _analyze(videos[part[0] - 1::part[1]],  # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
-                        data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds)
+                        data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds,
+                        lambda video: _adopt(video, data_dir, orphans, probe))
     finally:
         lock.close()
 
 
-def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds):
+def _orphans(data_dir, known):
+    """지금 영상 폴더의 어느 강의 것도 아닌 분석(폴더를 옮기거나 이름을 바꾸기 전의 강의) [{"id", "name", "duration", "data"}]"""
+    found = []
+    for path in Path(data_dir).glob("*.json"):
+        if path.stem in known:
+            continue
+        try:
+            data = load_analysis(data_dir, path.stem)
+            found.append({"id": path.stem, "name": unicodedata.normalize("NFC", data["title"].rsplit("/", 1)[-1]),
+                          "duration": float(data["duration"]), "data": data})
+        except (ValueError, TypeError, KeyError, AttributeError):
+            continue  # 형식이 다른 파일은 건드리지 않습니다
+    return found
+
+
+def _adopt(video, data_dir, orphans, probe):
+    """옮긴 강의: 주인 없는 분석 가운데 파일 이름이 같고 길이가 2초 안인 것이 꼭 하나면, 그 분석(과 페이지 그림)을 이 강의로 옮깁니다.
+    받아쓰기·요점 정리를 다시 만들지 않아 비용이 들지 않습니다. 둘 이상이거나 길이가 다르면 짐작하지 않고 None."""
+    name = video["title"].rsplit("/", 1)[-1]
+    same = [o for o in orphans if o["name"] == name]
+    if not same:
+        return None
+    try:
+        duration = probe(video["path"])
+        same = [o for o in same if abs(o["duration"] - duration) <= 2]
+        if len(same) != 1:
+            return None
+        old = same[0]
+        data = {**old["data"], "title": video["title"]}
+        save_analysis(data_dir, video["id"], data)
+        if (Path(data_dir) / old["id"]).is_dir() and not (Path(data_dir) / video["id"]).exists():
+            (Path(data_dir) / old["id"]).rename(Path(data_dir) / video["id"])
+        (Path(data_dir) / f"{old['id']}.json").unlink(missing_ok=True)
+    except Exception as e:  # 영상 길이를 못 읽음 등: 이어 쓰지 않고 새로 분석합니다
+        print(f"  예전 분석을 이어 쓰지 못함, 새로 분석: {e}", file=sys.stderr)
+        return None
+    orphans.remove(old)
+    print(f"  옮긴 강의로 보여 예전 분석을 이어 씁니다: {old['data']['title']}")
+    return data
+
+
+def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds, adopt):
     failures = 0
     for n, video in enumerate(videos, 1):
         print(f"[{n}/{len(videos)}] {video['title']}", flush=True)
@@ -68,6 +113,8 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
             print(f"  분석 파일 형식 오류, 건너뜀(고친 곳의 쉼표·따옴표를 확인하세요): {e}", file=sys.stderr)
             continue
         data = None if force else old
+        if data is None and not force:
+            data = adopt(video)  # 폴더를 옮기거나 이름을 바꾼 강의면 예전 분석을 이어 씀
         done = data or {}
         need_pages = detect_pages is not None and "pages" not in done
         need_guide = make_guide is not None and not done.get("guide")
@@ -161,6 +208,13 @@ def tidy_repeats(segments):
     return tidy
 
 
+def video_duration(path):
+    """영상 파일 머리에 적힌 길이(초). 파일 전체를 읽지 않아 빠릅니다."""
+    import av
+    with av.open(str(path)) as container:
+        return (container.duration or 0) / av.time_base
+
+
 def part_arg(text):
     i, n = map(int, text.split("/"))
     if not 1 <= i <= n:
@@ -235,6 +289,7 @@ def main():
         read_screens=read_screens,
         find_references=find_references,
         settle_seconds=SETTLE_SECONDS,
+        probe=video_duration,
     )
     if failures:
         print(f"{failures}개 영상 분석 실패. 다시 실행하면 실패한 영상만 이어서 분석합니다.", file=sys.stderr)

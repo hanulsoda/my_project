@@ -125,3 +125,46 @@ def test_a_video_without_an_audio_track_gets_an_empty_transcript(tmp_path):
     segments, duration = whisper_transcriber()(path)  # 받아쓰기 모델을 불러오지 않고 바로 돌려줌
 
     assert segments == [] and 2.5 <= duration <= 3.5
+
+
+def moved_site(tmp_path, *names):
+    videos = tmp_path / "videos"
+    for name in names:
+        (videos / name).parent.mkdir(parents=True, exist_ok=True)
+        (videos / name).write_bytes(b"x")
+    return videos, tmp_path / "data"
+
+
+def test_a_lecture_moved_to_a_renamed_folder_keeps_its_analysis(tmp_path, capsys):
+    videos, data_dir = moved_site(tmp_path, "2022개정/1강 제망매가.mp4")
+    rec = Recorder()
+    run = lambda: analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, detect_pages=rec.detect_pages,
+                              probe=lambda path: 120.4)  # 영상 길이(받아쓰기 길이 120초와 1초 안)
+    run()
+    old_id = find_videos(videos)[0]["id"]
+    (data_dir / old_id / "0.jpg").parent.mkdir(parents=True, exist_ok=True)
+    (data_dir / old_id / "0.jpg").write_bytes(b"jpg")
+    (videos / "2022개정").rename(videos / "2022 개정 교육과정")  # 선생님이 폴더 이름을 바꿈
+
+    run()
+
+    new = find_videos(videos)[0]
+    assert rec.transcribed == ["1강 제망매가.mp4"] and len(rec.guided) == 1  # 받아쓰기·Claude를 다시 하지 않음
+    moved = load_analysis(data_dir, new["id"])
+    assert moved["title"] == "2022 개정 교육과정/1강 제망매가" and moved["guide"] == GUIDE
+    assert load_analysis(data_dir, old_id) is None and (data_dir / new["id"] / "0.jpg").exists()
+    assert "옮긴" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("case", ["different-length", "two-candidates"])
+def test_a_new_lecture_is_analyzed_when_the_old_analysis_is_not_clearly_its_own(tmp_path, case):
+    names = ["A/1강.mp4"] if case == "different-length" else ["A/1강.mp4", "B/1강.mp4"]
+    videos, data_dir = moved_site(tmp_path, *names)
+    rec = Recorder()
+    analyze_all(videos, data_dir, rec.transcribe, rec.make_guide)
+    for folder in {name.split("/")[0] for name in names}:
+        (videos / folder).rename(videos / f"{folder}-옮김")
+
+    analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, probe=lambda path: 300.0 if case == "different-length" else 120.0)
+
+    assert len(rec.transcribed) == 2 * len(names)  # 길이가 다르거나 후보가 둘이면 짐작하지 않고 새로 분석
