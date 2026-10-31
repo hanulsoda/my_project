@@ -229,3 +229,112 @@ def test_a_moved_lecture_is_recorded_so_picks_follow_it(tmp_path):
     client = TestClient(create_app(videos, data_dir, None))
     assert client.get("/api/moves").json() == {old_id: new_id}  # 학생 기기가 이어 보기·메모를 옮길 때 씀
     assert [l["id"] for l in client.get("/api/picks").json()["lectures"]] == [new_id]  # '이번 주 강의'도 따라감
+
+
+def test_a_force_run_without_claude_does_not_buy_the_guide_again_the_next_night(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    data_dir = tmp_path / "data"
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 120.0, "segments": SEGMENTS, "guide": {"summary": "예전"}})
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, None, force=True)  # --force --no-guide: 받아쓰기만 새로
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)  # 다음 밤 작업
+
+    assert rec.guided == []  # 비용을 들인 요점 정리를 강의마다 다시 사지 않음
+    assert load_analysis(data_dir, ids["1강"])["guide"] == {"summary": "예전"}
+
+
+def test_a_video_moved_away_during_the_run_does_not_stop_the_rest(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4", "3강.mp4")
+    for path in (tmp_path / "videos").iterdir():
+        age(path, 3600)
+    rec = Recorder()
+
+    def transcribe(path):
+        (tmp_path / "videos" / "2강.mp4").unlink(missing_ok=True)  # 1강을 받아쓰는 동안 선생님이 2강을 다른 폴더로 옮김
+        return rec.transcribe(path)
+
+    failures = analyze_all(tmp_path / "videos", tmp_path / "data", transcribe, rec.make_guide, settle_seconds=600,
+                           probe=lambda path: 120.0)
+
+    assert rec.transcribed == ["1강.mp4", "3강.mp4"] and failures == 1
+
+
+def test_an_unreadable_file_in_the_data_folder_does_not_stop_the_analysis(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4")
+    (tmp_path / "data" / "old-thing.json").mkdir(parents=True)  # 이름만 .json인 폴더(읽을 수 없는 파일과 같음)
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, probe=lambda path: 120.0)
+
+    assert rec.transcribed == ["1강.mp4"]
+
+
+@pytest.mark.parametrize("when", ["analyzed-now", "analyzed-before-sizes-were-kept"])
+def test_a_new_lecture_with_the_same_name_and_length_does_not_take_a_deleted_lectures_analysis(tmp_path, when):
+    videos, data_dir = moved_site(tmp_path, "2025 고1/1강.mp4")
+    rec = Recorder()
+    run = lambda: analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, probe=lambda path: 120.0)
+    if when == "analyzed-now":
+        run()
+    else:
+        save_analysis(data_dir, find_videos(videos)[0]["id"], {"title": "2025 고1/1강", "duration": 120.0,
+                                                               "segments": SEGMENTS, "guide": GUIDE})
+        run()  # 밤 작업이 지금 있는 강의의 파일 크기를 적어 둠
+    (videos / "2025 고1" / "1강.mp4").unlink()  # 작년 폴더를 지움(분석 파일은 남음)
+    (videos / "2026 고1").mkdir()
+    (videos / "2026 고1" / "1강.mp4").write_bytes(b"new recording")  # 올해 새 1강(길이는 우연히 같음)
+
+    run()
+
+    assert rec.transcribed[-1] == "1강.mp4" and len(rec.transcribed) == (2 if when == "analyzed-now" else 1)
+
+
+def test_an_analysis_kept_before_file_sizes_were_recorded_is_still_carried_over_when_moved(tmp_path):
+    videos, data_dir = moved_site(tmp_path, "A/1강.mp4")
+    save_analysis(data_dir, find_videos(videos)[0]["id"], {"title": "A/1강", "duration": 120.0, "segments": SEGMENTS,
+                                                           "guide": GUIDE})
+    (videos / "A").rename(videos / "B")  # 크기를 적기 전에 옮김
+    rec = Recorder()
+
+    analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, probe=lambda path: 120.0)
+
+    assert rec.transcribed == [] and load_analysis(data_dir, find_videos(videos)[0]["id"])["guide"] == GUIDE
+
+
+def test_two_batches_running_together_do_not_both_take_one_old_analysis(tmp_path):
+    import shutil
+    videos, data_dir = moved_site(tmp_path, "A/1강.mp4")
+    rec = Recorder()
+    analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, detect_pages=rec.detect_pages)
+    (videos / "A").rename(videos / "B")
+    (videos / "C").mkdir()
+    shutil.copyfile(videos / "B" / "1강.mp4", videos / "C" / "1강.mp4")  # 같은 녹화를 다른 반 폴더에도 올림
+    started = []
+
+    def probe(path):  # 1/2 묶음이 길이를 재는 사이에 함께 돌던 2/2 묶음이 같은 예전 분석을 먼저 가져감
+        if not started:
+            started.append(path)
+            analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, part=(2, 2), detect_pages=rec.detect_pages,
+                        probe=lambda p: 120.0)
+        return 120.0
+
+    analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, part=(1, 2), detect_pages=rec.detect_pages, probe=probe)
+
+    assert len(rec.transcribed) == 2  # 처음 한 번 + 둘째 강의는 새로 받아씀(그림 없는 페이지 목록을 물려받지 않음)
+
+
+def test_a_guide_left_to_redo_is_still_redone_after_a_force_run_without_claude(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    data_dir = tmp_path / "data"
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 120.0, "segments": SEGMENTS, "guide": {"summary": "예전"}})
+    rec = Recorder()
+
+    def out_of_credit(*args):
+        raise RuntimeError("사용 한도에 닿음")
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, out_of_credit, force=True)  # 새 요점 정리를 못 만듦
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, None, force=True)  # 그 뒤 --force --no-guide
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)
+
+    assert rec.guided == ["1강"]

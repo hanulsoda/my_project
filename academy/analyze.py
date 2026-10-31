@@ -73,30 +73,32 @@ def _orphans(data_dir, known):
         try:
             data = load_analysis(data_dir, path.stem)
             found.append({"id": path.stem, "name": unicodedata.normalize("NFC", data["title"].rsplit("/", 1)[-1]),
-                          "duration": float(data["duration"]), "data": data})
-        except (ValueError, TypeError, KeyError, AttributeError):
-            continue  # 형식이 다른 파일은 건드리지 않습니다
+                          "duration": float(data["duration"]), "size": data.get("size"), "data": data})
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            continue  # 읽을 수 없거나 형식이 다른 파일은 건드리지 않습니다
     return found
 
 
 def _adopt(video, data_dir, orphans, probe):
-    """옮긴 강의: 주인 없는 분석 가운데 파일 이름이 같고 길이가 2초 안인 것이 꼭 하나면, 그 분석(과 페이지 그림)을 이 강의로 옮깁니다.
-    받아쓰기·요점 정리를 다시 만들지 않아 비용이 들지 않습니다. 둘 이상이거나 길이가 다르면 짐작하지 않고 None."""
+    """옮긴 강의: 주인 없는 분석 가운데 파일 이름이 같고 길이가 2초 안이고 파일 크기가 같은 것이 꼭 하나면,
+    그 분석(과 페이지 그림)을 이 강의로 옮깁니다. 받아쓰기·요점 정리를 다시 만들지 않아 비용이 들지 않습니다.
+    둘 이상이거나 길이·크기가 다르면 짐작하지 않고 None. 크기를 적기 전의 분석은 이름과 길이로만 봅니다."""
     name = video["title"].rsplit("/", 1)[-1]
     same = [o for o in orphans if o["name"] == name]
     if not same:
         return None
     try:
-        duration = probe(video["path"])
-        same = [o for o in same if abs(o["duration"] - duration) <= 2]
+        duration, size = probe(video["path"]), video["path"].stat().st_size
+        same = [o for o in same if abs(o["duration"] - duration) <= 2 and o["size"] in (None, size)]
         if len(same) != 1:
             return None
         old = same[0]
-        data = {**old["data"], "title": video["title"]}
+        # 분석 파일을 먼저 옮긴 쪽만 이어 씁니다(함께 도는 --part 묶음이 같은 분석을 둘 다 가져가지 않게).
+        (Path(data_dir) / f"{old['id']}.json").rename(Path(data_dir) / f"{video['id']}.json")
+        data = {**old["data"], "title": video["title"], "size": size}
         save_analysis(data_dir, video["id"], data)
         if (Path(data_dir) / old["id"]).is_dir() and not (Path(data_dir) / video["id"]).exists():
             (Path(data_dir) / old["id"]).rename(Path(data_dir) / video["id"])
-        (Path(data_dir) / f"{old['id']}.json").unlink(missing_ok=True)
         record_move(data_dir, old["id"], video["id"])  # 학생 기기의 이어 보기·메모와 '이번 주 강의'가 따라오게
     except Exception as e:  # 영상 길이를 못 읽음 등: 이어 쓰지 않고 새로 분석합니다
         print(f"  예전 분석을 이어 쓰지 못함, 새로 분석: {e}", file=sys.stderr)
@@ -121,6 +123,12 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
         if old and old.get("guide") == SILENT_GUIDE:  # 예전에는 소리 없는 강의에 빈 요점 정리를 넣어 학원 정리가 가려졌습니다
             old = {**old, "guide": None, "silent": True}
             save_analysis(data_dir, video["id"], old)
+        if old and "size" not in old:  # 옮긴 강의를 알아볼 파일 크기: 크기를 적기 전의 분석에 채워 둡니다
+            try:
+                old = {**old, "size": video["path"].stat().st_size}
+                save_analysis(data_dir, video["id"], old)
+            except OSError:
+                pass
         data = None if force else old
         if data is None and not force:
             data = adopt(video)  # 폴더를 옮기거나 이름을 바꾼 강의면 예전 분석을 이어 씀
@@ -132,18 +140,20 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
         if data and not (need_pages or need_guide):
             print("  이미 분석됨, 건너뜀")
             continue
-        if not data and time.time() - video["path"].stat().st_mtime < settle_seconds:
-            print("  방금 바뀐 영상이라(복사 중일 수 있음) 다음에 분석합니다")
-            continue
-        try:
+        try:  # 영상이 그사이 옮겨졌거나 NAS가 답하지 않으면 이 강의만 실패로 셉니다
+            if not data and time.time() - video["path"].stat().st_mtime < settle_seconds:
+                print("  방금 바뀐 영상이라(복사 중일 수 있음) 다음에 분석합니다")
+                continue
             if not data:
                 print("  받아쓰는 중...", flush=True)
+                size = video["path"].stat().st_size
                 segments, duration = transcribe(video["path"])
-                data = {"title": video["title"], "duration": duration,
+                data = {"title": video["title"], "duration": duration, "size": size,
                         "segments": segments, "guide": None}
                 # 다시 분석(--force)해도 새 요점 정리가 생길 때까지 예전 요점 정리·목차(비용을 들인 결과)를 둡니다.
                 data.update({key: old[key] for key in ("guide", "toc") if old and key in old})
-                if data["guide"]:
+                # --no-guide로 받아쓰기만 새로 했으면 예전 요점 정리를 계속 씁니다(다음 밤에 강의마다 다시 사지 않게).
+                if data["guide"] and (make_guide is not None or old.get("guide_stale")):
                     data["guide_stale"] = True
                 # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다.
                 save_analysis(data_dir, video["id"], data)
