@@ -5,19 +5,28 @@
 
 import math
 import re
+from bisect import bisect_right
 from collections import Counter
+from itertools import accumulate
 
 WINDOW = 180  # 3분 구간을 1분 30초씩 옮겨 가며 봅니다
 MIN_SCORE = 0.3  # 항목 글자 조각이 이만큼 겹쳐야 시간을 붙입니다(시험에서 Claude 챕터와 82% 일치)
 
 
+_NOT_WORD = re.compile(r"[^가-힣a-zA-Z0-9]")
+
+
 def _norm(text):
-    return re.sub(r"[^가-힣a-zA-Z0-9]", "", text)
+    return _NOT_WORD.sub("", text)
+
+
+def _pieces(line):
+    """다듬은 줄(_norm)의 세 글자 조각"""
+    return {line[i:i + 3] for i in range(len(line) - 2)}
 
 
 def _grams(text):
-    t = _norm(text)
-    return {t[i:i + 3] for i in range(len(t) - 2)}
+    return _pieces(_norm(text))
 
 
 def _spoken_forms(term):
@@ -38,19 +47,25 @@ def link_times(summaries, segments) -> list[dict]:
     sections마다 items와 나란한 "times"(초 또는 None), 어휘 퀴즈에는 그 낱말의 "time"을 붙입니다.
     """
     end = max((s["end"] for s in segments), default=0)
-    windows = [(t, [s for s in segments if s["start"] < t + WINDOW and s["end"] > t])
+    lines = [_norm(s["text"]) for s in segments]  # 띄어쓰기·기호를 뺀 대본 줄(줄마다 한 번만 다듬음)
+    grams = [_pieces(line) for line in lines]
+    windows = [[n for n, s in enumerate(segments) if s["start"] < t + WINDOW and s["end"] > t]
                for t in range(0, math.ceil(end), WINDOW // 2)]
-    window_grams = [set().union(*(_grams(s["text"]) for s in said)) for _, said in windows]
-    df = Counter(g for grams in window_grams for g in grams)
+    window_grams = [set().union(*(grams[n] for n in said)) for said in windows]
+    # 글자 조각이 나오는 구간 수: 항목에 든 조각만 셉니다(대본의 모든 조각을 세면 몇 배 느림).
+    asked = set().union(*(_grams(item) for summary in summaries for s in summary["sections"] for item in s["items"]))
+    df = Counter(g for wg in window_grams for g in wg & asked)
 
-    said = [(s["start"], _norm(s["text"])) for s in segments]  # 띄어쓰기·기호를 뺀 대본 줄(낱말마다 다시 다듬지 않게)
+    # 대본 줄을 '|'로 이어 두고 낱말마다 한 번에 찾습니다(찾는 꼴에는 '|'가 없어 줄을 넘지 않음).
+    said = "|".join(lines)
+    line_ends = list(accumulate(len(line) + 1 for line in lines))
 
     def word_time(item):
         term = _norm(item.split("(")[0])
         if len(term) < 2:
             return None
-        forms = _spoken_forms(term)
-        return next((start for start, text in said if any(f in text for f in forms)), None)
+        found = [at for at in (said.find(f) for f in _spoken_forms(term)) if at >= 0]
+        return segments[bisect_right(line_ends, min(found))]["start"] if found else None  # 가장 먼저 말한 줄
 
     def sentence_time(item):
         if not windows:
@@ -63,7 +78,7 @@ def link_times(summaries, segments) -> list[dict]:
         best = max(range(len(windows)), key=lambda i: overlap(window_grams[i]))
         if overlap(window_grams[best]) / sum(weight.values()) < MIN_SCORE:
             return None
-        return max(windows[best][1], key=lambda s: overlap(_grams(s["text"])))["start"]  # 구간 안에서 가장 잘 맞는 말
+        return segments[max(windows[best], key=lambda n: overlap(grams[n]))]["start"]  # 구간 안에서 가장 잘 맞는 말
 
     linked = []
     for summary in summaries:
