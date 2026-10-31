@@ -149,6 +149,19 @@ def test_search_sees_an_analysis_edited_in_place_within_a_minute(setup, monkeypa
     assert search() == []  # 강의 안 찾기와 다르지 않게
 
 
+def test_a_word_is_not_searched_again_every_minute_when_nothing_changed(setup, monkeypatch):
+    client, _, _ = setup
+    clock = fake_clock(monkeypatch)
+    scans, real_near = [], server._near
+    monkeypatch.setattr(server, "_near", lambda word, spaced=False: scans.append(word) or real_near(word, spaced))
+
+    for _ in range(3):
+        client.get("/api/search", params={"q": "안녕하세요"})
+        clock[0] += 61  # 수업 중 1분마다 같은 낱말
+
+    assert len(scans) == 1  # 강의 3,900개를 다시 훑지 않고 찾아 둔 답을 씀
+
+
 def test_a_word_already_searched_does_not_wait_behind_a_slow_search(setup, monkeypatch):
     client, _, _ = setup
     client.get("/api/search", params={"q": "안녕하세요"})

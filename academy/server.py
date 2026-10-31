@@ -413,8 +413,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """
         word = _search_word(q)
         current_library()
-        # 1분마다도 다시 찾습니다: 분석 파일을 그 자리에서 고치면(메모장 등) 분석 폴더의 시각이 바뀌지 않습니다.
-        key = (word, library["at"], stamp(data_dir), stamp(fixes_path), int(monotonic() // 60))
+        key = (word, library["at"], stamp(data_dir), stamp(fixes_path), analyses_version())
         found = searches.get(key)  # 찾아 둔 답은 다른 낱말을 찾는 동안 줄 서지 않고 바로 씁니다
         if found is not None:
             return found
@@ -428,6 +427,16 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             return searches[key]
 
     searches, search_lock = {}, Lock()
+    analyses_seen = {"minute": None, "version": None}
+
+    def analyses_version():
+        """분석 파일들의 시점을 1분에 한 번만 모아 봅니다. 그 자리에서 고친 파일(메모장 등은 분석 폴더의 시각을 바꾸지
+        않음)도 1분 안에 검색에 반영하되, 바뀐 것이 없으면 찾아 둔 답을 계속 씁니다(낱말마다 1분마다 다시 훑지 않게)."""
+        minute = int(monotonic() // 60)
+        if analyses_seen["minute"] != minute:
+            stamps = tuple(stamp(Path(data_dir) / f"{v['id']}.json") for v in current_library()["videos"])
+            analyses_seen.update(minute=minute, version=hash(stamps))
+        return analyses_seen["version"]
 
     def find_spoken(word):
         near = _near(word) if len(word) <= NEAR_MAX else None
