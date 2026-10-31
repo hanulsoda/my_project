@@ -16,8 +16,13 @@ PARTS = [("features", "핵심 특징"), ("stages", "구조"), ("stanzas", "연�
          ("fillins", "빈칸 문제"), ("words", "어휘")]
 
 
+def read_references(path) -> list:
+    """정리 파일을 읽기만 합니다(~: 집 폴더). 쓸 수 있는 정리만 고르는 것은 usable_references."""
+    return json.loads(Path(path).expanduser().read_text(encoding="utf-8")) if path else []
+
+
 def load_references(path) -> list[dict]:
-    return usable_references(json.loads(Path(path).expanduser().read_text(encoding="utf-8"))) if path else []  # ~: 집 폴더
+    return usable_references(read_references(path))
 
 
 def usable_references(refs) -> list[dict]:
@@ -136,9 +141,12 @@ def reference_sections(ref) -> list[dict]:
     return [{"name": name, "items": items} for name, items in sections if items]
 
 
+_SPACES = re.compile(r"\s+")
+
+
 def _same(text):
     """띄어쓰기·끝 마침표만 다른 글은 같은 글로 봅니다(PDF에서 두 번 뽑힌 뜻)."""
-    return re.sub(r"\s+", " ", text).strip().rstrip(".")
+    return _SPACES.sub(" ", text).strip().rstrip(".")
 
 
 def reference_quiz(ref) -> list[dict]:
@@ -178,6 +186,11 @@ def reference_quiz(ref) -> list[dict]:
     return quiz
 
 
+_BROKEN = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-�]")  # 깨진 기호 글꼴·제어 문자
+_WORD_BREAK = re.compile(r"(?<=[가-힣])\n(?=[가-힣])")  # 낱말 중간에서 끊긴 줄
+_LINE_BREAK = re.compile(r" *\n *")
+
+
 def _tidy(value):
     """교재 PDF에서 뽑을 때 남은 흔적을 정리합니다. 빈칸 표시인 두 칸 띄어쓰기는 그대로 둡니다."""
     if isinstance(value, list):
@@ -187,9 +200,9 @@ def _tidy(value):
     if not isinstance(value, str):
         return value
     value = value.split("\n\n")[0]  # 빈 줄 뒤는 쪽 머리글(단원 번호·UCI 코드·다음 단원 제목)
-    value = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-�]", "", value)  # 깨진 기호 글꼴·제어 문자
-    value = re.sub(r"(?<=[가-힣])\n(?=[가-힣])", "", value)  # 낱말 중간에서 끊긴 줄
-    return re.sub(r" *\n *", " ", value).strip()
+    value = _BROKEN.sub("", value)
+    value = _WORD_BREAK.sub("", value)
+    return _LINE_BREAK.sub(" ", value).strip()
 
 
 def reference_text(ref) -> str:

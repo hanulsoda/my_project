@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field, model_validator
 from academy.entry import PASS_TTL, entry_link_ok, make_pass, pass_ok
 from academy.library import find_videos, load_analysis, load_moves
 from academy.settings import entry_settings, teacher_key as _teacher_key
-from academy.references import load_references, matcher, ref_key, reference_sections, suspects, usable_references
+from academy.references import matcher, read_references, ref_key, reference_sections, suspects, usable_references
 from academy.timelink import link_times
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -1009,7 +1009,7 @@ def _ignored_hosts(text):
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
                  None,  # 질문하기는 Claude API 크레딧을 써서 막아 둡니다. 다시 열려면 _claude_answer()를 넘깁니다.
-                 load_references(os.environ.get("REFERENCES_FILE")),
+                 read_references(os.environ.get("REFERENCES_FILE")),  # 쓸 수 있는 정리 고르기는 create_app이 한 번만
                  os.environ.get("LOG_DIR"),
                  _ignored_hosts(os.environ.get("USAGE_IGNORE", "")),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
                  _teacher_key(os.environ.get("TEACHER_KEY_FILE")),
