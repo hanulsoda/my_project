@@ -14,7 +14,8 @@ from pathlib import Path
 
 import numpy as np
 
-from academy.library import VIDEO_EXTS, find_videos, load_analysis, record_move, save_analysis
+from academy.library import (VIDEO_EXTS, find_videos, load_analysis, load_sizes, record_move, record_sizes,
+                             save_analysis)
 
 # 예전에 소리 없는 강의에 넣던 빈 요점 정리. 지금은 "silent": true로 표시하고, 이것을 만나면 걷어 냅니다.
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
@@ -56,24 +57,37 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
         print("이 묶음의 분석이 이미 돌고 있어 이번에는 하지 않습니다.")
         return 0
     try:
-        orphans = _orphans(data_dir, {v["id"] for v in videos}) if probe else []
-        return _analyze(videos[part[0] - 1::part[1]],  # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
-                        data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds,
-                        lambda video: _adopt(video, data_dir, orphans, probe))
+        mine = videos[part[0] - 1::part[1]]  # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
+        orphans = []
+        if probe:
+            _note_sizes(data_dir, mine)  # 나중에 이 강의를 옮기면 알아볼 수 있게
+            orphans = _orphans(data_dir, {v["id"] for v in videos})
+        return _analyze(mine, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references,
+                        settle_seconds, lambda video: _adopt(video, data_dir, orphans, probe))
     finally:
         lock.close()
 
 
+def _note_sizes(data_dir, videos):
+    sizes = {}
+    for video in videos:
+        try:
+            sizes[video["id"]] = video["path"].stat().st_size
+        except OSError:  # 그사이 옮겨진 영상
+            pass
+    record_sizes(data_dir, sizes)
+
+
 def _orphans(data_dir, known):
     """지금 영상 폴더의 어느 강의 것도 아닌 분석(폴더를 옮기거나 이름을 바꾸기 전의 강의) [{"id", "name", "duration", "data"}]"""
-    found = []
+    found, sizes = [], load_sizes(data_dir)
     for path in Path(data_dir).glob("*.json"):
         if path.stem in known:
             continue
         try:
             data = load_analysis(data_dir, path.stem)
             found.append({"id": path.stem, "name": unicodedata.normalize("NFC", data["title"].rsplit("/", 1)[-1]),
-                          "duration": float(data["duration"]), "size": data.get("size"), "data": data})
+                          "duration": float(data["duration"]), "size": sizes.get(path.stem, data.get("size")), "data": data})
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             continue  # 읽을 수 없거나 형식이 다른 파일은 건드리지 않습니다
     return found
@@ -95,14 +109,17 @@ def _adopt(video, data_dir, orphans, probe):
         old = same[0]
         # 분석 파일을 먼저 옮긴 쪽만 이어 씁니다(함께 도는 --part 묶음이 같은 분석을 둘 다 가져가지 않게).
         (Path(data_dir) / f"{old['id']}.json").rename(Path(data_dir) / f"{video['id']}.json")
-        data = {**old["data"], "title": video["title"], "size": size}
+        data = {**old["data"], "title": video["title"]}
         save_analysis(data_dir, video["id"], data)
         if (Path(data_dir) / old["id"]).is_dir() and not (Path(data_dir) / video["id"]).exists():
             (Path(data_dir) / old["id"]).rename(Path(data_dir) / video["id"])
-        record_move(data_dir, old["id"], video["id"])  # 학생 기기의 이어 보기·메모와 '이번 주 강의'가 따라오게
     except Exception as e:  # 영상 길이를 못 읽음 등: 이어 쓰지 않고 새로 분석합니다
         print(f"  예전 분석을 이어 쓰지 못함, 새로 분석: {e}", file=sys.stderr)
         return None
+    try:  # 학생 기기의 이어 보기·메모와 '이번 주 강의'가 따라오게(못 남겨도 이어 쓴 분석은 그대로)
+        record_move(data_dir, old["id"], video["id"])
+    except OSError as e:
+        print(f"  옮긴 기록을 남기지 못함(학생 기록이 따라오지 않을 수 있음): {e}", file=sys.stderr)
     orphans.remove(old)
     print(f"  옮긴 강의로 보여 예전 분석을 이어 씁니다: {old['data']['title']}")
     return data
@@ -123,12 +140,6 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
         if old and old.get("guide") == SILENT_GUIDE:  # 예전에는 소리 없는 강의에 빈 요점 정리를 넣어 학원 정리가 가려졌습니다
             old = {**old, "guide": None, "silent": True}
             save_analysis(data_dir, video["id"], old)
-        if old and "size" not in old:  # 옮긴 강의를 알아볼 파일 크기: 크기를 적기 전의 분석에 채워 둡니다
-            try:
-                old = {**old, "size": video["path"].stat().st_size}
-                save_analysis(data_dir, video["id"], old)
-            except OSError:
-                pass
         data = None if force else old
         if data is None and not force:
             data = adopt(video)  # 폴더를 옮기거나 이름을 바꾼 강의면 예전 분석을 이어 씀
@@ -146,15 +157,15 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
                 continue
             if not data:
                 print("  받아쓰는 중...", flush=True)
-                size = video["path"].stat().st_size
                 segments, duration = transcribe(video["path"])
-                data = {"title": video["title"], "duration": duration, "size": size,
+                data = {"title": video["title"], "duration": duration,
                         "segments": segments, "guide": None}
                 # 다시 분석(--force)해도 새 요점 정리가 생길 때까지 예전 요점 정리·목차(비용을 들인 결과)를 둡니다.
                 data.update({key: old[key] for key in ("guide", "toc") if old and key in old})
                 # --no-guide로 받아쓰기만 새로 했으면 예전 요점 정리를 계속 씁니다(다음 밤에 강의마다 다시 사지 않게).
                 if data["guide"] and (make_guide is not None or old.get("guide_stale")):
                     data["guide_stale"] = True
+                _apply_corrections(data["segments"], data["guide"])  # 예전 요점 정리 때 찾은 받아쓰기 오타도 그대로 고침
                 # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다.
                 save_analysis(data_dir, video["id"], data)
             if need_pages:
@@ -193,10 +204,7 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
                     for page in data.get("pages", []):
                         if abs(page["start"] - label["start"]) <= 1:  # 이름표 시점은 페이지 시작을 초 단위로 버린 값
                             page["label"] = label["label"]
-                # Claude가 요점 정리 때 찾은 받아쓰기 오타를 대본 탭·질문하기에도 반영합니다.
-                for fix in data["guide"].get("corrections", []):
-                    for segment in data["segments"]:
-                        segment["text"] = segment["text"].replace(fix["wrong"], fix["right"])
+                _apply_corrections(data["segments"], data["guide"])
                 data.pop("guide_stale", None)
                 save_analysis(data_dir, video["id"], data)
             print("  완료")
@@ -204,6 +212,13 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
             failures += 1
             print(f"  실패: {e}", file=sys.stderr)
     return failures
+
+
+def _apply_corrections(segments, guide):
+    """Claude가 요점 정리 때 찾은 받아쓰기 오타를 대본 탭·검색·질문하기에도 반영합니다."""
+    for fix in (guide or {}).get("corrections", []):
+        for segment in segments:
+            segment["text"] = segment["text"].replace(fix["wrong"], fix["right"])
 
 
 def voice_channel(left, right):

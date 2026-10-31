@@ -73,17 +73,43 @@ def load_moves(data_dir: Path, listed=()) -> dict:
 
 
 def record_move(data_dir: Path, old_id: str, new_id: str) -> None:
-    path = Path(data_dir) / MOVES_FILE
-    try:
-        moves = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        moves = {}
     # 되돌려 옮기면(가→나 뒤에 나→가) 나에서 옮겼다는 줄은 지웁니다(둘이 서로를 가리켜 아무 데도 옮기지 않게).
-    moves = {k: v for k, v in (moves if isinstance(moves, dict) else {}).items() if k != new_id}
-    moves[old_id] = new_id
-    tmp = path.with_name(MOVES_FILE + ".tmp")
-    tmp.write_text(json.dumps(moves), encoding="utf-8")
-    tmp.replace(path)
+    _update(data_dir, MOVES_FILE, lambda moves: {**{k: v for k, v in moves.items() if k != new_id}, old_id: new_id})
+
+
+SIZES_FILE = ".lecture-sizes"  # 강의 번호 → 영상 파일 크기: 옮긴 강의를 알아볼 때 씁니다(분석 파일을 다시 쓰지 않게 따로)
+
+
+def load_sizes(data_dir: Path) -> dict:
+    try:
+        sizes = json.loads((Path(data_dir) / SIZES_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return sizes if isinstance(sizes, dict) else {}
+
+
+def record_sizes(data_dir: Path, sizes: dict) -> None:
+    if any(load_sizes(data_dir).get(k) != v for k, v in sizes.items()):  # 바뀐 것이 있을 때만 씁니다
+        _update(data_dir, SIZES_FILE, lambda saved: {**saved, **sizes})
+
+
+def _update(data_dir: Path, name: str, change) -> None:
+    """분석 폴더의 작은 기록 파일(JSON 사전)을 change로 고쳐 씁니다. 함께 도는 --part 묶음이 서로의 것을 지우지 않게
+    잠근 채 읽고 씁니다(윈도에는 이 잠금이 없어 잠그지 않습니다)."""
+    path = Path(data_dir) / name
+    with open(Path(data_dir) / ".records.lock", "w") as lock:
+        try:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        except ImportError:
+            pass
+        try:
+            current = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = {}
+        tmp = path.with_name(name + ".tmp")
+        tmp.write_text(json.dumps(change(current if isinstance(current, dict) else {})), encoding="utf-8")
+        tmp.replace(path)
 
 
 def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:

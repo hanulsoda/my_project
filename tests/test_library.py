@@ -118,3 +118,25 @@ def test_a_hand_edited_moves_file_keeps_only_lecture_numbers(tmp_path):
                                        f' "dddddddddddd": "{C}"}}', encoding="utf-8")
 
     assert load_moves(tmp_path) == {"dddddddddddd": C}
+
+
+def test_moves_recorded_at_the_same_time_by_two_batches_are_all_kept(tmp_path):
+    import threading
+
+    from academy.library import load_moves, record_move
+    errors = []
+
+    def batch(prefix):  # --part 1/2와 2/2가 옮긴 폴더에 함께 닿음
+        try:
+            for n in range(40):
+                record_move(tmp_path, f"{prefix}{n:011x}", f"{prefix}{n + 100:011x}")
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    runs = [threading.Thread(target=batch, args=(p,)) for p in "ab"]
+    for run in runs:
+        run.start()
+    for run in runs:
+        run.join()
+
+    assert errors == [] and len(load_moves(tmp_path)) == 80

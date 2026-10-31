@@ -357,3 +357,29 @@ def test_a_new_lecture_at_a_moved_lectures_old_place_keeps_its_own_picks(tmp_pat
 
     assert client.get("/api/moves").json() == {}  # 학생 기기가 새 1강의 기록을 작년 녹화로 옮기지 않음
     assert [l["id"] for l in client.get("/api/picks").json()["lectures"]] == [new]  # 손으로 고친 줄이 있어도 500 없이
+
+
+def test_a_night_run_with_nothing_to_do_leaves_the_analysis_files_alone(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    data_dir = tmp_path / "data"
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 120.0, "segments": SEGMENTS, "guide": GUIDE})
+    path = data_dir / f"{ids['1강']}.json"
+    age(path, 3600)
+    before = path.stat().st_mtime_ns
+
+    analyze_all(tmp_path / "videos", data_dir, Recorder().transcribe, None, probe=lambda p: 120.0)
+
+    # 파일 시각은 현황의 '최근 3일 동안 만든 목차' 셈에 쓰이고, 바뀌면 서버가 3,900개를 다시 읽습니다
+    assert path.stat().st_mtime_ns == before
+
+
+def test_a_force_run_without_claude_keeps_the_old_guides_spelling_fixes(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    data_dir = tmp_path / "data"
+    guide = {**GUIDE, "corrections": [{"wrong": "재망매가", "right": "제망매가"}]}
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 120.0, "segments": SEGMENTS, "guide": guide})
+    rec = Recorder(segments=[{"start": 0.0, "end": 2.0, "text": "오늘은 재망매가를 봅니다"}])
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, None, force=True)  # --force --no-guide
+
+    assert load_analysis(data_dir, ids["1강"])["segments"][0]["text"] == "오늘은 제망매가를 봅니다"  # 대본 탭·검색
