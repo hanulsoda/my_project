@@ -90,3 +90,31 @@ def test_a_folder_copied_from_a_mac_and_a_pc_keeps_lecture_order(tmp_path):
     touch(tmp_path / unicodedata.normalize("NFD", "고1") / "2강 청산별곡.mp4")  # 같은 이름을 맥에서 만든 폴더(자모로 나뉨)
 
     assert [v["title"] for v in find_videos(tmp_path)] == ["고1/1강 제망매가", "고1/2강 청산별곡"]
+
+
+A, B, C = "aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"
+
+
+def test_moving_a_folder_back_leaves_one_move(tmp_path):
+    from academy.library import load_moves, record_move
+    record_move(tmp_path, A, B)  # 방학 동안 다른 폴더로
+    record_move(tmp_path, B, A)  # 다시 제자리로
+
+    assert load_moves(tmp_path) == {B: A}  # 둘이 서로를 가리켜 아무 데도 옮기지 않던 것
+
+
+def test_a_lecture_listed_again_at_its_old_place_is_not_moved(tmp_path):
+    from academy.library import load_moves, record_move
+    record_move(tmp_path, A, B)  # 작년 고1 폴더를 2025/고1로 옮김
+    record_move(tmp_path, C, A)
+
+    # 올해 새 1강이 예전 자리(같은 번호 A)에 올라옴: A의 기록은 옮기지 않고, A로 옮긴 C는 그대로 A로
+    assert load_moves(tmp_path, listed={A, B}) == {C: A}
+
+
+def test_a_hand_edited_moves_file_keeps_only_lecture_numbers(tmp_path):
+    from academy.library import MOVES_FILE, load_moves
+    (tmp_path / MOVES_FILE).write_text(f'{{"{A}": ["{B}"], "{B}": null, "{C}": "3강-예전", "x": "{A}", "{B[:6]}xxxxxx": "{C}",'
+                                       f' "dddddddddddd": "{C}"}}', encoding="utf-8")
+
+    assert load_moves(tmp_path) == {"dddddddddddd": C}

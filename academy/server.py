@@ -687,11 +687,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     @app.get("/api/moves")
     def moves():
         """폴더를 옮기거나 이름을 바꾼 강의 {예전 번호: 지금 번호}: 학생 기기가 이어 보기·메모·틀린 문제를 새 번호로 옮깁니다."""
-        return load_moves(data_dir)
+        return load_moves(data_dir, current_library()["by_id"])
 
     @app.get("/api/picks")
     def picks():
-        saved, moved = saved_picks(), load_moves(data_dir)
+        saved, moved = saved_picks(), load_moves(data_dir, current_library()["by_id"])
         by_id, grades = current_library()["by_id"], saved.get("grades", {})
         # 고른 뒤 폴더를 옮긴 강의도 새 자리로 보여 줍니다(대상 학년은 예전 번호에 적혀 있음)
         chosen = {}  # 지금 번호 → 고를 때 번호(같은 강의는 한 번)

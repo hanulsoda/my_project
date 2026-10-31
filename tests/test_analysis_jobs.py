@@ -338,3 +338,22 @@ def test_a_guide_left_to_redo_is_still_redone_after_a_force_run_without_claude(t
     analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)
 
     assert rec.guided == ["1강"]
+
+
+def test_a_new_lecture_at_a_moved_lectures_old_place_keeps_its_own_picks(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from academy.library import record_move
+    from academy.server import create_app
+    videos, data_dir = moved_site(tmp_path, "고1/1강.mp4", "2025/고1/1강.mp4")
+    ids = {v["title"]: v["id"] for v in find_videos(videos)}
+    new, old = ids["고1/1강"], ids["2025/고1/1강"]
+    data_dir.mkdir()
+    record_move(data_dir, new, old)  # 작년에 고1을 2025/고1로 옮겼고, 올해 같은 자리(같은 번호)에 새 1강
+    (data_dir / ".moved-lectures").write_text((data_dir / ".moved-lectures").read_text()[:-1] + ', "x": ["y"]}')
+    teacher = {"x-teacher-key": "teacher-key-123"}
+    client = TestClient(create_app(videos, data_dir, None, teacher_key="teacher-key-123"))
+    client.put("/api/picks", json={"ids": [new]}, headers=teacher)
+
+    assert client.get("/api/moves").json() == {}  # 학생 기기가 새 1강의 기록을 작년 녹화로 옮기지 않음
+    assert [l["id"] for l in client.get("/api/picks").json()["lectures"]] == [new]  # 손으로 고친 줄이 있어도 500 없이

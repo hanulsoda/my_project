@@ -45,24 +45,30 @@ def load_analysis(data_dir: Path, video_id: str) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+_LECTURE_ID = re.compile(r"[0-9a-f]{12}")  # 강의 번호(경로로 만든 12자리)
 MOVES_FILE = ".moved-lectures"  # 폴더를 옮기거나 이름을 바꾼 강의의 {예전 번호: 새 번호}(분석 폴더에, 매일 백업에 들어감)
 
 
-def load_moves(data_dir: Path) -> dict:
-    """옮긴 강의 {예전 번호: 지금 번호}. 두 번 옮긴 강의(가→나→다)도 지금 번호로 이어 줍니다."""
+def load_moves(data_dir: Path, listed=()) -> dict:
+    """옮긴 강의 {예전 번호: 지금 번호}. 두 번 옮긴 강의(가→나→다)도 지금 번호로 이어 줍니다.
+    listed(지금 목록의 번호)에 다시 있는 예전 번호는 옮긴 것으로 보지 않습니다: 예전 자리에 새 강의가 올라온 것이라
+    학생 기록·'이번 주 강의'를 예전 녹화로 넘기면 안 됩니다."""
     try:
         raw = json.loads((Path(data_dir) / MOVES_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(raw, dict):
         return {}
+    lecture = lambda value: isinstance(value, str) and _LECTURE_ID.fullmatch(value)  # 손으로 고친 줄은 건너뜀
+    raw = {old: new for old, new in raw.items() if lecture(old) and lecture(new) and old not in listed}
     moves = {}
     for old, new in raw.items():
         seen = {old}
         while new in raw and new not in seen:
             seen.add(new)
             new = raw[new]
-        moves[old] = new
+        if new != old:
+            moves[old] = new
     return moves
 
 
@@ -72,7 +78,9 @@ def record_move(data_dir: Path, old_id: str, new_id: str) -> None:
         moves = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         moves = {}
-    moves = {**(moves if isinstance(moves, dict) else {}), old_id: new_id}
+    # 되돌려 옮기면(가→나 뒤에 나→가) 나에서 옮겼다는 줄은 지웁니다(둘이 서로를 가리켜 아무 데도 옮기지 않게).
+    moves = {k: v for k, v in (moves if isinstance(moves, dict) else {}).items() if k != new_id}
+    moves[old_id] = new_id
     tmp = path.with_name(MOVES_FILE + ".tmp")
     tmp.write_text(json.dumps(moves), encoding="utf-8")
     tmp.replace(path)
