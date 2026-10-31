@@ -223,3 +223,15 @@ def test_records_of_a_moved_lecture_follow_it_to_its_new_place(page, site):
     assert stored(page, f"notes:{vid}") == [{"t": 10, "text": "옮기기 전 메모"}, {"t": 20, "text": "새 자리 메모"}]  # 합침
     assert stored(page, f"wrong:{vid}")[0]["stage"] == 1
     assert stored(page, f"notes:{old}") is None and stored(page, f"wrong:{old}") is None
+
+
+def test_arrow_down_right_after_typing_goes_to_a_lecture_that_matches(page, site):
+    page.goto(site.url + "/#f/2022개정/고1/미래엔")
+    expect(page.locator(".video-list a:visible")).to_have_count(3)
+
+    page.fill("#search", "청산")
+    page.keyboard.press("ArrowDown")  # 거르기를 기다리지 않고 바로
+
+    expect(page.locator(".video-list a:focus")).to_contain_text("청산별곡")
+    page.wait_for_timeout(300)  # 늦게 거르더라도 자리를 잃지 않음
+    expect(page.locator(".video-list a:focus")).to_contain_text("청산별곡")

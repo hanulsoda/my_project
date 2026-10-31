@@ -176,3 +176,19 @@ def test_every_academy_item_at_the_same_time_is_highlighted(page, site):
     expect(page.locator(".reference li.active")).to_have_count(at_30.count())
     go(page, 0)
     expect(page.locator(".reference li.active")).to_have_count(0)
+
+
+def test_a_lecture_without_sound_says_so_instead_of_promising_a_guide(page, site):
+    import re
+    title = "2022개정/고1/천재/성에꽃"
+
+    def silent(route):  # 소리 트랙이 없어 받아쓸 말이 없던 강의
+        body = route.fetch().json()
+        body["analysis"]["silent"] = True
+        route.fulfill(json=body)
+
+    page.route(re.compile(rf"/api/videos/{site.ids[title]}(\?|$)"), silent)
+    open_player(page, site, title)
+
+    expect(page.locator("#tab-guide")).to_contain_text("음성이 없는 영상입니다")
+    expect(page.locator("#tab-guide")).not_to_contain_text("아직")

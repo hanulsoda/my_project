@@ -156,12 +156,15 @@
 
     // 한글은 한 글자를 치는 동안 입력이 여러 번 바뀌어, 잠깐 멈춘 뒤 한 번만 거릅니다(3,900개를 글자마다 다시 거르지 않게).
     let typing = null;
+    const filterNow = () => {
+      clearTimeout(typing);
+      typing = null;
+      if (scope === "spoken" && !search.value.trim()) showingFound = false;
+      render();
+    };
     search.oninput = () => {
       clearTimeout(typing);
-      typing = setTimeout(() => {
-        if (scope === "spoken" && !search.value.trim()) showingFound = false;
-        render();
-      }, 150);
+      typing = setTimeout(filterNow, 150);
     };
     guideOnly.onchange = render;
     $("scope-title").onclick = () => { setScope("title"); render(); search.focus(); };
@@ -198,7 +201,9 @@
     // 키보드: 찾기 칸에서 ↓로 첫 강의, 목록에서 ↑↓(그림 보기는 ←→ 옆, ↑↓ 한 줄), Enter로 열기
     const lectureLinks = () => [...document.querySelectorAll(".content-body .video-list a")].filter((a) => a.offsetParent);
     search.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowDown" && !e.isComposing && lectureLinks().length) { e.preventDefault(); lectureLinks()[0].focus(); }
+      if (e.key !== "ArrowDown" || e.isComposing) return;
+      if (typing) filterNow();  // 방금 친 글자로 먼저 거릅니다(거르기 전 목록의 강의로 갔다가 자리를 잃지 않게)
+      if (lectureLinks().length) { e.preventDefault(); lectureLinks()[0].focus(); }
     });
     document.querySelector(".content-body").addEventListener("keydown", (e) => {
       const a = e.target.closest(".video-list a");

@@ -88,7 +88,8 @@ function render({ title, analysis, references = [], prev = null, next = null }) 
     $("tab-guide").replaceChildren(tocNotice(), ...renderChapters(toc, analysis.duration));
     renderQuiz([]);
   } else {
-    const msg = "이 강의는 아직 요점 정리가 없습니다. 페이지는 사용할 수 있습니다.";
+    const msg = analysis.silent ? "음성이 없는 영상입니다. 페이지는 사용할 수 있습니다."  // 받아쓸 말이 없어 요점 정리가 생기지 않음
+      : "이 강의는 아직 요점 정리가 없습니다. 페이지는 사용할 수 있습니다.";
     $("tab-guide").replaceChildren(notice(msg));
     $("tab-quiz").replaceChildren(notice(msg));
   }
