@@ -208,3 +208,24 @@ def test_a_force_run_whose_guide_step_failed_finishes_on_a_plain_rerun(tmp_path)
     assert load_analysis(data_dir, ids["1강"])["guide"] == GUIDE
     analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)
     assert rec.guided == ["1강"]  # 새 요점 정리가 생긴 뒤에는 다시 묻지 않음
+
+
+def test_a_moved_lecture_is_recorded_so_picks_follow_it(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from academy.server import create_app
+    videos, data_dir = moved_site(tmp_path, "2022개정/1강 제망매가.mp4")
+    rec = Recorder()
+    run = lambda: analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, probe=lambda path: 120.0)
+    run()
+    old_id = find_videos(videos)[0]["id"]
+    teacher = {"x-teacher-key": "teacher-key-123"}
+    TestClient(create_app(videos, data_dir, None, teacher_key="teacher-key-123")).put("/api/picks", json={"ids": [old_id]},
+                                                                                      headers=teacher)
+    (videos / "2022개정").rename(videos / "2022 개정")
+    run()
+    new_id = find_videos(videos)[0]["id"]
+
+    client = TestClient(create_app(videos, data_dir, None))
+    assert client.get("/api/moves").json() == {old_id: new_id}  # 학생 기기가 이어 보기·메모를 옮길 때 씀
+    assert [l["id"] for l in client.get("/api/picks").json()["lectures"]] == [new_id]  # '이번 주 강의'도 따라감

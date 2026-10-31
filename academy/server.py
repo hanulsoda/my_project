@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from academy.entry import PASS_TTL, entry_link_ok, make_pass, pass_ok
-from academy.library import find_videos, load_analysis
+from academy.library import find_videos, load_analysis, load_moves
 from academy.settings import entry_settings, teacher_key as _teacher_key
 from academy.references import load_references, matcher, ref_key, reference_sections, suspects, usable_references
 from academy.timelink import link_times
@@ -664,13 +664,22 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         except (OSError, ValueError):
             return {}
 
+    @app.get("/api/moves")
+    def moves():
+        """폴더를 옮기거나 이름을 바꾼 강의 {예전 번호: 지금 번호}: 학생 기기가 이어 보기·메모·틀린 문제를 새 번호로 옮깁니다."""
+        return load_moves(data_dir)
+
     @app.get("/api/picks")
     def picks():
-        saved = saved_picks()
-        by_id = current_library()["by_id"]
+        saved, moved = saved_picks(), load_moves(data_dir)
+        by_id, grades = current_library()["by_id"], saved.get("grades", {})
+        # 고른 뒤 폴더를 옮긴 강의도 새 자리로 보여 줍니다(대상 학년은 예전 번호에 적혀 있음)
+        chosen = {}  # 지금 번호 → 고를 때 번호(같은 강의는 한 번)
+        for i in saved.get("ids", []):
+            chosen.setdefault(moved.get(i, i), i)
         return {"note": saved.get("note", ""), "at": saved.get("at"),
-                "lectures": [{"id": i, "title": by_id[i]["title"], "grade": saved.get("grades", {}).get(i, "")}
-                             for i in saved.get("ids", []) if i in by_id]}
+                "lectures": [{"id": now, "title": by_id[now]["title"], "grade": grades.get(now) or grades.get(was, "")}
+                             for now, was in chosen.items() if now in by_id]}
 
     @app.put("/api/picks")
     def set_picks(req: PicksRequest, request: Request):

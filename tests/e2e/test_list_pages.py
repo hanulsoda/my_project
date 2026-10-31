@@ -186,3 +186,18 @@ def test_a_folder_link_opens_the_folder_even_after_a_spoken_search(page, site):
     page.goto(site.url + "/#f/2022개정/고1/미래엔")  # 다른 화면(플레이어의 '‹ 폴더' 등)에서 폴더로
     expect(page.locator("#view-title")).to_have_text("미래엔")
     assert searched == []
+
+
+def test_records_of_a_moved_lecture_follow_it_to_its_new_place(page, site):
+    vid, old = site.ids[ZMG], "0123456789ab"
+    page.route("**/api/moves", lambda route: route.fulfill(json={old: vid}))
+    remember(page, site, {f"pos:{old}": {"t": 60, "d": 150, "at": 5}, f"notes:{old}": [{"t": 10, "text": "옮기기 전 메모"}],
+                          f"notes:{vid}": [{"t": 20, "text": "새 자리 메모"}],
+                          f"wrong:{old}": [{"k": "제망매가의 갈래는?", "stage": 1, "due": 0}]})
+    page.goto(site.url + "/")
+    page.wait_for_function(f"!localStorage.getItem('pos:{old}')")
+
+    assert stored(page, f"pos:{vid}")["t"] == 60
+    assert stored(page, f"notes:{vid}") == [{"t": 10, "text": "옮기기 전 메모"}, {"t": 20, "text": "새 자리 메모"}]  # 합침
+    assert stored(page, f"wrong:{vid}")[0]["stage"] == 1
+    assert stored(page, f"notes:{old}") is None and stored(page, f"wrong:{old}") is None

@@ -45,6 +45,39 @@ def load_analysis(data_dir: Path, video_id: str) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+MOVES_FILE = ".moved-lectures"  # 폴더를 옮기거나 이름을 바꾼 강의의 {예전 번호: 새 번호}(분석 폴더에, 매일 백업에 들어감)
+
+
+def load_moves(data_dir: Path) -> dict:
+    """옮긴 강의 {예전 번호: 지금 번호}. 두 번 옮긴 강의(가→나→다)도 지금 번호로 이어 줍니다."""
+    try:
+        raw = json.loads((Path(data_dir) / MOVES_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    moves = {}
+    for old, new in raw.items():
+        seen = {old}
+        while new in raw and new not in seen:
+            seen.add(new)
+            new = raw[new]
+        moves[old] = new
+    return moves
+
+
+def record_move(data_dir: Path, old_id: str, new_id: str) -> None:
+    path = Path(data_dir) / MOVES_FILE
+    try:
+        moves = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        moves = {}
+    moves = {**(moves if isinstance(moves, dict) else {}), old_id: new_id}
+    tmp = path.with_name(MOVES_FILE + ".tmp")
+    tmp.write_text(json.dumps(moves), encoding="utf-8")
+    tmp.replace(path)
+
+
 def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     path = Path(data_dir) / f"{video_id}.json"

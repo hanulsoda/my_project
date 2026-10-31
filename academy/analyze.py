@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from academy.library import VIDEO_EXTS, find_videos, load_analysis, save_analysis
+from academy.library import VIDEO_EXTS, find_videos, load_analysis, record_move, save_analysis
 
 # 예전에 소리 없는 강의에 넣던 빈 요점 정리. 지금은 "silent": true로 표시하고, 이것을 만나면 걷어 냅니다.
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
@@ -97,6 +97,7 @@ def _adopt(video, data_dir, orphans, probe):
         if (Path(data_dir) / old["id"]).is_dir() and not (Path(data_dir) / video["id"]).exists():
             (Path(data_dir) / old["id"]).rename(Path(data_dir) / video["id"])
         (Path(data_dir) / f"{old['id']}.json").unlink(missing_ok=True)
+        record_move(data_dir, old["id"], video["id"])  # 학생 기기의 이어 보기·메모와 '이번 주 강의'가 따라오게
     except Exception as e:  # 영상 길이를 못 읽음 등: 이어 쓰지 않고 새로 분석합니다
         print(f"  예전 분석을 이어 쓰지 못함, 새로 분석: {e}", file=sys.stderr)
         return None

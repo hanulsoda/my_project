@@ -255,6 +255,19 @@ function mergeRecords(data) {
   return counts;
 }
 
+// 폴더를 옮기거나 이름을 바꾼 강의는 번호가 바뀝니다. 서버가 알려 준 {예전 번호: 새 번호}대로 이 기기의 이어 보기·메모·
+// 틀린 문제·점수를 새 번호로 옮깁니다(새 번호에 이미 기록이 있으면 기기 옮기기처럼 합침). 화면을 열 때마다 한 번 봅니다.
+fetch("/api/moves").then((r) => (r.ok ? r.json() : {})).then((moves) => {
+  let names = [];
+  try { names = Object.keys(localStorage); } catch {}
+  for (const key of names) {
+    const found = key.match(/^(pos|notes|wrong|score):([0-9a-f]{12})$/), to = found && moves[found[2]];
+    if (!to || to === found[2]) continue;
+    mergeRecords({ [`${found[1]}:${to}`]: store.get(key) });
+    try { localStorage.removeItem(key); } catch {}
+  }
+}).catch(() => {});
+
 // 메모 하나 지우기(내 메모·플레이어): 지금 저장된 목록에서 같은 시각·글을 지웁니다.
 // 화면을 그릴 때 읽어 둔 목록으로 덮어쓰면, 그사이 다른 탭에서 더한 메모가 사라집니다.
 function removeNote(videoId, note) {
