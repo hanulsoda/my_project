@@ -1,5 +1,6 @@
 """서버 설정(환경 변수·열쇠 파일) 확인. 서버(academy.server)와 설정 점검(academy.check)이 함께 씁니다."""
 
+import logging
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -24,9 +25,12 @@ def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
 
 def teacher_key(path):
     """선생님 열쇠 파일(TEACHER_KEY_FILE)의 글. 파일이 없거나 비었으면 None: 아무도 '이번 주 강의' 등을 바꿀 수 없습니다."""
-    try:
-        key = Path(path).read_text(encoding="utf-8-sig").strip() or None if path else None  # -sig: 메모장이 붙이는 BOM을 뺌
-    except OSError:
+    if not path:
+        return None
+    try:  # ~: 따옴표 안에 적어 셸이 풀어 주지 않은 집 폴더. -sig: 메모장이 붙이는 BOM을 뺌
+        key = Path(path).expanduser().read_text(encoding="utf-8-sig").strip() or None
+    except OSError as e:  # 경로가 틀리면 열쇠가 늘 '맞지 않습니다'로 나오므로 서버 기록에 남깁니다
+        logging.warning("선생님 열쇠 파일을 읽지 못해 열쇠 없이 켭니다(TEACHER_KEY_FILE 경로 확인): %s (%s)", path, e.strerror)
         return None
     if key and not all(" " <= c <= "~" for c in key):  # 브라우저는 머리글(X-Teacher-Key)에 한글 등을 보내지 못합니다
         raise SystemExit(f"선생님 열쇠는 영문·숫자·기호로만 정해 주세요(한글은 쓸 수 없음): {path}")

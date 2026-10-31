@@ -94,7 +94,6 @@ def site(tmp_path_factory):
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     app = create_app(videos, data, None, load_references(root / "refs.json"), log_dir=root / "logs", teacher_key=TEACHER_KEY)
-    (root / "logs").mkdir()
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

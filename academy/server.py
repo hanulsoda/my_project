@@ -517,11 +517,24 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             salt_path.write_text(secrets.token_hex(16), encoding="utf-8")
         return hashlib.sha256((salt_path.read_text(encoding="utf-8") + host).encode()).hexdigest()[:10]
 
+    if log_dir:
+        try:  # 없으면 만들어 둡니다(전에는 학생이 강의를 열 때마다 오류가 났음)
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logging.warning("로그 폴더를 만들지 못했습니다(이용 통계·퀴즈 기록 없이 씁니다): %s", log_dir)
+
+    def append_log(name, row):
+        """기록 한 줄. 쓰지 못해도(폴더 권한·디스크) 학생의 요청은 그대로 됩니다."""
+        try:
+            with usage_lock, (Path(log_dir) / name).open("a", encoding="utf-8") as f:
+                f.write(json.dumps({**row, "who": device(row.pop("who"))}) + "\n")
+        except OSError as e:
+            logging.warning("로그를 쓰지 못했습니다(%s): %s", name, e)
+
     def record_open(video_id, host):
         if not log_dir or host in usage_ignore or not may_log("open", host):
             return
-        with usage_lock, (Path(log_dir) / "usage.log").open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": int(wall_clock()), "id": video_id, "who": device(host)}) + "\n")
+        append_log("usage.log", {"t": int(wall_clock()), "id": video_id, "who": host})
 
     # ---- 많이 틀리는 문제: 퀴즈를 풀 때 강의·문제·맞음/틀림·기기 번호만 log_dir/quiz.log에(이용 통계와 같은 방식) ----
     @app.post("/api/quiz-result", status_code=204)
@@ -531,8 +544,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if not log_dir or host in usage_ignore or not may_log("quiz", host):
             return
         # 한글도 \u 글자로 적습니다: 학생이 보낸 문제 글의 U+2028 같은 글자가 줄 바꿈으로 읽혀 가짜 줄이 생기지 않게
-        with usage_lock, (Path(log_dir) / "quiz.log").open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": int(wall_clock()), "id": req.id, "k": req.key, "who": device(host), "right": req.right}) + "\n")
+        append_log("quiz.log", {"t": int(wall_clock()), "id": req.id, "k": req.key, "who": host, "right": req.right})
 
     def quiz_summary():
         first = {}  # (기기, 강의, 문제) → 처음 푼 결과: 다시 푼 것은 정답률을 흐리므로 세지 않습니다
@@ -975,11 +987,17 @@ def _claude_answer():
     return answer
 
 
+
+def _ignored_hosts(text):
+    """USAGE_IGNORE의 주소들. 쉼표 뒤 띄어쓰기는 무시합니다('192.168.0.6, 192.168.0.7')."""
+    return tuple(host.strip() for host in text.split(",") if host.strip())
+
+
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
                  None,  # 질문하기는 Claude API 크레딧을 써서 막아 둡니다. 다시 열려면 _claude_answer()를 넘깁니다.
                  load_references(os.environ.get("REFERENCES_FILE")),
                  os.environ.get("LOG_DIR"),
-                 tuple(filter(None, os.environ.get("USAGE_IGNORE", "").split(","))),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
+                 _ignored_hosts(os.environ.get("USAGE_IGNORE", "")),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
                  _teacher_key(os.environ.get("TEACHER_KEY_FILE")),
                  *entry_settings(os.environ))  # 인터넷으로 열 때만: 학원 사이트 입장 확인(docs/인터넷-열기.md)

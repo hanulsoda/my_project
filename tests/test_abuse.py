@@ -43,8 +43,7 @@ def test_very_long_search_words_are_refused_quickly(lecture):
 def test_one_device_cannot_fill_the_disk_with_quiz_results_or_opens(lecture, monkeypatch):
     tmp_path, video_id = lecture
     monkeypatch.setattr(server, "LOG_WRITES_PER_HOUR", 5)
-    app = create_app(tmp_path / "videos", tmp_path / "data", None, log_dir=tmp_path / "logs")
-    (tmp_path / "logs").mkdir()
+    app = create_app(tmp_path / "videos", tmp_path / "data", None, log_dir=tmp_path / "logs")  # 로그 폴더는 서버가 만듦
     me, other = TestClient(app, client=ACADEMY), TestClient(app, client=OTHER_PC)
 
     for n in range(8):

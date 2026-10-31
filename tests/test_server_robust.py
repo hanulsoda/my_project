@@ -138,3 +138,30 @@ def test_mac_file_names_are_listed_like_any_other(tmp_path):
     title = find_videos(video_dir)[0]["title"]
 
     assert title == "고1/제망매가"  # 학생이 친 '제망매가'로 찾을 수 있게
+
+
+def test_a_log_folder_that_does_not_exist_yet_does_not_stop_students(two_lectures, tmp_path):
+    video_dir, data_dir, ids = two_lectures
+    log_dir = tmp_path / "아직 없는 로그"
+    client = TestClient(create_app(video_dir, data_dir, None, log_dir=log_dir), client=LAN)
+
+    assert client.get(f"/api/videos/{ids[0]}", params={"view": 1}).status_code == 200  # 플레이어가 강의를 엶
+    assert client.post("/api/quiz-result", json={"id": ids[0], "key": "Q1", "right": True}).status_code == 204
+    assert (log_dir / "usage.log").exists()  # 켤 때 만들어 둠
+
+
+def test_an_unwritable_log_folder_only_loses_the_log_line(two_lectures, tmp_path, caplog):
+    video_dir, data_dir, ids = two_lectures
+    blocked = tmp_path / "logs"
+    blocked.write_text("폴더가 아니라 파일")  # 쓸 수 없는 로그 자리
+    client = TestClient(create_app(video_dir, data_dir, None, log_dir=blocked), client=LAN)
+
+    assert client.get(f"/api/videos/{ids[0]}", params={"view": 1}).status_code == 200
+    assert client.post("/api/quiz-result", json={"id": ids[0], "key": "Q1", "right": True}).status_code == 204
+    assert "로그" in caplog.text
+
+
+def test_usage_ignore_accepts_spaces_after_commas(monkeypatch):
+    from academy.server import _ignored_hosts
+
+    assert _ignored_hosts("192.168.0.6, 192.168.0.7 ,") == ("192.168.0.6", "192.168.0.7")

@@ -17,7 +17,7 @@ PARTS = [("features", "핵심 특징"), ("stages", "구조"), ("stanzas", "연�
 
 
 def load_references(path) -> list[dict]:
-    return usable_references(json.loads(Path(path).read_text(encoding="utf-8"))) if path else []
+    return usable_references(json.loads(Path(path).expanduser().read_text(encoding="utf-8"))) if path else []  # ~: 집 폴더
 
 
 def usable_references(refs) -> list[dict]:

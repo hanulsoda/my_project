@@ -157,3 +157,13 @@ def test_a_teacher_key_file_saved_with_a_bom_still_works(tmp_path):
     path.write_text("﻿plain-key-123\n", encoding="utf-8")  # 윈도 메모장이 붙이는 글자(BOM)
 
     assert server._teacher_key(str(path)) == "plain-key-123"
+
+
+def test_a_teacher_key_path_with_a_tilde_or_a_typo_is_handled(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".config").mkdir()
+    (tmp_path / ".config" / "teacher-key").write_text("plain-key-123\n", encoding="utf-8")
+
+    assert server._teacher_key("~/.config/teacher-key") == "plain-key-123"  # 따옴표 안의 ~도 집 폴더로
+    assert server._teacher_key(str(tmp_path / "오타")) is None
+    assert "선생님 열쇠" in caplog.text  # 경로가 틀리면 조용히 넘어가지 않고 서버 기록에 남김

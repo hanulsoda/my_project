@@ -1,6 +1,5 @@
 """분석·밤 작업(academy.analyze, academy.toc)의 버그 찾기에서 나온 경우들."""
 
-import fcntl
 import json
 import os
 import re
@@ -189,3 +188,23 @@ def test_a_silent_lecture_shows_its_academy_summary(tmp_path):
     client = TestClient(create_app(tmp_path / "videos", data_dir, None, refs))
     for title in ("제망매가", "청산별곡"):
         assert client.get(f"/api/videos/{ids[title]}").json()["references"], title  # 판서만 있는 강의도 학원 정리를 봄
+
+
+def test_a_force_run_whose_guide_step_failed_finishes_on_a_plain_rerun(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    data_dir = tmp_path / "data"
+    save_analysis(data_dir, ids["1강"], {"title": "1강", "duration": 120.0, "segments": SEGMENTS, "guide": {"summary": "예전"}})
+    rec = Recorder()
+
+    def out_of_credit(*args):
+        raise RuntimeError("사용 한도에 닿음")
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, out_of_credit, force=True)
+    assert load_analysis(data_dir, ids["1강"])["guide"] == {"summary": "예전"}  # 학생은 그동안 예전 요점 정리를 봄
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)  # 다음 달, --force 없이
+
+    assert rec.transcribed == ["1강.mp4"] and rec.guided == ["1강"]  # 받아쓰기는 다시 하지 않고 요점 정리만 새로
+    assert load_analysis(data_dir, ids["1강"])["guide"] == GUIDE
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide)
+    assert rec.guided == ["1강"]  # 새 요점 정리가 생긴 뒤에는 다시 묻지 않음

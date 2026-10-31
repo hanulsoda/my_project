@@ -5,7 +5,6 @@
 """
 
 import argparse
-import fcntl
 import os
 import sys
 import time
@@ -23,9 +22,14 @@ SETTLE_SECONDS = 600  # 이보다 최근에 바뀐 영상은 아직 NAS로 복�
 
 
 def run_lock(data_dir, part):
-    """같은 묶음(--part)의 분석이 이미 돌고 있으면 None. 돌려준 파일을 닫으면(프로세스가 끝나면) 풀립니다."""
+    """같은 묶음(--part)의 분석이 이미 돌고 있으면 None. 돌려준 파일을 닫으면(프로세스가 끝나면) 풀립니다.
+    윈도에는 이 잠금(fcntl)이 없어 잠그지 않습니다(분석을 겹쳐 돌리지 않게 조심)."""
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     lock = open(Path(data_dir) / f".analyze-{part[0]}of{part[1]}.lock", "w")
+    try:
+        import fcntl
+    except ImportError:
+        return lock
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -122,7 +126,8 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
         done = data or {}
         need_pages = detect_pages is not None and "pages" not in done
         # 소리 없는 강의(받아쓴 말 없음)는 Claude에 묻지 않습니다. 요점 정리 칸은 비워 두어 학원 정리가 보이게 합니다.
-        need_guide = make_guide is not None and not done.get("guide") and not done.get("silent")
+        # guide_stale: --force로 새로 받아쓴 뒤 아직 새 요점 정리를 못 만든 강의(예전 것을 보여 주는 중): 다음 실행에서 이어 만듭니다.
+        need_guide = make_guide is not None and (not done.get("guide") or done.get("guide_stale")) and not done.get("silent")
         if data and not (need_pages or need_guide):
             print("  이미 분석됨, 건너뜀")
             continue
@@ -137,6 +142,8 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
                         "segments": segments, "guide": None}
                 # 다시 분석(--force)해도 새 요점 정리가 생길 때까지 예전 요점 정리·목차(비용을 들인 결과)를 둡니다.
                 data.update({key: old[key] for key in ("guide", "toc") if old and key in old})
+                if data["guide"]:
+                    data["guide_stale"] = True
                 # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다.
                 save_analysis(data_dir, video["id"], data)
             if need_pages:
@@ -179,6 +186,7 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
                 for fix in data["guide"].get("corrections", []):
                     for segment in data["segments"]:
                         segment["text"] = segment["text"].replace(fix["wrong"], fix["right"])
+                data.pop("guide_stale", None)
                 save_analysis(data_dir, video["id"], data)
             print("  완료")
         except Exception as e:
