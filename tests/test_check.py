@@ -77,3 +77,11 @@ def test_a_missing_video_folder_is_a_problem_and_optional_settings_are_notes(tmp
     assert any(level == "문제" and "영상 폴더" in text for level, text in found)
     notes = " / ".join(text for level, text in found if level == "참고")
     assert "학원 정리" in notes and "선생님 열쇠" in notes and "내부망" in notes  # 안 쓰는 기능은 문제가 아님
+
+
+def test_a_log_folder_the_server_cannot_create_is_a_problem(tmp_path):
+    env, _ = setup(tmp_path)
+    (tmp_path / "logs.txt").write_text("파일", encoding="utf-8")
+    env["LOG_DIR"] = str(tmp_path / "logs.txt" / "logs")  # 위가 폴더가 아니라 파일
+
+    assert any("로그 폴더" in text for text in problems(env))

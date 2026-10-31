@@ -28,6 +28,9 @@ function fmt(seconds) {
   return h ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
 }
 
+// 뒤로 가기로 예전 화면을 그대로 되살리면(bfcache) 본 데까지·복습 일정이 예전 것이라 다시 불러옵니다.
+addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
+
 // 서버를 다시 켜는 중(시놀로지가 502)이거나 인터넷이 끊겼을 때 보여 줄 말
 const OFFLINE = "서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 잠시 뒤 다시 해 주세요.";
 
@@ -269,7 +272,7 @@ function mergeRecords(data) {  // 센 수와 failed(하나라도 저장하지 �
 
 // 폴더를 옮기거나 이름을 바꾼 강의는 번호가 바뀝니다. 서버가 알려 준 {예전 번호: 새 번호}대로 이 기기의 이어 보기·메모·
 // 틀린 문제·점수를 새 번호로 옮깁니다(새 번호에 이미 기록이 있으면 기기 옮기기처럼 합침). 화면을 열 때마다 한 번 봅니다.
-fetch("/api/moves").then((r) => (r.ok ? r.json() : {})).then((moves) => {
+const recordsMoved = fetch("/api/moves").then((r) => (r.ok ? r.json() : {})).then((moves) => {  // 다 옮긴 뒤 다시 그릴 화면이 씀
   let names = [];
   try { names = Object.keys(localStorage); } catch {}
   for (const key of names) {
@@ -302,7 +305,9 @@ const daysLater = (n) => { const d = new Date(); d.setDate(d.getDate() + n); ret
 const isDue = (w) => dayStart(w.due) <= Date.now();
 
 function wrongItems(videoId) {
-  return (store.get(`wrong:${videoId}`) || []).map((w) => (typeof w === "string" ? { k: w, stage: 0, due: 0 } : w));
+  // 다음 복습은 가장 긴 간격(7일)보다 멀 수 없습니다: 기기 날짜를 앞으로 돌려 둔 동안 정한 날은 당겨 씁니다.
+  return (store.get(`wrong:${videoId}`) || []).map((w) => (typeof w === "string" ? { k: w, stage: 0, due: 0 }
+    : { ...w, due: Math.min(w.due, daysLater(7)) }));
 }
 
 function markWrong(videoId, key, wrong) {

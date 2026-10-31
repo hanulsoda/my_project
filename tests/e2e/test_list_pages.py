@@ -311,3 +311,21 @@ def test_notes_keep_their_lecture_links_when_the_list_cannot_be_loaded(page, sit
     expect(page.locator("#notes-page")).to_contain_text("서버에 연결하지 못했습니다")
     expect(page.locator("#notes-page")).not_to_contain_text("목록에 없는 강의")
     expect(page.locator(f'#notes-page h2 a[href="watch.html?id={vid}"]')).to_be_visible()
+
+
+def test_coming_back_with_the_back_button_redraws_progress(page, site):
+    page.goto(site.url + "/")
+    expect(page.locator(".video-list a").first).to_be_attached()
+
+    with page.expect_navigation():  # 뒤로 가기로 예전 화면을 그대로 되살리면(bfcache) 본 데까지가 예전 것
+        page.evaluate("dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))")
+
+
+def test_a_review_set_while_the_phone_clock_was_ahead_comes_back_within_a_week(page, site):
+    page.clock.install(time=datetime(2026, 11, 3, 9, 0, tzinfo=KST))
+    far = datetime(2026, 12, 4, tzinfo=KST).timestamp() * 1000  # 휴대폰 날짜를 한 달 앞으로 해 둔 동안 틀린 문제
+    remember(page, site, {f"wrong:{site.ids[ZMG]}": [{"k": "제망매가의 갈래는?", "stage": 0, "due": far}]})
+
+    page.goto(site.url + "/review.html")
+
+    expect(page.locator("#review")).to_contain_text("다음 복습: 7일 뒤 1개")  # 가장 긴 간격(7일)보다 멀지 않게

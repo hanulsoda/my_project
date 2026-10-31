@@ -296,7 +296,9 @@ function linkify(text) {
   let from = 0;
   for (const m of text.matchAll(/\[((?:\d+:)?\d{1,2}:\d{2})\]/g)) {
     const t = m[1].split(":").reduce((acc, part) => acc * 60 + Number(part), 0);
-    parts.push(text.slice(from, m.index), el("button", { class: "time", onclick: () => seek(t) }, m[1]));
+    // 영상보다 뒤 시각(AI가 잘못 적음)은 누르면 끝으로 가 '다 봄'이 되므로 글로만 둡니다.
+    parts.push(text.slice(from, m.index), video.duration > 0 && t > video.duration ? m[0]
+      : el("button", { class: "time", onclick: () => seek(t) }, m[1]));
     from = m.index + m[0].length;
   }
   parts.push(text.slice(from));
@@ -323,10 +325,12 @@ function setupAsk() {
   question.onkeydown = (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
   };
+  let asking = false;  // Enter(requestSubmit)는 꺼 둔 버튼과 상관없이 보내져, 답을 기다리는 동안 같은 질문이 두 번 갔습니다
   form.onsubmit = async (e) => {
     e.preventDefault();
     const text = question.value.trim();
-    if (!text) return;
+    if (!text || asking) return;
+    asking = true;
     const button = form.querySelector("button");
     button.disabled = true;
     say("user", text);
@@ -342,15 +346,16 @@ function setupAsk() {
         }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : `서버 오류 (${res.status})`);
+      if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : res.status >= 500 ? OFFLINE : `서버 오류 (${res.status})`);
       reply.replaceChildren(...linkify(body.answer));
       history.push({ role: "user", content: text }, { role: "assistant", content: body.answer });
-      question.value = "";
+      if (question.value.trim() === text) question.value = "";  // 기다리는 동안 쓴 다음 질문은 지우지 않습니다
     } catch (err) {
-      reply.textContent = `답변을 받지 못했습니다. ${err.message}`;
+      reply.textContent = `답변을 받지 못했습니다. ${err instanceof TypeError ? OFFLINE : err.message}`;  // 연결 실패는 영어 글
       reply.classList.add("error");
     } finally {
       button.disabled = false;
+      asking = false;
     }
   };
 }
@@ -392,6 +397,7 @@ $("bookmark-btn").onclick = () => {
     : `북마크를 ${notSaved}`;
 };
 renderNotes();
+recordsMoved.then(renderNotes);  // 옮긴 강의를 처음 열 때: 예전 번호의 메모를 옮겨 온 뒤 다시 그립니다
 
 // ---- 구간 반복: 한 번 누르면 시작점, 두 번째는 끝점(반복 시작), 세 번째는 끄기. 어려운 설명을 여러 번 들을 때 ----
 // 시작점만 찍은 뒤 시작점이나 그 앞에서 다시 누르면 시작점을 지웁니다.

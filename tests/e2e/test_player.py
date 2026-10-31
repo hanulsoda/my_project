@@ -275,3 +275,39 @@ def test_searching_this_lecture_offline_does_not_spin_forever(page, site):
     page.press("#find-text", "Enter")
 
     expect(page.locator("#find-status")).to_contain_text("서버에 연결하지 못했습니다")
+
+
+def test_a_moved_lectures_notes_show_the_first_time_it_is_opened(page, site):
+    vid, old = site.ids[ZMG], "0123456789ab"
+    remember(page, site, {f"notes:{old}": [{"t": 10, "text": "옮기기 전 메모"}]})
+    page.route("**/api/moves", lambda route: route.fulfill(json={old: vid}))
+    open_player(page, site)
+
+    page.click("[data-tab=notes]")
+
+    expect(page.locator("#notes")).to_contain_text("옮기기 전 메모")
+
+
+def test_the_question_box_sends_once_keeps_new_typing_and_links_only_real_times(page, site):
+    import json
+    sent, held = [], []
+    page.route("**/ask", lambda route: (sent.append(json.loads(route.request.post_data)), held.append(route)))
+    open_player(page, site)
+    page.evaluate("document.getElementById('tab-btn-ask').hidden = false")  # 지금은 숨겨 둔 탭
+    page.click("[data-tab=ask]")
+
+    page.fill("#question", "첫 질문")
+    page.press("#question", "Enter")
+    page.press("#question", "Enter")  # 답을 기다리는 동안 한 번 더(질문 횟수·비용이 두 배)
+    page.wait_for_timeout(300)
+    assert len(sent) == 1
+    page.fill("#question", "다음 질문")  # 기다리는 동안 다음 질문을 써 둠
+    held[0].fulfill(json={"answer": "[00:30]에서 설명하고 [59:59]에도 나옵니다"})
+
+    expect(page.locator(".bubble.assistant").last).to_contain_text("설명하고")
+    expect(page.locator("#question")).to_have_value("다음 질문")
+    expect(page.locator(".bubble.assistant button.time")).to_have_text(["00:30"])  # 영상(2:30)보다 뒤 시각은 누를 수 없게
+    page.unroute("**/ask")
+    page.route("**/ask", lambda route: route.abort("internetdisconnected"))
+    page.press("#question", "Enter")
+    expect(page.locator(".bubble.assistant").last).to_contain_text("서버에 연결하지 못했습니다")  # 'Failed to fetch'가 아님

@@ -111,7 +111,13 @@ def checks(env) -> list[tuple[str, str]]:
     if not log_dir:
         say(NOTE, "로그 폴더(LOG_DIR)가 없어 현황 화면에 이용 통계·운영 기록이 나오지 않습니다")
     elif not Path(log_dir).is_dir():
-        say(NOTE, f"로그 폴더가 아직 없습니다: {log_dir} (서버를 켜면 만듭니다)")
+        parent = Path(log_dir)
+        while not parent.exists() and parent != parent.parent:  # 서버가 만들 수 있는지: 가장 가까운 있는 위 폴더
+            parent = parent.parent
+        if parent.is_dir() and os.access(parent, os.W_OK):
+            say(NOTE, f"로그 폴더가 아직 없습니다: {log_dir} (서버를 켜면 만듭니다)")
+        else:
+            say(PROBLEM, f"로그 폴더를 만들 수 없습니다: {log_dir} ({parent}에 폴더를 만들 수 없음). 이용 통계·퀴즈 기록이 남지 않습니다")
     else:
         say(OK, f"로그 폴더: {Path(log_dir).resolve()}")
 
