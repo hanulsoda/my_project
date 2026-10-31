@@ -235,3 +235,30 @@ def test_arrow_down_right_after_typing_goes_to_a_lecture_that_matches(page, site
     expect(page.locator(".video-list a:focus")).to_contain_text("청산별곡")
     page.wait_for_timeout(300)  # 늦게 거르더라도 자리를 잃지 않음
     expect(page.locator(".video-list a:focus")).to_contain_text("청산별곡")
+
+
+def test_records_are_not_dropped_when_the_new_place_cannot_be_written(page, site):
+    vid, old = site.ids[ZMG], "0123456789ab"
+    page.route("**/api/moves", lambda route: route.fulfill(json={old: vid}))
+    remember(page, site, {f"notes:{old}": [{"t": 10, "text": "옮기기 전 메모"}]})
+    page.add_init_script(f"""{{ const set = Storage.prototype.setItem;  // 저장 공간이 꽉 참
+        Storage.prototype.setItem = function (k, v) {{ if (k.includes('{vid}')) throw new DOMException('full', 'QuotaExceededError');
+                                                       return set.call(this, k, v); }}; }}""")
+    with page.expect_response("**/api/moves"):
+        page.goto(site.url + "/")
+    page.wait_for_timeout(300)
+
+    assert stored(page, f"notes:{old}") == [{"t": 10, "text": "옮기기 전 메모"}]  # 새 자리에 쓰지 못했으면 그대로 둠
+
+
+def test_received_records_that_cannot_be_saved_are_not_reported_as_received(page, site):
+    page.route("**/api/transfer/123456", lambda route: route.fulfill(
+        json={"data": {f"notes:{site.ids[ZMG]}": [{"t": 1, "text": "다른 기기 메모"}]}}))
+    page.add_init_script("""Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); };""")
+    page.goto(site.url + "/move.html")
+
+    page.fill("#code-input", "123456")
+    page.press("#code-input", "Enter")
+
+    expect(page.locator("#receive-status")).to_contain_text("저장하지 못했습니다")
+    expect(page.locator("#receive-status")).not_to_contain_text("받았습니다")

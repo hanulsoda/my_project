@@ -33,10 +33,18 @@ const store = {
   get(key) {
     try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
   },
-  set(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  set(key, value) {  // 저장했으면 true. 저장이 막혔거나(사이트 데이터 차단) 꽉 찬 브라우저는 false
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { cannotSave(); return false; }
   },
 };
+
+// 기록을 저장할 수 없는 브라우저: 저장된 줄 알고 메모를 쓰다 잃지 않게 화면 맨 위에 한 번 알립니다.
+function cannotSave() {
+  if (document.getElementById("storage-warning")) return;
+  document.body.prepend(el("p", { id: "storage-warning", class: "storage-warning", role: "alert" },
+    "이 브라우저에는 기록(이어 보기·메모·틀린 문제)을 저장할 수 없습니다. 브라우저 설정에서 이 사이트의 데이터(쿠키) 저장을 허용하거나 저장 공간을 비워 주세요."));
+}
+try { localStorage.setItem("storage-check", "1"); localStorage.removeItem("storage-check"); } catch { cannotSave(); }
 
 // ---- 선생님 열쇠(현황·학원 정리 고치기): 브라우저는 머리글(X-Teacher-Key)에 영문·숫자·기호만 보낼 수 있습니다 ----
 // 한글 자판 상태로 친 열쇠(예: rkskek → 가나다)는 받지 않고, 예전에 그렇게 기억한 열쇠는 없는 것으로 봅니다.
@@ -219,21 +227,22 @@ function collectRecords() {
 }
 
 // 받은 기록은 다른 기기가 보낸 것이라 모양을 확인하고, 이 기기 기록을 지우지 않고 합칩니다. 합친 개수를 돌려줍니다.
-function mergeRecords(data) {
+function mergeRecords(data) {  // 센 수와 failed(하나라도 저장하지 못함)
   const num = (x) => typeof x === "number" && Number.isFinite(x);
-  const counts = { pos: 0, notes: 0, wrong: 0, score: 0, study: 0 };
+  const counts = { pos: 0, notes: 0, wrong: 0, score: 0, study: 0, failed: false };
+  const put = (key, value) => { if (!store.set(key, value)) counts.failed = true; };
   for (const [key, value] of Object.entries(data || {})) {
     const kind = key.split(":")[0], mine = store.get(key);
     if (kind === "pos" || kind === "score") {  // 더 나중에 본 진도·푼 점수
       const ok = kind === "pos" ? num(value?.t) && num(value?.d) : num(value?.right) && num(value?.total);
-      if (MOVABLE.test(key) && ok && (!mine || (value.at || 0) > (mine.at || 0))) { store.set(key, value); counts[kind]++; }
+      if (MOVABLE.test(key) && ok && (!mine || (value.at || 0) > (mine.at || 0))) { put(key, value); counts[kind]++; }
     } else if (kind === "notes" && MOVABLE.test(key) && Array.isArray(value)) {  // 메모는 둘 다(같은 시각·글은 한 번)
       const same = (n) => `${n.t}|${n.text || ""}`;
       const got = value.filter((n) => num(n?.t) && typeof (n.text ?? "") === "string");
       const had = new Set((mine || []).map(same));
       const merged = [...new Map([...(mine || []), ...got].map((n) => [same(n), { t: n.t, text: n.text || "" }])).values()].sort((a, b) => a.t - b.t);
       counts.notes += new Set(got.map(same).filter((k) => !had.has(k))).size;  // 이 기기에 없던 메모만 셉니다
-      store.set(key, merged);
+      put(key, merged);
     } else if (kind === "wrong" && MOVABLE.test(key) && Array.isArray(value)) {  // 틀린 문제는 복습이 더 나간 쪽
       const items = new Map(wrongItems(key.slice(6)).map((w) => [w.k, w]));
       for (const w of value.map((v) => (typeof v === "string" ? { k: v, stage: 0, due: 0 } : v))) {
@@ -241,15 +250,15 @@ function mergeRecords(data) {
         if (!items.has(w.k)) counts.wrong++;
         if (!items.has(w.k) || w.stage > items.get(w.k).stage) items.set(w.k, { k: w.k, stage: w.stage, due: w.due });
       }
-      store.set(key, [...items.values()]);
+      put(key, [...items.values()]);
     } else if (key === "study" && value && typeof value === "object") {  // 날마다 큰 값: 두 번 받아도 늘지 않게
       const days = store.get("study") || {};
       for (const [day, seconds] of Object.entries(value)) {
         if (/^\d{4}-\d\d-\d\d$/.test(day) && num(seconds) && seconds > (days[day] || 0)) { days[day] = seconds; counts.study++; }
       }
-      store.set("study", days);
+      put("study", days);
     } else if (key === "speed" && num(value) && mine == null) {
-      store.set("speed", value);
+      put("speed", value);
     }
   }
   return counts;
@@ -263,7 +272,7 @@ fetch("/api/moves").then((r) => (r.ok ? r.json() : {})).then((moves) => {
   for (const key of names) {
     const found = key.match(/^(pos|notes|wrong|score):([0-9a-f]{12})$/), to = found && moves[found[2]];
     if (!to || to === found[2]) continue;
-    mergeRecords({ [`${found[1]}:${to}`]: store.get(key) });
+    if (mergeRecords({ [`${found[1]}:${to}`]: store.get(key) }).failed) continue;  // 새 자리에 쓰지 못했으면 예전 기록을 둡니다
     try { localStorage.removeItem(key); } catch {}
   }
 }).catch(() => {});

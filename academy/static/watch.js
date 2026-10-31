@@ -368,22 +368,24 @@ function renderNotes() {
 }
 
 function addNote(text) {  // 지금 장면에 메모(글이 없으면 북마크). 같은 초에 같은 글이 있으면 더하지 않습니다(두 번 누름).
-  const notes = store.get(notesKey) || [];
-  if (notes.some((n) => Math.floor(n.t) === Math.floor(video.currentTime) && n.text === text)) return;
+  const notes = store.get(notesKey) || [];  // 저장했으면 true
+  if (notes.some((n) => Math.floor(n.t) === Math.floor(video.currentTime) && n.text === text)) return true;
   notes.push({ t: video.currentTime, text });
   notes.sort((a, b) => a.t - b.t);
-  store.set(notesKey, notes);
+  if (!store.set(notesKey, notes)) return false;
   renderNotes();
+  return true;
 }
 
+const notSaved = "저장하지 못했습니다. 화면 맨 위의 안내를 봐 주세요.";
 $("note-form").onsubmit = (e) => {
   e.preventDefault();
-  addNote($("note-text").value.trim());
-  $("note-text").value = "";
+  if (addNote($("note-text").value.trim())) $("note-text").value = "";
+  else $("status").textContent = `메모를 ${notSaved} 쓴 글은 그대로 두었습니다.`;
 };
 $("bookmark-btn").onclick = () => {
-  addNote("");
-  $("status").textContent = `${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`;
+  $("status").textContent = addNote("") ? `${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`
+    : `북마크를 ${notSaved}`;
 };
 renderNotes();
 

@@ -234,3 +234,20 @@ def test_the_video_picks_up_where_it_stopped_after_the_internet_comes_back(page,
 
     expect(page.locator("#status")).to_contain_text("40")
     page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 40) < 3")
+
+
+BLOCKED_STORAGE = """Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
+    get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });"""
+
+
+def test_a_browser_that_cannot_save_says_so_and_keeps_the_typed_note(page, site):
+    page.add_init_script(BLOCKED_STORAGE)
+    open_player(page, site)
+
+    expect(page.locator("#storage-warning")).to_contain_text("저장할 수 없습니다")
+    page.click("[data-tab=notes]")
+    page.fill("#note-text", "중요한 장면")
+    page.click("#note-form button[type=submit]")
+    expect(page.locator("#note-text")).to_have_value("중요한 장면")  # 저장하지 못한 글을 지우지 않음
+    page.click("#bookmark-btn")
+    expect(page.locator("#status")).not_to_contain_text("북마크했습니다")

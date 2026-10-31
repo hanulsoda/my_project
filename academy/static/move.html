@@ -86,7 +86,9 @@
       }
       const got = mergeRecords((await res.json()).data);
       $("code-input").value = "";
-      $("receive-status").textContent = `받았습니다: 메모 ${got.notes}개 · 이어 보기 ${got.pos}개 · 틀린 문제 ${got.wrong}개 · 퀴즈 점수 ${got.score}개 · 공부 기록 ${got.study}일`;
+      $("receive-status").textContent = got.failed  // 코드는 한 번 쓰면 사라집니다
+        ? "기록을 이 브라우저에 저장하지 못했습니다. 화면 맨 위의 안내대로 고친 뒤, 보내는 기기에서 코드를 다시 만들어 주세요."
+        : `받았습니다: 메모 ${got.notes}개 · 이어 보기 ${got.pos}개 · 틀린 문제 ${got.wrong}개 · 퀴즈 점수 ${got.score}개 · 공부 기록 ${got.study}일`;
       $("send-summary").textContent = `보낼 기록: ${describe(collectRecords())}`;
       fillSidebar(videos, { here: "move.html" });
     };
