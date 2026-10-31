@@ -192,3 +192,27 @@ def test_a_lecture_without_sound_says_so_instead_of_promising_a_guide(page, site
 
     expect(page.locator("#tab-guide")).to_contain_text("음성이 없는 영상입니다")
     expect(page.locator("#tab-guide")).not_to_contain_text("아직")
+
+
+def test_questions_keep_working_after_several_long_answers(page, site):
+    import json
+    sent = []
+
+    def reply(route):
+        sent.append(json.loads(route.request.post_data))
+        if len(sent) <= 4:
+            route.fulfill(json={"answer": "가" * 6000})  # 긴 답 네 번이면 대화 기록이 서버 한도(20,000자)를 넘음
+        else:
+            route.continue_()  # 실제 서버가 대화 기록을 받는지: 질문하기를 끈 테스트 서버는 기록을 받은 뒤에야 403
+
+    page.route("**/ask", reply)
+    open_player(page, site)
+    page.evaluate("document.getElementById('tab-btn-ask').hidden = false")  # 지금은 숨겨 둔 탭
+    page.click("[data-tab=ask]")
+    for n in range(5):
+        page.fill("#question", f"{n + 1}번째 질문")
+        page.press("#question", "Enter")
+        expect(page.locator(".bubble.assistant").nth(n)).not_to_have_text("답변을 만드는 중…")
+
+    expect(page.locator(".bubble.assistant").last).to_contain_text("질문하기는 지금 쓰지 않습니다")  # 422(기록이 너무 김)가 아님
+    assert sent[-1]["history"][0]["role"] == "user"

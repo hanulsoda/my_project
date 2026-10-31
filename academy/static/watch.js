@@ -273,6 +273,14 @@ function linkify(text) {
   return parts;
 }
 
+// 서버가 받는 만큼의 최근 대화(server.py의 AskRequest: 20개까지, 하나에 10,000자, 모두 20,000자)만 보냅니다.
+// 그러지 않으면 긴 답이 몇 번 쌓인 뒤의 질문이 모두 거절됩니다. 오래된 질문·답부터 한 쌍씩 덜어 냅니다.
+function recentHistory(history) {
+  let kept = history.slice(-20).map((t) => ({ ...t, content: t.content.slice(0, 10000) }));
+  while (kept.reduce((n, t) => n + t.content.length, 0) > 20000) kept = kept.slice(2);
+  return kept;
+}
+
 function setupAsk() {
   const history = [];
   const form = $("ask-form"), question = $("question"), chat = $("chat");
@@ -299,7 +307,7 @@ function setupAsk() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: text,
-          history: history.slice(-20),
+          history: recentHistory(history),
           current_time: $("use-time").checked ? video.currentTime : null,
         }),
       });
