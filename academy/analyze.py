@@ -17,6 +17,7 @@ import numpy as np
 
 from academy.library import VIDEO_EXTS, find_videos, load_analysis, save_analysis
 
+# 예전에 소리 없는 강의에 넣던 빈 요점 정리. 지금은 "silent": true로 표시하고, 이것을 만나면 걷어 냅니다.
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
 SETTLE_SECONDS = 600  # 이보다 최근에 바뀐 영상은 아직 NAS로 복사 중일 수 있어 다음에 분석합니다
 
@@ -112,12 +113,16 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
             failures += 1
             print(f"  분석 파일 형식 오류, 건너뜀(고친 곳의 쉼표·따옴표를 확인하세요): {e}", file=sys.stderr)
             continue
+        if old and old.get("guide") == SILENT_GUIDE:  # 예전에는 소리 없는 강의에 빈 요점 정리를 넣어 학원 정리가 가려졌습니다
+            old = {**old, "guide": None, "silent": True}
+            save_analysis(data_dir, video["id"], old)
         data = None if force else old
         if data is None and not force:
             data = adopt(video)  # 폴더를 옮기거나 이름을 바꾼 강의면 예전 분석을 이어 씀
         done = data or {}
         need_pages = detect_pages is not None and "pages" not in done
-        need_guide = make_guide is not None and not done.get("guide")
+        # 소리 없는 강의(받아쓴 말 없음)는 Claude에 묻지 않습니다. 요점 정리 칸은 비워 두어 학원 정리가 보이게 합니다.
+        need_guide = make_guide is not None and not done.get("guide") and not done.get("silent")
         if data and not (need_pages or need_guide):
             print("  이미 분석됨, 건너뜀")
             continue
@@ -145,7 +150,10 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
                     page.update(next(({"label": p["label"]} for p in (old or {}).get("pages", [])
                                       if p.get("label") and abs(p["start"] - page["start"]) <= 1), {}))
                 save_analysis(data_dir, video["id"], data)
-            if need_guide:
+            if need_guide and not data["segments"]:  # 소리 없는 강의: Claude에 묻지 않고 표시만 해 둡니다(다시 묻지 않게)
+                data["silent"] = True
+                save_analysis(data_dir, video["id"], data)
+            elif need_guide:
                 screens = None
                 if data["segments"] and read_screens and data.get("pages"):
                     if "text" not in data["pages"][0]:  # 요점 정리에서 실패해도 다시 읽지 않도록 저장해 둡니다.
@@ -160,8 +168,7 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
                     lines = [line for page in data.get("pages", []) for line in page.get("text", [])]
                     refs = find_references(data["title"], lines)
                 print("  요점 정리·퀴즈 만드는 중..." + (f" (학원 정리 {len(refs)}개 활용)" if refs else ""), flush=True)
-                data["guide"] = (make_guide(data["title"], data["segments"], screens, [r["text"] for r in refs] or None)
-                                 if data["segments"] else SILENT_GUIDE)
+                data["guide"] = make_guide(data["title"], data["segments"], screens, [r["text"] for r in refs] or None)
                 if refs:
                     data["guide"]["sources"] = [r["source"] for r in refs]
                 for label in data["guide"].pop("page_labels", []):

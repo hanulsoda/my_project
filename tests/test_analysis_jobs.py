@@ -168,3 +168,24 @@ def test_a_new_lecture_is_analyzed_when_the_old_analysis_is_not_clearly_its_own(
     analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, probe=lambda path: 300.0 if case == "different-length" else 120.0)
 
     assert len(rec.transcribed) == 2 * len(names)  # 길이가 다르거나 후보가 둘이면 짐작하지 않고 새로 분석
+
+
+def test_a_silent_lecture_shows_its_academy_summary(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from academy.analyze import SILENT_GUIDE
+    from academy.server import create_app
+    ids = make_videos(tmp_path / "videos", "제망매가.mp4", "청산별곡.mp4")
+    data_dir = tmp_path / "data"
+    save_analysis(data_dir, ids["청산별곡"], {"title": "청산별곡", "duration": 60.0, "segments": [], "guide": SILENT_GUIDE,
+                                           "pages": []})  # 예전 분석: 소리 없는 강의에 빈 요점 정리를 넣었음
+    rec = Recorder(segments=[])
+
+    analyze_all(tmp_path / "videos", data_dir, rec.transcribe, rec.make_guide, detect_pages=rec.detect_pages)
+
+    assert rec.guided == []
+    assert load_analysis(data_dir, ids["청산별곡"])["guide"] is None  # 다음 실행에서 빈 요점 정리를 걷어 냄
+    refs = [{"title": title, "grade": "고1", "meta": {"갈래": "고전 시가"}} for title in ("제망매가", "청산별곡")]
+    client = TestClient(create_app(tmp_path / "videos", data_dir, None, refs))
+    for title in ("제망매가", "청산별곡"):
+        assert client.get(f"/api/videos/{ids[title]}").json()["references"], title  # 판서만 있는 강의도 학원 정리를 봄

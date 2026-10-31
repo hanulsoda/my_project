@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 
@@ -9,7 +10,13 @@ class FakeClient:
         self.reply = reply if isinstance(reply, str) else json.dumps(reply, ensure_ascii=False)
         self.stop_reason = stop_reason
         self.requests = []
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+        self.streamed = []  # stream()으로 보낸 요청(긴 답을 받는 요점 정리)
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create, stream=self._stream))
+
+    def _stream(self, **kwargs):
+        self.streamed.append(kwargs)
+        response = self._create(**kwargs)
+        return nullcontext(SimpleNamespace(get_final_message=lambda: response))
 
     def _create(self, **kwargs):
         self.requests.append(kwargs)

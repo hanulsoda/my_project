@@ -59,6 +59,16 @@ def test_study_guide_converts_times_sorts_chapters_and_drops_broken_quiz():
     assert guide["quiz"][0]["time"] == 75
 
 
+def test_a_guide_for_a_long_lecture_has_room_to_finish():
+    client = FakeClient(GUIDE)
+
+    make_study_guide(client, "수학/1강", SEGMENTS)
+
+    # 3시간 강의는 생각+답이 16,000 토큰을 넘어 잘렸고, 밤마다 다시 요청해 비용이 들었습니다.
+    # 넉넉한 한도는 스트리밍으로만 보낼 수 있습니다(SDK가 오래 걸릴 보통 요청을 막음).
+    assert len(client.streamed) == 1 and client.streamed[0]["max_tokens"] >= 64000
+
+
 def test_study_guide_keeps_only_real_multi_letter_corrections():
     guide = make_study_guide(FakeClient(GUIDE), "수학/1강", SEGMENTS)
 

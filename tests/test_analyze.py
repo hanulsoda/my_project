@@ -101,7 +101,10 @@ def test_silent_video_skips_claude(tmp_path):
     analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
 
     assert rec.guided == []
-    assert load_analysis(tmp_path / "data", ids["무음"])["guide"]["chapters"] == []
+    data = load_analysis(tmp_path / "data", ids["무음"])
+    assert data["silent"] is True and data["guide"] is None  # 빈 요점 정리를 넣지 않음(학원 정리가 가려지지 않게)
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)  # 다음 밤
+    assert rec.guided == [] and rec.transcribed == ["무음.mp4"]  # 다시 받아쓰거나 묻지 않음
 
 
 def test_empty_video_folder_says_so(tmp_path, capsys):

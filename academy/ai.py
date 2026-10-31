@@ -141,14 +141,15 @@ def transcript_text(segments: list[dict]) -> str:
     return "\n".join(f"[{fmt_time(s['start'])}] {s['text']}" for s in segments)
 
 
-def _ask_claude(client, **request) -> str:
-    response = client.beta.messages.create(
-        model=MODEL,
-        # 안전 필터가 드물게 요청을 거절하면 Anthropic이 권장하는 다른 모델로 자동 재시도합니다.
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        **request,
-    )
+def _ask_claude(client, stream=False, **request) -> str:
+    """stream: 답이 길 수 있는 요청(요점 정리)은 스트리밍으로 받습니다. 한도(max_tokens)를 크게 잡으면 SDK가 보통 요청을 막습니다."""
+    # 안전 필터가 드물게 요청을 거절하면 Anthropic이 권장하는 다른 모델로 자동 재시도합니다.
+    request = {"model": MODEL, "betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default", **request}
+    if stream:
+        with client.beta.messages.stream(**request) as answer:
+            response = answer.get_final_message()
+    else:
+        response = client.beta.messages.create(**request)
     if response.stop_reason in ("refusal", "max_tokens"):
         raise RuntimeError(f"Claude 응답이 완료되지 않았습니다 ({response.stop_reason})")
     return "".join(b.text for b in response.content if b.type == "text")
@@ -169,7 +170,10 @@ def make_study_guide(client, title: str, segments: list[dict], screens: list[dic
     system = GUIDE_PROMPT + (SCREEN_NOTE if screens else "") + (REFERENCE_NOTE if references else "")
     text = _ask_claude(
         client,
-        max_tokens=16000,
+        stream=True,
+        # 생각한 글도 이 한도에 듭니다. 3시간 강의(챕터 30개쯤·페이지 이름표 90개쯤)는 16,000이면 잘려 밤마다 다시 요청했습니다.
+        # 실제로 쓴 만큼만 비용이 들고, 한도를 넉넉히 잡는 것만으로는 비용이 늘지 않습니다.
+        max_tokens=64000,
         output_config={"effort": "high", "format": {"type": "json_schema", "schema": GUIDE_SCHEMA}},
         system=system,
         messages=[{"role": "user", "content": content}],
