@@ -30,15 +30,12 @@ def _grams(text):
 
 
 def _spoken_forms(term):
-    """어휘 낱말을 강의에서 찾을 꼴. 사전형('포효하다')은 '포효하는·포효해·포효했다'처럼 말하므로 줄기로도 찾습니다.
-    줄기가 한 글자면(바다 → 바) 다른 말과 겹치기 쉬워 사전형 그대로만 찾습니다."""
-    forms = [term]
-    if term.endswith("다") and len(term) >= 3:
-        stem = term[:-1]
-        forms.append(stem)
-        if stem.endswith("하"):  # 하다 → 해·했(줄어든 꼴)
-            forms += [stem[:-1] + "해", stem[:-1] + "했"]
-    return forms
+    """사전형('포효하다')이 강의에서 들리지 않을 때 찾을 꼴: '포효하는·포효해·포효했죠'처럼 말하므로 줄기로 찾습니다.
+    네 글자보다 짧은 동사는 줄기가 흔한 말과 같아(여기다→'여기', 대하다→'대해', 그리다→'그리고') 사전형으로만 찾습니다."""
+    if not (term.endswith("다") and len(term) >= 4):
+        return []
+    stem = term[:-1]
+    return [stem, stem[:-1] + "해", stem[:-1] + "했"] if stem.endswith("하") else [stem]  # 하다 → 해·했(줄어든 꼴)
 
 
 def link_times(summaries, segments) -> list[dict]:
@@ -64,8 +61,11 @@ def link_times(summaries, segments) -> list[dict]:
         term = _norm(item.split("(")[0])
         if len(term) < 2:
             return None
-        found = [at for at in (said.find(f) for f in _spoken_forms(term)) if at >= 0]
-        return segments[bisect_right(line_ends, min(found))]["start"] if found else None  # 가장 먼저 말한 줄
+        at = said.find(term)  # 사전형 그대로 말한 곳이 먼저
+        if at < 0:
+            found = [at for at in (said.find(f) for f in _spoken_forms(term)) if at >= 0]
+            at = min(found) if found else -1
+        return segments[bisect_right(line_ends, at)]["start"] if at >= 0 else None
 
     def sentence_time(item):
         if not windows:

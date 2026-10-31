@@ -72,3 +72,16 @@ def test_a_verb_listed_in_dictionary_form_links_to_its_spoken_form():
     times = link_times(summaries, segments)[0]["sections"][0]["times"]
 
     assert times == [30.0, None, 60.0]  # '바다'는 '바'만으로 찾지 않음(두 글자 넘는 줄기만)
+
+
+def test_a_verb_said_in_full_or_a_short_verb_is_not_linked_to_a_look_alike_word():
+    summaries = [{"source": "s", "quiz": [], "sections": [{"name": "어휘", "items": [
+        "여기다(동사): 그렇다고 인정하다", "대하다(동사): 마주 향하다", "회상하다(동사): 지난 일을 떠올리다", "그리다(동사): 생각하다"]}]}]
+    segments = [{"start": 0.0, "end": 5.0, "text": "여기 보시면 이 시에 대해 회상하는 장면이 그리고"},
+                {"start": 600.0, "end": 605.0, "text": "소중히 여기다 회상하다 라고 해요"},
+                {"start": 700.0, "end": 705.0, "text": "사람을 대하다"}]
+
+    times = link_times(summaries, segments)[0]["sections"][0]["times"]
+
+    # '여기'·'대해'·'그리고'는 다른 말이고, 사전형 그대로 말한 곳이 있으면 그곳
+    assert times == [600.0, 700.0, 600.0, None]
