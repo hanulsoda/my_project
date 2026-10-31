@@ -306,11 +306,15 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         pass  # 없거나 망가졌거나 예전 형식이면 처음부터 읽습니다
 
     def save_index():
-        if not Path(data_dir).is_dir():
+        # 지금 목록에 있는 강의만 둡니다(지우거나 옮긴 강의의 요약이 해마다 쌓여 켜는 시간·메모리가 늘지 않게).
+        # 영상 폴더가 비어 보이면(NAS 연결이 잠깐 끊김) 저장하지 않습니다: 다음에 켤 때 모두 처음부터 읽지 않게.
+        listed = {v["id"] for v in current_library()["videos"]}
+        if not Path(data_dir).is_dir() or not listed:
             return
+        entries = {video_id: entry for video_id, entry in dict(status_cache).items() if video_id in listed}
         tmp = index_path.with_suffix(".tmp")
         try:
-            tmp.write_text(json.dumps({"version": INDEX_VERSION, "entries": dict(status_cache)}, ensure_ascii=False),
+            tmp.write_text(json.dumps({"version": INDEX_VERSION, "entries": entries}, ensure_ascii=False),
                            encoding="utf-8")
             tmp.replace(index_path)
         except OSError:

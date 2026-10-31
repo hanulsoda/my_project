@@ -173,6 +173,48 @@ def test_a_word_already_searched_does_not_wait_behind_a_slow_search(setup, monke
     assert [r["title"] for r in found["exact"]] == ["1강"] and waited < 0.5  # 찾아 둔 답은 줄 서지 않고 바로
 
 
+def test_the_saved_index_keeps_only_lectures_still_in_the_folder(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    for name in ["A/1강", "B/1강"]:
+        (video_dir / f"{name}.mp4").parent.mkdir(parents=True, exist_ok=True)
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    for title, video_id in ids.items():
+        save_analysis(data_dir, video_id, {"title": title, "duration": 60.0, "segments": SEGMENTS})
+    index = data_dir / ".server-index.cache"
+
+    def start():  # 켜서 목록을 준비하고 요약을 저장할 때까지
+        before = index.stat().st_mtime_ns if index.exists() else None
+        with TestClient(create_app(video_dir, data_dir, None)):
+            deadline = time.monotonic() + 5
+            while (index.stat().st_mtime_ns if index.exists() else None) == before and time.monotonic() < deadline:
+                time.sleep(0.01)
+        return set(json.loads(index.read_text(encoding="utf-8"))["entries"])
+
+    assert start() == set(ids.values())
+    (video_dir / "B" / "1강.mp4").unlink()  # 지우거나 옮긴 강의는 다음에 켤 때 요약에서 빠짐(해마다 쌓이지 않게)
+    assert start() == {ids["A/1강"]}
+
+
+def test_the_saved_index_is_kept_when_the_video_folder_looks_empty(tmp_path):
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    (video_dir / "1강.mp4").write_bytes(b"x")
+    vid = find_videos(video_dir)[0]["id"]
+    save_analysis(data_dir, vid, {"title": "1강", "duration": 60.0, "segments": SEGMENTS})
+    index = data_dir / ".server-index.cache"
+    with TestClient(create_app(video_dir, data_dir, None)):
+        deadline = time.monotonic() + 5
+        while not index.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    (video_dir / "1강.mp4").rename(tmp_path / "1강.mp4")  # NAS 연결이 잠깐 끊겨 영상 폴더가 비어 보임
+
+    with TestClient(create_app(video_dir, data_dir, None)):
+        time.sleep(0.3)
+
+    assert vid in json.loads(index.read_text(encoding="utf-8"))["entries"]  # 다음에 켤 때 처음부터 다시 읽지 않게
+
+
 def test_a_damaged_analysis_file_only_takes_that_lecture_out(tmp_path):
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
     video_dir.mkdir()
