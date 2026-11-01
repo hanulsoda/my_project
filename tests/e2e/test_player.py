@@ -125,6 +125,22 @@ def test_a_note_keeps_the_scene_where_the_student_started_typing(page, site):
     assert stored(page, f"notes:{site.ids[ZMG]}")[-1] == {"t": 60, "text": "둘째 메모"}
 
 
+def test_a_double_tap_on_delete_in_the_memo_tab_removes_one_note(phone, site):
+    page = phone(390, 844)
+    vid = site.ids[ZMG]
+    remember(page, site, {f"notes:{vid}": [{"t": 10, "text": "첫 메모"}, {"t": 20, "text": "둘째 메모"}, {"t": 30, "text": "셋째 메모"}]})
+    page.goto(f"{site.url}/watch.html?id={vid}")
+    page.locator("[data-tab=notes]").tap()
+    box = page.locator("#notes button.delete").first.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.touchscreen.tap(x, y)
+    page.wait_for_timeout(120)
+    page.touchscreen.tap(x, y)  # 지운 자리로 올라온 다음 메모의 삭제 단추(이 탭에는 되돌리기가 없음)
+    page.wait_for_timeout(300)
+
+    assert [n["text"] for n in stored(page, f"notes:{vid}")] == ["둘째 메모", "셋째 메모"]
+
+
 def test_a_quiz_answer_shows_its_explanation_on_a_phone_and_says_which_is_which(phone, site):
     page = phone(360, 740)
     page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")

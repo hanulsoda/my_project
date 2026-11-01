@@ -420,7 +420,7 @@ function renderNotes() {
     el("button", {
       class: "delete",
       "aria-label": `${fmt(n.t)} 메모 삭제`,
-      onclick: () => { removeNote(id, n); renderNotes(); },
+      onclick: () => { if (!tappedTwice()) { removeNote(id, n); renderNotes(); } },
     }, "삭제"))));
   if (!notes.length) $("notes").append(el("li", { class: "notice" }, "아직 메모가 없습니다. 영상을 보다가 기억할 장면에서 추가하세요."));
 }

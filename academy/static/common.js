@@ -318,6 +318,14 @@ function removeNote(videoId, note) {
   store.set(`notes:${videoId}`, notes);
 }
 
+// 삭제를 두 번 누르면(두 번 탭) 지운 자리로 올라온 다음 메모까지 지워졌습니다. 0.4초 안에 다시 누른 삭제는 받지 않습니다(true).
+let lastRemove = 0;
+function tappedTwice() {
+  const now = Date.now(), twice = now - lastRemove < 400;
+  if (!twice) lastRemove = now;
+  return twice;
+}
+
 // 지운 메모 되돌리기(내 메모): 같은 시각·글로 다시 넣습니다. 그사이 다른 탭에서 같은 메모를 더했으면 한 번만 둡니다.
 function restoreNote(videoId, note) {
   const notes = store.get(`notes:${videoId}`) || [];

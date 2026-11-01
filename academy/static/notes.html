@@ -58,29 +58,43 @@
           el("button", {
             class: "delete",
             "aria-label": `${fmt(n.t)} 메모 삭제`,
-            onclick: () => {
+            onclick: (e) => {
+              if (tappedTwice()) return;  // 두 번 탭: 지운 자리로 올라온 다음 메모는 지우지 않습니다
+              const at = [...box.querySelectorAll("button.delete")].indexOf(e.currentTarget);
               removeNote(id, n);
               render();
               offerUndo(id, n);
-              // 키보드로 지웠을 때 초점이 화면 맨 처음으로 가지 않게 같은 자리의 다음 삭제 버튼으로
-              const left = box.querySelectorAll(`section[data-id="${id}"] button.delete`);
-              left[Math.min(i, left.length - 1)]?.focus();
+              // 키보드로 지웠을 때 초점이 화면 맨 처음으로 가지 않게 같은 자리의 다음 삭제 버튼으로.
+              // 그 강의의 마지막 메모였으면 그 자리의 다른 강의 메모로, 메모가 하나도 없으면 되돌리기로 갑니다.
+              const left = box.querySelectorAll(`section[data-id="${id}"] button.delete`), all = box.querySelectorAll("button.delete");
+              (left[Math.min(i, left.length - 1)] || all[Math.min(at, all.length - 1)] || undo.querySelector("button"))?.focus();
             },
           }, "삭제")))))));
     }
     filter.oninput = render;
 
     // 잘못 지운 메모를 되살릴 수 있게 지운 뒤 10초 동안 '되돌리기'를 보입니다(같은 시각·글로 다시 넣음).
-    let undoTimer = null;
+    // 그동안 더 지운 메모도 모아 한꺼번에 되살리고, 키보드로 찾아가 초점이 있는 동안에는 숨기지 않습니다.
+    let undoTimer = null, removed = [];  // removed: 되돌리기가 보이는 동안 지운 메모 {id, note}
+    const hideUndo = () => {
+      if (undo.contains(document.activeElement)) undoTimer = setTimeout(hideUndo, 2000);
+      else { undo.replaceChildren(); removed = []; }
+    };
     function offerUndo(id, note) {
       clearTimeout(undoTimer);
-      undo.replaceChildren(`${fmt(note.t)} ${note.text ? "메모" : "북마크"}를 지웠습니다. `,
+      removed.push({ id, note });
+      undo.replaceChildren(removed.length > 1 ? `메모 ${removed.length}개를 지웠습니다. ` : `${fmt(note.t)} ${note.text ? "메모" : "북마크"}를 지웠습니다. `,
         el("button", { type: "button", class: "link", onclick: () => {
           clearTimeout(undoTimer);
-          undo.replaceChildren(restoreNote(id, note) ? "" : "되돌리지 못했습니다. 화면 맨 위의 안내를 봐 주세요.");
+          const back = removed;
+          removed = [];
+          const saved = back.map((r) => restoreNote(r.id, r.note)).every(Boolean);
+          undo.replaceChildren(saved ? "" : "되돌리지 못했습니다. 화면 맨 위의 안내를 봐 주세요.");
           render();
+          // 키보드로 되돌렸을 때 초점이 화면 맨 처음으로 가지 않게 되살린 메모의 삭제 버튼으로
+          box.querySelector(`section[data-id="${back[0].id}"] button[aria-label="${fmt(back[0].note.t)} 메모 삭제"]`)?.focus();
         } }, "되돌리기"));
-      undoTimer = setTimeout(() => undo.replaceChildren(), 10000);
+      undoTimer = setTimeout(hideUndo, 10000);
     }
 
     // 다른 탭(플레이어 등)에서 메모를 더하거나 지우면 이 화면도 바로 다시 그립니다.

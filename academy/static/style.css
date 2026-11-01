@@ -714,9 +714,10 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 /* 손가락으로 누르는 화면(휴대폰·태블릿): 누르는 것은 40px 이상으로 해서 옆 단추를 잘못 누르지 않게 합니다 */
 @media (pointer: coarse) {
   .back, .tool, .tabs button, .speed button, .loop, .chapter-nav button, button.time, a.time, .delete,
-  .scope button, .layout button, #sort, .picks-head select { box-sizing: border-box; min-height: 40px; }
+  .scope button, .layout button, #sort, .picks-head select, .toast button.link { box-sizing: border-box; min-height: 40px; }
   .tool, .layout button, .chapter-nav button, .speed button { min-width: 40px; }
   button.time, a.time { display: inline-flex; align-items: center; vertical-align: middle; }
+  .toast button.link { padding: 0 6px; vertical-align: middle; }  /* 되돌리기 */
   .layout button { justify-content: center; }
   .disclosure { width: 40px; }  /* 폴더 펼치기 삼각형 */
   .sidebar li + li > .row, .sidebar .sub > li:first-child > .row { background-size: calc(100% - 62px) 1px; }  /* 넓어진 삼각형만큼 줄 */

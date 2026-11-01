@@ -702,6 +702,70 @@ def test_a_deleted_note_can_be_brought_back(page, site):
     expect(undo).to_be_hidden()
 
 
+THREE_NOTES = [{"t": 10, "text": "첫 메모"}, {"t": 20, "text": "둘째 메모"}, {"t": 30, "text": "셋째 메모"}]
+
+
+def double_tap(page, locator):
+    box = locator.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.touchscreen.tap(x, y)
+    page.wait_for_timeout(120)
+    page.touchscreen.tap(x, y)  # 지운 자리로 올라온 다음 메모의 삭제 단추
+    page.wait_for_timeout(300)
+
+
+def test_a_double_tap_on_delete_removes_one_note_and_undo_brings_back_every_deleted_one(phone, site):
+    page = phone(390, 844)
+    vid = site.ids[ZMG]
+    remember(page, site, {f"notes:{vid}": THREE_NOTES})
+    page.goto(site.url + "/notes.html")
+    double_tap(page, page.locator("button.delete").first)
+    assert [n["text"] for n in stored(page, f"notes:{vid}")] == ["둘째 메모", "셋째 메모"]
+
+    page.wait_for_timeout(500)
+    page.locator("button.delete").first.tap()  # 일부러 하나 더
+    expect(page.locator("#undo")).to_contain_text("메모 2개를 지웠습니다")
+    undo = page.get_by_role("button", name="되돌리기")
+    assert undo.bounding_box()["height"] >= 40  # 휴대폰에서 누르기 쉽게(다른 단추처럼)
+    undo.tap()
+
+    assert stored(page, f"notes:{vid}") == THREE_NOTES  # 마지막 하나만이 아니라 지운 메모 모두
+    expect(page.locator("#notes-page .notes li")).to_have_count(3)
+
+
+def test_the_keyboard_focus_stays_on_the_notes_after_deleting_and_undoing(page, site):
+    vid, other = site.ids[ZMG], site.ids["2022개정/고1/천재/성에꽃"]
+    remember(page, site, {f"notes:{vid}": [{"t": 10, "text": "하나"}], f"notes:{other}": [{"t": 5, "text": "둘"}]})
+    page.goto(site.url + "/notes.html")
+    page.get_by_role("button", name="00:10 메모 삭제").focus()
+    page.keyboard.press("Enter")  # 그 강의의 마지막 메모
+    expect(page.get_by_role("button", name="00:05 메모 삭제")).to_be_focused()  # 화면 맨 처음(body)이 아님
+
+    page.get_by_role("button", name="되돌리기").focus()
+    page.keyboard.press("Enter")
+    expect(page.get_by_role("button", name="00:10 메모 삭제")).to_be_focused()  # 되살린 메모
+
+    for name in ["00:10 메모 삭제", "00:05 메모 삭제"]:  # 메모가 하나도 남지 않으면 되돌리기로
+        page.wait_for_timeout(500)  # 0.4초 안에 다시 누른 삭제는 받지 않음(두 번 누름)
+        page.get_by_role("button", name=name).press("Enter")
+    expect(page.get_by_role("button", name="되돌리기")).to_be_focused()
+
+
+def test_the_undo_bar_stays_while_it_has_the_keyboard_focus(page, site):
+    remember(page, site, {f"notes:{site.ids[ZMG]}": THREE_NOTES})
+    page.clock.install()
+    page.goto(site.url + "/notes.html")
+    page.get_by_role("button", name="00:10 메모 삭제").click()
+    undo = page.get_by_role("button", name="되돌리기")
+    undo.focus()
+    page.clock.run_for(15000)
+    expect(undo).to_be_visible()  # 키보드로 찾아가는 동안 사라지지 않음
+
+    page.focus("#note-filter")
+    page.clock.run_for(5000)
+    expect(undo).to_be_hidden()
+
+
 def test_coming_back_with_the_back_button_redraws_progress(page, site):
     page.goto(site.url + "/")
     expect(page.locator(".video-list a").first).to_be_attached()
