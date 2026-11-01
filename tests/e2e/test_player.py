@@ -155,6 +155,24 @@ def test_the_player_uses_the_same_words_for_what_to_read_and_for_times(page, sit
     expect(guide).to_contain_text("준비 중")  # 목록의 '준비 중'과 같은 말
 
 
+def test_the_study_tabs_move_with_the_arrow_keys(page, site):
+    open_player(page, site)
+    page.focus("#tab-btn-guide")
+
+    page.keyboard.press("ArrowRight")
+    expect(page.locator("#tab-btn-pages")).to_be_focused()
+    expect(page.locator("#tab-btn-pages")).to_have_attribute("aria-selected", "true")
+    expect(page.locator("#tab-pages")).to_be_visible()
+    assert now(page) == 0  # 영상 10초 앞으로가 아님
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("ArrowLeft")  # 맨 앞에서 ←는 맨 끝 탭(숨긴 질문하기는 건너뜀)
+    expect(page.locator("#tab-btn-find")).to_be_focused()
+    expect(page.locator("#tab-find")).to_be_visible()
+    page.keyboard.press("Home")
+    expect(page.locator("#tab-btn-guide")).to_be_focused()
+    assert page.evaluate("[...document.querySelectorAll('[role=tab]')].filter((t) => t.tabIndex === 0).map((t) => t.id)") == ["tab-btn-guide"]
+
+
 def test_a_section_repeat_keeps_looping(page, site):
     open_player(page, site)
     go(page, 20)

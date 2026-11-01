@@ -73,15 +73,26 @@ function notice(text) {
 }
 
 // ---- 탭 ----
-for (const tab of document.querySelectorAll(".tabs button")) {
-  tab.onclick = () => {
-    for (const other of document.querySelectorAll(".tabs button")) {
-      other.classList.toggle("active", other === tab);
-      other.setAttribute("aria-selected", String(other === tab));  // 화면 읽기 프로그램에 열린 탭을 알립니다
-    }
-    for (const body of document.querySelectorAll(".tab-body")) body.hidden = body.id !== `tab-${tab.dataset.tab}`;
-  };
+const tabs = [...document.querySelectorAll(".tabs button")];
+function openTab(tab) {
+  for (const other of tabs) {
+    other.classList.toggle("active", other === tab);
+    other.setAttribute("aria-selected", String(other === tab));  // 화면 읽기 프로그램에 열린 탭을 알립니다
+    other.tabIndex = other === tab ? 0 : -1;  // Tab 키는 열린 탭 하나에만 서고 곧장 그 내용으로 갑니다
+  }
+  for (const body of document.querySelectorAll(".tab-body")) body.hidden = body.id !== `tab-${tab.dataset.tab}`;
 }
+for (const tab of tabs) tab.onclick = () => openTab(tab);
+openTab(tabs.find((t) => t.classList.contains("active")));
+// 키보드: 탭 줄에서 ←→로 옆 탭(끝에서는 반대쪽 끝), Home·End로 처음·마지막 탭을 엽니다. 숨긴 탭은 건너뜁니다.
+document.querySelector(".tabs").addEventListener("keydown", (e) => {
+  const shown = tabs.filter((t) => !t.hidden), i = shown.indexOf(e.target), n = shown.length;
+  const next = i < 0 ? null : { ArrowLeft: shown[(i - 1 + n) % n], ArrowRight: shown[(i + 1) % n], Home: shown[0], End: shown[n - 1] }[e.key];
+  if (!next) return;
+  e.preventDefault();
+  openTab(next);
+  next.focus();
+});
 
 // ---- 데이터 불러오기 ----
 fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(선생님용 이용 통계)
@@ -534,6 +545,7 @@ setSpeed(store.get("speed") || 1);
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.closest("input, textarea, select")) return;
   if ($("shortcuts").open || (e.key === " " && e.target.closest("button"))) return;
+  if (e.target.closest('[role="tab"]') && ["ArrowLeft", "ArrowRight"].includes(e.key)) return;  // 탭 줄의 ←→는 탭 옮기기
   if (e.key === " ") {
     if (!e.repeat) video.paused ? video.play().catch(() => {}) : video.pause();  // 꾹 누르고 있어도 반복하지 않게
   } else if (e.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);

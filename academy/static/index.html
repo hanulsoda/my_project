@@ -12,6 +12,8 @@
   <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 </head>
 <body class="library" data-view="home">
+  <!-- 키보드: 맨 처음 Tab에 보이는 '건너뛰기'. 사이드바의 폴더들을 하나씩 지나지 않고 강의 목록으로 갑니다. -->
+  <a class="skip" id="skip" href="#lectures">목록으로 건너뛰기</a>
   <main class="app">
     <header class="content-head">
       <a class="back" href="#">강의</a>
@@ -36,7 +38,7 @@
     <!-- 휴대폰 첫 화면 맨 위의 '이어 보기'(보다 만 강의 셋). 넓은 화면은 본문에 이어 보기 목록이 따로 있어 숨깁니다. -->
     <section id="resume" class="resume" aria-labelledby="resume-title" hidden><h2 id="resume-title">이어 보기</h2><ul id="resume-list" class="video-list"></ul></section>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
-    <div class="content-body">
+    <div class="content-body" id="lectures" tabindex="-1">
       <p id="found-status" class="sr-only" aria-live="polite"></p>
       <section id="found" hidden></section>
       <section id="recent" hidden><h2>이어 보기</h2><ul id="recent-list" class="video-list"></ul></section>
@@ -231,6 +233,11 @@
 
     // 키보드: 찾기 칸에서 ↓로 첫 강의, 목록에서 ↑↓(그림 보기는 ←→ 옆, ↑↓ 한 줄), Enter로 열기
     const lectureLinks = () => [...document.querySelectorAll(".content-body .video-list a")].filter((a) => a.offsetParent);
+    // 건너뛰기: 첫 강의(선생님 말 결과면 첫 결과)에 초점. 주소(#f/폴더)는 바꾸지 않습니다.
+    $("skip").onclick = (e) => {
+      e.preventDefault();
+      ([...document.querySelectorAll(".content-body a")].find((a) => a.offsetParent) || $("lectures")).focus();
+    };
     search.addEventListener("keydown", (e) => {
       if (e.key !== "ArrowDown" || e.isComposing) return;
       if (typing) filterNow();  // 방금 친 글자로 먼저 거릅니다(거르기 전 목록의 강의로 갔다가 자리를 잃지 않게)

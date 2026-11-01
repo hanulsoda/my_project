@@ -344,6 +344,22 @@ def test_lists_use_the_two_student_words_for_what_to_read(page, site):
     expect(page.locator("#found")).not_to_contain_text("학원")
 
 
+def test_a_keyboard_can_skip_straight_to_the_lecture_list(page, site):
+    page.goto(site.url + "/#f/2022개정/고1/미래엔")
+    expect(page.locator(".video-list a:visible").first).to_be_visible()
+    skip = page.locator("a.skip")
+    assert not on_screen(page, skip)  # 마우스로 쓸 때는 보이지 않음
+
+    page.keyboard.press("Tab")
+    expect(skip).to_be_focused()
+    expect(skip).to_have_text("목록으로 건너뛰기")
+    assert on_screen(page, skip)
+    page.keyboard.press("Enter")
+
+    expect(page.locator(".video-list a:focus")).to_contain_text("제망매가")  # 사이드바의 폴더들을 지나지 않고 첫 강의로
+    assert unquote(page.url).endswith("#f/2022개정/고1/미래엔")  # 고른 폴더는 그대로
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()
