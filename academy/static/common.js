@@ -305,6 +305,14 @@ function removeNote(videoId, note) {
   store.set(`notes:${videoId}`, notes);
 }
 
+// 지운 메모 되돌리기(내 메모): 같은 시각·글로 다시 넣습니다. 그사이 다른 탭에서 같은 메모를 더했으면 한 번만 둡니다.
+function restoreNote(videoId, note) {
+  const notes = store.get(`notes:${videoId}`) || [];
+  if (!notes.some((n) => n.t === note.t && (n.text || "") === (note.text || ""))) notes.push({ ...note });
+  notes.sort((a, b) => a.t - b.t);
+  return store.set(`notes:${videoId}`, notes);
+}
+
 // ---- 퀴즈 카드: 플레이어와 '틀린 문제 복습'이 함께 씁니다 ----
 // 틀린 문제는 강의마다 wrong:<영상 번호>에 문제 글로 기억합니다. 빈칸 문제는 답 문장이 같은 것이 있어 지문까지 붙입니다.
 const quizKey = (q) => q.question || [q.context, ...q.parts].join(" ");

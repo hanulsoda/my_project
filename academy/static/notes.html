@@ -15,27 +15,41 @@
   <main class="app">
     <header class="content-head"><a class="back" href="./">강의</a><div class="heading"><h1>내 메모</h1><p id="view-sub" class="sub"></p></div></header>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
-    <div class="content-body"><div id="notes-page" class="list-page"><p class="notice">불러오는 중…</p></div></div>
+    <div class="content-body"><div class="list-page">
+      <input id="note-filter" class="note-filter" type="search" aria-label="메모 찾기" placeholder="메모·강의 이름으로 찾기">
+      <div id="notes-page"><p class="notice">불러오는 중…</p></div>
+    </div></div>
+    <!-- 지운 뒤 잠깐 보이는 '되돌리기'. 비어 있으면 숨고, 글이 들어가면 화면 읽기 프로그램이 읽습니다. -->
+    <p id="undo" class="toast" role="status"></p>
   </main>
   <script src="common.js"></script>
   <script>
     // 강의마다 notes:<영상 번호>에 저장된 메모·북마크를 강의별로 모아 봅니다. 시간을 누르면 그 장면부터 봅니다.
-    const box = document.getElementById("notes-page");
+    const box = document.getElementById("notes-page"), filter = document.getElementById("note-filter"), undo = document.getElementById("undo");
     let titles = new Map(), videos = [], listFailed = false;  // listFailed: 강의 목록을 받지 못함(서버를 다시 켜는 중 등)
 
     function render() {
       const lists = savedLists("notes:");
       fillSidebar(videos, { here: "notes.html" });  // 지우면 사이드바의 메모 수도 바뀝니다
-      document.getElementById("view-sub").textContent = lists.length ? `강의 ${lists.length}개 · 메모 ${lists.reduce((n, l) => n + l.items.length, 0)}개` : "";
+      const total = lists.reduce((n, l) => n + l.items.length, 0);
+      filter.hidden = !lists.length;
       if (!lists.length) {
+        document.getElementById("view-sub").textContent = "";
         box.replaceChildren(el("p", { class: "notice" }, "아직 메모가 없습니다. 강의를 보다가 메모 탭에서 기억할 장면을 추가하세요."));
         return;
       }
       // 지워졌거나 옮겨진 강의의 메모도 버리지 않고 보여 줍니다. 목록을 못 받았으면 이름만 모르고 강의로는 갈 수 있습니다.
       const name = (id) => titles.get(id) || (listFailed ? "강의 이름을 불러오지 못함" : "목록에 없는 강의");
       lists.sort((a, b) => name(a.id).localeCompare(name(b.id), "ko"));
+      // 찾기: 낱말마다 메모 글(북마크는 '북마크')이나 강의 이름·폴더에 들어 있는 메모만
+      const words = filter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const hit = (id, n) => words.every((w) => `${n.text || "북마크"} ${name(id)}`.toLowerCase().includes(w));
+      const shown = lists.map(({ id, items }) => ({ id, items: items.filter((n) => hit(id, n)) })).filter((l) => l.items.length);
+      const found = shown.reduce((n, l) => n + l.items.length, 0);
+      document.getElementById("view-sub").textContent = words.length ? `찾은 메모 ${found}개 · 모두 ${total}개` : `강의 ${lists.length}개 · 메모 ${total}개`;
       box.replaceChildren(...(listFailed ? [el("p", { class: "notice" }, `강의 이름을 불러오지 못했습니다. ${OFFLINE}`)] : []),
-        ...lists.map(({ id, items }) => el("section", { class: "review-lecture", "data-id": id },
+        ...(shown.length ? [] : [el("p", { class: "notice" }, `‘${filter.value.trim()}’에 맞는 메모가 없습니다.`)]),
+        ...shown.map(({ id, items }) => el("section", { class: "review-lecture", "data-id": id },
         el("h2", {}, titles.has(id) || listFailed ? el("a", { href: `watch.html?id=${id}` }, name(id)) : name(id)),
         el("ul", { class: "notes" }, ...items.map((n, i) => el("li", {},
           el("a", { class: "time", href: `watch.html?id=${id}&t=${Math.floor(n.t)}` }, fmt(n.t)),
@@ -46,12 +60,28 @@
             onclick: () => {
               removeNote(id, n);
               render();
+              offerUndo(id, n);
               // 키보드로 지웠을 때 초점이 화면 맨 처음으로 가지 않게 같은 자리의 다음 삭제 버튼으로
               const left = box.querySelectorAll(`section[data-id="${id}"] button.delete`);
               left[Math.min(i, left.length - 1)]?.focus();
             },
           }, "삭제")))))));
     }
+    filter.oninput = render;
+
+    // 잘못 지운 메모를 되살릴 수 있게 지운 뒤 10초 동안 '되돌리기'를 보입니다(같은 시각·글로 다시 넣음).
+    let undoTimer = null;
+    function offerUndo(id, note) {
+      clearTimeout(undoTimer);
+      undo.replaceChildren(`${fmt(note.t)} ${note.text ? "메모" : "북마크"}를 지웠습니다. `,
+        el("button", { type: "button", class: "link", onclick: () => {
+          clearTimeout(undoTimer);
+          undo.replaceChildren(restoreNote(id, note) ? "" : "되돌리지 못했습니다. 화면 맨 위의 안내를 봐 주세요.");
+          render();
+        } }, "되돌리기"));
+      undoTimer = setTimeout(() => undo.replaceChildren(), 10000);
+    }
+
     // 다른 탭(플레이어 등)에서 메모를 더하거나 지우면 이 화면도 바로 다시 그립니다.
     addEventListener("storage", (e) => { if (e.key === null || e.key.startsWith("notes:")) render(); });
 

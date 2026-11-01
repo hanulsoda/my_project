@@ -679,6 +679,11 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .note-text { flex: 1; overflow-wrap: anywhere; }
 .list-page .notes { padding: 0 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }  /* 내 메모 화면: 묶음 목록 */
 .list-page .notes li:last-child { border-bottom: 0; }
+.note-filter { display: block; width: 100%; margin: 4px 0 4px; }  /* 내 메모 찾기 */
+/* 지운 뒤 화면 아래에 잠깐 뜨는 '되돌리기' */
+.toast { position: fixed; bottom: 16px; left: 50%; z-index: 20; width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; margin: 0; padding: 10px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); transform: translateX(-50%); }
+.toast:empty { display: none; }
+.toast button.link { font-weight: 600; }
 .delete { padding: 2px 8px; box-shadow: none; }
 
 /* 좁은 화면(휴대폰): 영상은 위, 아래 탭 상자가 남은 높이를 채웁니다. 화면 자체는 움직이지 않아서

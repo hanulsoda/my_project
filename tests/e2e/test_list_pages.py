@@ -544,6 +544,43 @@ def test_notes_keep_their_lecture_links_when_the_list_cannot_be_loaded(page, sit
     expect(page.locator(f'#notes-page h2 a[href="watch.html?id={vid}"]')).to_be_visible()
 
 
+def test_notes_can_be_found_by_their_text_or_lecture_name(page, site):
+    remember(page, site, {f"notes:{site.ids[ZMG]}": [{"t": 10, "text": "반어법 정리"}, {"t": 20, "text": "주제"}],
+                          f"notes:{site.ids['2022개정/고1/천재/성에꽃']}": [{"t": 30, "text": "반어법 예시"}],
+                          f"notes:{site.ids['2022개정/고1/미래엔/청산별곡']}": [{"t": 5, "text": ""}]})
+    page.goto(site.url + "/notes.html")
+    notes = page.locator("#notes-page .notes li")
+    expect(notes).to_have_count(4)
+
+    page.fill("#note-filter", "반어법")
+    expect(notes).to_have_count(2)
+    page.fill("#note-filter", "성에꽃")  # 강의 이름으로
+    expect(notes).to_have_count(1)
+    expect(notes.first).to_contain_text("반어법 예시")
+    page.fill("#note-filter", "북마크")
+    expect(notes).to_have_count(1)
+    page.fill("#note-filter", "없는말")
+    expect(page.locator("#notes-page")).to_contain_text("‘없는말’에 맞는 메모가 없습니다.")
+    page.fill("#note-filter", "")
+    expect(notes).to_have_count(4)
+
+
+def test_a_deleted_note_can_be_brought_back(page, site):
+    vid = site.ids[ZMG]
+    remember(page, site, {f"notes:{vid}": [{"t": 10, "text": "메모 하나"}, {"t": 20, "text": "메모 둘"}]})
+    page.goto(site.url + "/notes.html")
+    page.get_by_role("button", name="00:10 메모 삭제").click()
+    expect(page.locator("#notes-page")).not_to_contain_text("메모 하나")
+
+    undo = page.get_by_role("button", name="되돌리기")
+    expect(undo).to_be_visible()
+    undo.click()
+
+    expect(page.locator("#notes-page")).to_contain_text("메모 하나")
+    assert stored(page, f"notes:{vid}") == [{"t": 10, "text": "메모 하나"}, {"t": 20, "text": "메모 둘"}]
+    expect(undo).to_be_hidden()
+
+
 def test_coming_back_with_the_back_button_redraws_progress(page, site):
     page.goto(site.url + "/")
     expect(page.locator(".video-list a").first).to_be_attached()
