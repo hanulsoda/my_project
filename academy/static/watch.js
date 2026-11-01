@@ -70,8 +70,9 @@ fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(
     else $("tab-guide").replaceChildren(notice(`요점 정리를 불러오지 못했습니다. ${OFFLINE}`));
   });
 
-function render({ title, analysis, references = [], prev = null, next = null }) {
+function render({ title, analysis, references = [], prev = null, next = null, ask = false }) {
   document.title = title;
+  $("tab-btn-ask").hidden = !ask;  // 질문하기는 서버가 켜 둘 때만(ASK_ENABLED, 질문마다 Claude 비용)
   // 머리글: 작품 이름과 그 위치(2022개정 · 고1 · 모의고사) 두 줄, 왼쪽 위 버튼은 그 폴더로 돌아갑니다.
   const parts = title.split("/");
   $("title").textContent = parts.pop();

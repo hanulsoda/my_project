@@ -194,6 +194,19 @@ def test_a_lecture_without_sound_says_so_instead_of_promising_a_guide(page, site
     expect(page.locator("#tab-guide")).not_to_contain_text("아직")
 
 
+def test_the_ask_tab_shows_only_when_the_server_answers_questions(page, site):
+    import re
+    open_player(page, site)
+    expect(page.locator("#tab-btn-ask")).to_be_hidden()  # 테스트 서버는 질문하기를 꺼 둠(ASK_ENABLED 없음)
+
+    def asking(route):
+        res = route.fetch()
+        route.fulfill(response=res, json={**res.json(), "ask": True})
+    page.route(re.compile(r"/api/videos/\w+\?view=1$"), asking)
+    open_player(page, site)
+    expect(page.locator("#tab-btn-ask")).to_be_visible()
+
+
 def test_questions_keep_working_after_several_long_answers(page, site):
     import json
     sent = []
