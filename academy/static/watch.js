@@ -413,21 +413,38 @@ function renderNotes() {
   if (!notes.length) $("notes").append(el("li", { class: "notice" }, "아직 메모가 없습니다. 영상을 보다가 기억할 장면에서 추가하세요."));
 }
 
-function addNote(text) {  // 지금 장면에 메모(글이 없으면 북마크). 같은 초에 같은 글이 있으면 더하지 않습니다(두 번 누름).
+function addNote(text, t = video.currentTime) {  // t초 장면에 메모(글이 없으면 북마크). 같은 초에 같은 글이 있으면 더하지 않습니다(두 번 누름).
   const notes = store.get(notesKey) || [];  // 저장했으면 true
-  if (notes.some((n) => Math.floor(n.t) === Math.floor(video.currentTime) && n.text === text)) return true;
-  notes.push({ t: video.currentTime, text });
+  if (notes.some((n) => Math.floor(n.t) === Math.floor(t) && n.text === text)) return true;
+  notes.push({ t, text });
   notes.sort((a, b) => a.t - b.t);
   if (!store.set(notesKey, notes)) return false;
   renderNotes();
   return true;
 }
 
+// 메모는 쓰기 시작한 장면에 붙입니다: 다 쓰고 추가를 누를 때면 영상이 이미 지나가 있습니다. 그 시각을 추가 단추에 보입니다.
+let noteAt = null;
+const noteButton = $("note-form").querySelector("button");
+const setNoteAt = (t) => {
+  noteAt = t;
+  noteButton.textContent = t === null ? "추가" : `${fmt(t)}에 추가`;
+};
+const startNote = () => { if (noteAt === null) setNoteAt(video.currentTime); };
+$("note-text").addEventListener("focus", startNote);
+$("note-text").addEventListener("input", startNote);
+$("note-text").addEventListener("blur", () => { if (!$("note-text").value.trim()) setNoteAt(null); });  // 쓰지 않고 떠나면 다음에 새로
+
 const notSaved = "저장하지 못했습니다. 화면 맨 위의 안내를 봐 주세요.";
 $("note-form").onsubmit = (e) => {
   e.preventDefault();
-  if (addNote($("note-text").value.trim())) $("note-text").value = "";
-  else $("status").textContent = `메모를 ${notSaved} 쓴 글은 그대로 두었습니다.`;
+  if (!addNote($("note-text").value.trim(), noteAt ?? video.currentTime)) {
+    $("status").textContent = `메모를 ${notSaved} 쓴 글은 그대로 두었습니다.`;
+    return;
+  }
+  $("note-text").value = "";
+  setNoteAt(null);  // 다음 메모는 다시 쓰기 시작할 때의 장면(칸에 남아 있으면 첫 글자에서)
+  if (!lost) $("status").textContent = "";  // 지난 북마크·저장 실패 안내가 남아 있지 않게(연결이 끊긴 안내는 둠)
 };
 $("bookmark-btn").onclick = () => {
   $("status").textContent = addNote("") ? `${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`

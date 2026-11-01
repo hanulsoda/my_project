@@ -103,6 +103,28 @@ def test_notes_at_different_scenes_are_all_kept(page, site):
     assert stored(page, f"notes:{site.ids[ZMG]}") == [{"t": 10, "text": ""}, {"t": 40, "text": ""}, {"t": 40, "text": "메모 하나"}]
 
 
+def test_a_note_keeps_the_scene_where_the_student_started_typing(page, site):
+    open_player(page, site)
+    go(page, 20)
+    page.click("#bookmark-btn")
+    expect(page.locator("#status")).to_contain_text("북마크했습니다")
+    go(page, 30)
+    page.click("[data-tab=notes]")
+    page.locator("#note-text").press_sequentially("중요")
+    expect(page.locator("#note-form button")).to_have_text("00:30에 추가")  # 어느 장면에 붙는지 보임
+    go(page, 45)  # 쓰는 동안 영상은 지나감
+    page.locator("#note-text").press_sequentially("한 장면")
+    page.press("#note-text", "Enter")
+
+    assert stored(page, f"notes:{site.ids[ZMG]}")[-1] == {"t": 30, "text": "중요한 장면"}
+    expect(page.locator("#note-form button")).to_have_text("추가")
+    expect(page.locator("#status")).to_have_text("")  # 지난 북마크 안내는 지움
+    go(page, 60)
+    page.fill("#note-text", "둘째 메모")  # 다음 메모는 다시 그때의 장면
+    page.press("#note-text", "Enter")
+    assert stored(page, f"notes:{site.ids[ZMG]}")[-1] == {"t": 60, "text": "둘째 메모"}
+
+
 def test_a_section_repeat_keeps_looping(page, site):
     open_player(page, site)
     go(page, 20)
