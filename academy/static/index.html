@@ -155,10 +155,7 @@
 
     function lectureLink(v, sub) {
       const parts = v.title.split("/"), name = parts.pop();
-      const pos = store.get(`pos:${v.id}`), score = store.get(`score:${v.id}`);  // score: 퀴즈 4지선다를 끝까지 푼 마지막 점수
-      const progress = !(pos?.d > 0) ? [] : pos.t >= pos.d - 5 ? [el("span", { class: "done" }, "다 봄")]  // 길이를 모르는 기록은 표시 안 함
-        : [el("span", { class: "progress" }, el("span", { class: "bar", "aria-hidden": "true" },
-            el("span", { style: `width: ${Math.round((pos.t / pos.d) * 100)}%` })), `${fmt(pos.t)}까지`)];
+      const score = store.get(`score:${v.id}`);  // score: 퀴즈 4지선다를 끝까지 푼 마지막 점수
       // 첫 교재 화면을 작게(화면에 보일 때만 불러옴). 그림이 없으면 같은 크기의 빈 칸으로 줄을 맞춥니다.
       const blank = () => el("span", { class: "thumb" });
       const thumb = v.analyzed ? el("img", { class: "thumb", src: `/api/videos/${v.id}/pages/0.jpg`, alt: "", loading: "lazy",
@@ -168,7 +165,7 @@
           el("span", { class: "video-sub" }, sub ?? parts.join(" · "))),
         el("span", { class: "meta" },
           el("span", { class: v.guide ? "badge ready" : "badge" }, v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "페이지" : "분석 전"),
-          ...(score ? [`퀴즈 ${score.right}/${score.total}`] : []), ...progress));
+          ...(score ? [`퀴즈 ${score.right}/${score.total}`] : []), ...watchedMark(v.id)));
     }
 
     // 한글은 한 글자를 치는 동안 입력이 여러 번 바뀌어, 잠깐 멈춘 뒤 한 번만 거릅니다(3,900개를 글자마다 다시 거르지 않게).

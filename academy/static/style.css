@@ -321,6 +321,10 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .picks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .picks-head select, #pick-list select { padding: 2px 6px; border: 1px solid var(--control); border-radius: 6px; background: var(--surface); font-size: 12px; }
 .picks-head select { margin: 12px 4px 0 0; }
+.picks .name { display: flex; flex-direction: column; }  /* 작품 이름, 그 아래 책·학기와 본 데까지 */
+.pick-title, .pick-sub .where { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pick-sub { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.pick-sub .progress .bar { width: 28px; }
 .picker { display: grid; gap: 8px; max-width: 560px; }
 .picker label { color: var(--muted); font-size: 13px; }
 /* 기기 옮기기: 크게 보이는 6자리 코드 */
@@ -457,6 +461,8 @@ a.time { display: inline-block; text-decoration: none; }
   .sidebar li + li > a, .sidebar li + li > a[aria-current="page"], .sidebar li + li > .row, .sidebar .sub > li:first-child > .row { background: linear-gradient(var(--border), var(--border)) right top / calc(100% - 46px) 1px no-repeat; }
   .sidebar a::after { content: ""; flex: none; width: 14px; height: 14px; background: var(--control); -webkit-mask: var(--i-chev-right) center / contain no-repeat; mask: var(--i-chev-right) center / contain no-repeat; }
   .sidebar .icon { width: 20px; height: 20px; }
+  .sidebar .picks a { padding-top: 6px; padding-bottom: 6px; }  /* 두 줄(이름, 책·본 데까지) */
+  .pick-sub { font-size: 13px; }
   .sidebar .n { font-size: 15px; }
   .sidebar a[aria-current="page"] { background-color: transparent; color: var(--text); }  /* 휴대폰에서는 고른 표시 없이 */
   .sidebar a[aria-current="page"] .icon { background: var(--accent); }

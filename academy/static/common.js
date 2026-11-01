@@ -102,6 +102,15 @@ function weekCard() {
     el("p", { class: "streak" }, streak ? `${streak}일째 이어서 공부하는 중` : "오늘 강의를 보면 기록이 시작됩니다"));
 }
 
+// 강의 줄에 붙이는 본 데까지(강의 목록·이번 주 강의): 다 봤으면 '다 봄', 아니면 막대와 '20:34까지'. 길이를 모르는 기록은 표시하지 않습니다.
+function watchedMark(videoId) {
+  const pos = store.get(`pos:${videoId}`);
+  if (!(pos?.d > 0)) return [];
+  if (pos.t >= pos.d - 5) return [el("span", { class: "done" }, "다 봄")];
+  return [el("span", { class: "progress" }, el("span", { class: "bar", "aria-hidden": "true" },
+    el("span", { style: `width: ${Math.round((pos.t / pos.d) * 100)}%` })), `${fmt(pos.t)}까지`)];
+}
+
 // 선생님이 고른 '이번 주 강의'(사이드바 맨 위). 한 화면에서 한 번만 불러오고, 선생님이 바꾼 뒤에는 picksLoad = null로 다시.
 let picksLoad = null;
 function picksSection() {
@@ -116,8 +125,12 @@ function picksSection() {
     const list = el("ul");
     const show = () => {
       const shown = picks.lectures.filter((l) => !select.value || !l.grade || l.grade === select.value);
+      // 작품 이름 아래에 책·학기(폴더 마지막 두 단계, 예: 수능특강 · 1학기)와 본 데까지: '1강 …'처럼 이름이 같은 강의도 구별되게
       list.replaceChildren(...shown.map((l) => el("li", {}, el("a", { href: `watch.html?id=${l.id}` },
-        el("span", { class: "icon i-star", "aria-hidden": "true" }), el("span", { class: "name" }, l.title.split("/").pop()),
+        el("span", { class: "icon i-star", "aria-hidden": "true" }),
+        el("span", { class: "name" }, el("span", { class: "pick-title" }, l.title.split("/").pop()),
+          el("span", { class: "pick-sub" }, el("span", { class: "where" }, l.title.split("/").slice(0, -1).slice(-2).join(" · ")),
+            ...watchedMark(l.id))),
         el("span", { class: "n" }, l.grade)))));
       if (!shown.length) list.append(el("li", { class: "picks-note" }, `${select.value} 강의는 아직 없습니다.`));
     };

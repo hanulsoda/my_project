@@ -285,6 +285,28 @@ def test_controls_that_do_nothing_on_a_view_are_hidden(page, site):
         expect(page.locator(control)).to_be_hidden()
 
 
+def picks(page, site, *titles):
+    """선생님이 고른 '이번 주 강의'(첫 강의에 대상 학년 고1)"""
+    page.route("**/api/picks", lambda route: route.fulfill(json={"note": "", "at": None, "lectures": [
+        {"id": site.ids[t], "title": t, "grade": "고1" if i == 0 else ""} for i, t in enumerate(titles)]}))
+
+
+@pytest.mark.parametrize("width", [1200, 390], ids=["desktop", "phone"])
+def test_this_weeks_lectures_show_progress_and_where_they_are(phone, site, width):
+    page = phone(width, 844)
+    picks(page, site, ZMG, "2022개정/고1/천재/성에꽃")
+    remember(page, site, {f"pos:{site.ids[ZMG]}": {"t": 148, "d": 150, "at": 1},
+                          f"pos:{site.ids['2022개정/고1/천재/성에꽃']}": {"t": 60, "d": 150, "at": 2}})
+    page.goto(site.url + "/")
+    rows = page.locator(".picks li a")
+    expect(rows).to_have_count(2)
+    expect(rows.nth(0)).to_contain_text("고1 · 미래엔")  # '1강 …'처럼 이름이 같아도 어느 책인지 알게
+    expect(rows.nth(0)).to_contain_text("다 봄")
+    expect(rows.nth(1)).to_contain_text("고1 · 천재")
+    expect(rows.nth(1)).to_contain_text("01:00까지")
+    expect(rows.nth(1).locator(".progress")).to_be_visible()
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()
