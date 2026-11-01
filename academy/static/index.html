@@ -77,6 +77,8 @@
     const findAgain = () => {  // 결과를 보던 화면으로 돌아왔으면 다시 찾아 보여 줍니다
       if (foundHere && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
     };
+    // 찾을 곳마다 찾지 못한 낱말: 다른 곳에서도 이미 못 찾은 낱말이면 그쪽에서 찾아보라고 권하지 않습니다(제목 ↔ 선생님 말을 오가지 않게).
+    const notFound = { title: "", spoken: "" };
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
     const PICK_FOLDER = "왼쪽에서 폴더를 고르세요.";
 
@@ -138,9 +140,12 @@
       $("recent").hidden = !(listing && recent && ["home", "recent"].includes(view.kind));
       $("new").hidden = !(listing && fresh && ["home", "new"].includes(view.kind));
       const folder = folders.find((f) => f.name === top), parts = view.kind === "folder" ? view.name.split("/") : [];
+      if (searching && !shown && !guideOnly.checked) notFound.title = search.value.trim();
+      const askSpoken = searching && !shown && !jamoOnly(search.value) && notFound.spoken !== search.value.trim();
       const [title, sub, empty] =
         showingFound ? ["선생님 말에서 찾기", `‘${search.value.trim()}’`, ""]
-        : searching ? ["찾기 결과", `강의 ${shown.toLocaleString()}개 · ‘${search.value.trim()}’`, shown ? "" : jamoOnly(search.value) ? JAMO_ONLY : "제목에는 없습니다. ‘선생님 말’에서 찾아볼까요?"]
+        : searching ? ["찾기 결과", `강의 ${shown.toLocaleString()}개 · ‘${search.value.trim()}’`, shown ? "" : jamoOnly(search.value) ? JAMO_ONLY
+                       : askSpoken ? "제목에는 없습니다. ‘선생님 말’에서 찾아볼까요?" : "제목에도 선생님 말에도 없습니다. 다른 낱말로 찾아보세요."]
         : folder ? [parts.at(-1), `${parts.length > 1 ? `${parts.slice(0, -1).join(" › ")} · ` : ""}강의 ${shown.toLocaleString()}개`
                     + (folder.seen && parts.length === 1 ? ` · ${folder.seen}개 봄` : ""),
                     shown ? "" : guideOnly.checked ? "이 폴더에는 요점 정리가 있는 강의가 없습니다." : "이 폴더에는 강의가 없습니다."]
@@ -150,9 +155,8 @@
       $("view-title").textContent = title;
       $("view-sub").textContent = sub;
       // 제목에 없는 낱말은 선생님이 말했을 수 있어, 선생님 말에서 찾아보게 합니다.
-      const askSpoken = el("button", { type: "button", class: "retry", onclick: () => { setScope("spoken"); $("tools").requestSubmit(); } },
-                           "선생님 말에서 찾기");
-      $("empty").replaceChildren(empty, ...(searching && !shown && !jamoOnly(search.value) ? [" ", askSpoken] : []));
+      $("empty").replaceChildren(empty, ...(askSpoken ? [" ", el("button", { type: "button", class: "retry",
+        onclick: () => { setScope("spoken"); $("tools").requestSubmit(); } }, "선생님 말에서 찾기")] : []));
       $("empty").hidden = !empty;
       $("empty").classList.toggle("wide-only", empty === PICK_FOLDER);  // 휴대폰 첫 화면은 폴더가 바로 아래에 있습니다
       // found: 선생님 말 결과, search: 제목 찾기. 화면마다 아무 일도 하지 않는 단추(요점 정리만·보기·정렬)를 숨기는 데 씁니다(style.css).
@@ -324,9 +328,13 @@
           ? [el("p", { class: "also" }, m.text)]
           : [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(m.time)}` }, `${fmt(m.time)} · ${m.text}`), " "]),
         ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.map(lectureLabel).join(", ")}`)] : []));
-      // 아무 데서도 찾지 못했으면 다음에 해 볼 것을 알려 줍니다(제목에서 찾기).
+      // 아무 데서도 찾지 못했으면 다음에 해 볼 것을 알려 줍니다(제목에서 이미 찾지 못한 낱말이 아니면 제목에서 찾기).
       const none = !found.exact.length && !found.similar.length && !found.notes.length;
       if (none) {
+        notFound.spoken = q;
+        if (notFound.title === q) {
+          return void box.replaceChildren(el("p", { class: "notice" }, `‘${q}’: 선생님이 이 낱말을 말한 강의가 없고, 강의 제목에도 없습니다. 다른 낱말로 찾아보세요.`));
+        }
         return void box.replaceChildren(el("p", { class: "notice" }, `‘${q}’: 선생님이 이 낱말을 말한 강의가 없습니다. 다른 낱말로 찾거나 강의 제목에서 찾아보세요. `,
           el("button", { type: "button", class: "retry", onclick: () => { setScope("title"); render(); search.focus(); } }, "제목에서 찾기")));
       }

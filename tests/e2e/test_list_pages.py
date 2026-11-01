@@ -485,6 +485,20 @@ def test_search_messages_say_what_went_wrong_and_what_to_do_next(page, site):
     expect(page.locator("#found .found-list .meta").first).to_have_text("5번 말함")  # '5번'만으로는 무엇인지 몰랐음
 
 
+def test_an_empty_search_does_not_send_the_student_back_and_forth(page, site):
+    page.goto(site.url + "/")
+    expect(page.locator(".video-list a").first).to_be_attached()
+    page.fill("#search", "없는낱말")
+    expect(page.locator("#empty")).to_contain_text("제목에는 없습니다. ‘선생님 말’에서 찾아볼까요?")
+    page.locator("#empty button").click()  # 선생님 말에서 찾기
+
+    expect(page.locator("#found")).to_contain_text("선생님이 이 낱말을 말한 강의가 없고, 강의 제목에도 없습니다")
+    expect(page.locator("#found button")).to_have_count(0)  # 이미 찾지 못한 제목으로 다시 보내지 않음
+    page.click("#scope-title")  # 직접 제목으로 돌아가도
+    expect(page.locator("#empty")).to_contain_text("제목에도 선생님 말에도 없습니다")
+    expect(page.locator("#empty button")).to_have_count(0)
+
+
 def test_lectures_are_named_with_their_place_instead_of_a_slash_path(page, site):
     vid = site.ids[ZMG]
     remember(page, site, {f"notes:{vid}": [{"t": 10, "text": "메모"}],
