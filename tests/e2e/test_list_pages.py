@@ -47,6 +47,38 @@ def test_spoken_search_results_come_back_after_watching_a_lecture(page, site):
     expect(page.locator("#found h2").first).to_contain_text("반어법")
 
 
+def test_choosing_spoken_after_typing_a_word_searches_it(page, site):
+    page.goto(site.url + "/")
+    expect(page.locator(".video-list a").first).to_be_attached()
+    page.fill("#search", "반어법")
+    page.click("#scope-spoken")  # 낱말을 먼저 쓰고 '선생님 말'을 누름: 찾을 곳만 바뀌고 찾지 않던 것
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+
+
+def test_the_spoken_scope_shows_a_find_button_on_a_phone(phone, site):
+    page = phone(390, 844)
+    page.goto(site.url + "/")
+    expect(page.locator("nav.sidebar a", has_text="2022개정")).to_be_visible()
+    expect(page.locator("#find-btn")).to_be_hidden()  # 제목은 쓰는 대로 걸러 보여 줌
+    page.locator("#scope-spoken").tap()
+    expect(page.locator("#find-btn")).to_be_visible()
+    assert on_screen(page, page.locator("#find-btn"))
+    page.fill("#search", "반어법")
+    page.locator("#find-btn").tap()
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    expect(page.locator("#found h2").first).to_be_visible()
+
+
+def test_a_title_search_with_no_hits_offers_to_search_what_the_teacher_said(page, site):
+    page.goto(site.url + "/")
+    expect(page.locator(".video-list a").first).to_be_attached()
+    page.fill("#search", "반어법")  # 제목에는 없는 낱말
+    expect(page.locator("#empty")).to_contain_text("제목에는 없습니다. ‘선생님 말’에서 찾아볼까요?")
+    page.locator("#empty button").click()
+    expect(page.locator("#scope-spoken")).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+
+
 def test_typing_a_title_does_not_start_a_spoken_search_on_return(page, site):
     page.goto(site.url + "/")
     page.fill("#search", "제망매가")

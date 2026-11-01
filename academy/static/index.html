@@ -17,7 +17,10 @@
       <a class="back" href="#">강의</a>
       <div class="heading"><h1 id="view-title">강의</h1><p id="view-sub" class="sub"></p></div>
       <form id="tools" class="tools" role="search">
-        <input id="search" type="search" aria-label="강의 찾기">
+        <div class="search-box">
+          <input id="search" type="search" aria-label="강의 찾기">
+          <button type="submit" id="find-btn" hidden>찾기</button>
+        </div>
         <div class="seg scope" role="group" aria-label="찾을 곳">
           <button type="button" id="scope-title" aria-pressed="true">제목</button>
           <button type="button" id="scope-spoken" aria-pressed="false">선생님 말</button>
@@ -74,6 +77,7 @@
       scope = next;
       for (const [id, s] of [["scope-title", "title"], ["scope-spoken", "spoken"]]) $(id).setAttribute("aria-pressed", String(s === scope));
       search.placeholder = PLACEHOLDER[scope];
+      $("find-btn").hidden = scope !== "spoken";  // 선생님 말은 다 쓴 뒤 찾습니다(제목은 쓰는 대로 걸러짐). 휴대폰에서 Enter를 몰라도 되게
       if (scope === "title") showingFound = false;
       save();
     }
@@ -122,7 +126,7 @@
       const folder = folders.find((f) => f.name === top), parts = view.kind === "folder" ? view.name.split("/") : [];
       const [title, sub, empty] =
         showingFound ? ["선생님 말에서 찾기", `‘${search.value.trim()}’`, ""]
-        : searching ? ["찾기 결과", `강의 ${shown.toLocaleString()}개 · ‘${search.value.trim()}’`, shown ? "" : "제목으로 찾은 강의가 없습니다."]
+        : searching ? ["찾기 결과", `강의 ${shown.toLocaleString()}개 · ‘${search.value.trim()}’`, shown ? "" : "제목에는 없습니다. ‘선생님 말’에서 찾아볼까요?"]
         : folder ? [parts.at(-1), `${parts.length > 1 ? `${parts.slice(0, -1).join(" › ")} · ` : ""}강의 ${shown.toLocaleString()}개`
                     + (folder.seen && parts.length === 1 ? ` · ${folder.seen}개 봄` : ""),
                     shown ? "" : guideOnly.checked ? "이 폴더에는 요점 정리가 있는 강의가 없습니다." : "이 폴더에는 강의가 없습니다."]
@@ -131,7 +135,10 @@
         : ["강의", `강의 ${total.toLocaleString()}개`, !total ? "아직 올라온 강의가 없습니다." : recent || fresh ? "" : PICK_FOLDER];
       $("view-title").textContent = title;
       $("view-sub").textContent = sub;
-      $("empty").textContent = empty;
+      // 제목에 없는 낱말은 선생님이 말했을 수 있어, 선생님 말에서 찾아보게 합니다.
+      const askSpoken = el("button", { type: "button", class: "retry", onclick: () => { setScope("spoken"); $("tools").requestSubmit(); } },
+                           "선생님 말에서 찾기");
+      $("empty").replaceChildren(empty, ...(searching && !shown ? [" ", askSpoken] : []));
       $("empty").hidden = !empty;
       $("empty").classList.toggle("wide-only", empty === PICK_FOLDER);  // 휴대폰 첫 화면은 폴더가 바로 아래에 있습니다
       document.body.dataset.view = searching || showingFound ? "search" : view.kind;
@@ -170,7 +177,11 @@
     };
     guideOnly.onchange = render;
     $("scope-title").onclick = () => { setScope("title"); render(); search.focus(); };
-    $("scope-spoken").onclick = () => { setScope("spoken"); render(); search.focus(); };
+    $("scope-spoken").onclick = () => {  // 낱말을 먼저 썼으면 바로 찾습니다
+      setScope("spoken");
+      render();
+      if (search.value.trim()) $("tools").requestSubmit(); else search.focus();
+    };
     document.querySelector(".content-head .back").onclick = () => {  // 휴대폰: 찾던 것도 지우고 첫 화면으로
       search.value = "";
       showingFound = false;

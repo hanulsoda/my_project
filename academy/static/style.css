@@ -261,6 +261,7 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .content-head h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.search-box { display: flex; gap: 6px; }  /* 찾기 칸과 '선생님 말'일 때의 찾기 단추 */
 .tools input[type="search"] { width: 240px; }
 .seg button { padding: 4px 12px; font-size: 13px; }
 .layout button { display: flex; align-items: center; padding: 4px 9px; }
@@ -424,8 +425,9 @@ a.time { display: inline-block; text-decoration: none; }
   .library:not([data-view="home"]) .content-head .back { display: inline-flex; }
   .content-head .heading { flex-basis: 100%; }
   .content-head h1 { font-size: 30px; }
-  .tools { flex: 1 1 100%; }
-  .tools input[type="search"] { flex: 1 1 100%; width: auto; }
+  .tools { flex: 1 1 100%; min-width: 0; }
+  .search-box { flex: 1 1 100%; min-width: 0; }  /* 찾기 칸의 기본 너비 + 찾기 단추가 화면보다 넓어지지 않게 */
+  .tools input[type="search"] { flex: 1; min-width: 0; width: auto; }
   .scope { flex: 1; }
   .scope button { flex: 1; min-height: 32px; }
   .switch-label { font-size: 14px; }
