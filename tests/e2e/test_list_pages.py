@@ -127,6 +127,21 @@ def test_review_counts_what_is_done_and_says_when_todays_review_is_over(page, si
     expect(page.locator("#view-sub")).to_have_text("오늘 복습할 문제 0개 · 앞으로 2개")
 
 
+def test_the_end_of_todays_review_is_in_view_after_the_last_answer_on_a_phone(phone, site):
+    page = phone(360, 740)
+    remember(page, site, {f"wrong:{site.ids[ZMG]}": [{"k": "제망매가의 갈래는?", "stage": 0, "due": 0},
+                                                     {"k": "누이의 죽음을 극복한 방법은?", "stage": 0, "due": 0}]})
+    page.goto(site.url + "/review.html")
+    questions = page.locator(".review-lecture .question")
+    questions.nth(0).locator("button.choice").first.tap()
+    questions.nth(1).locator("button.choice").nth(1).tap()  # 마지막 문제
+
+    end = page.locator("#review-end")
+    expect(end).to_contain_text("오늘 복습 끝!")
+    assert on_screen(page, end)  # 해설만 보이고 끝났다는 말은 화면 바로 아래에 있던 것
+    assert on_screen(page, questions.nth(1).locator(".feedback"))
+
+
 def test_an_old_record_with_an_evening_time_is_due_that_morning(page, site):
     page.clock.install(time=datetime(2026, 11, 3, 9, 0, tzinfo=KST))
     evening = datetime(2026, 11, 3, 22, 59, tzinfo=KST).timestamp() * 1000

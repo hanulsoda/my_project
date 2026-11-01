@@ -74,12 +74,14 @@
           : left.length ? `오늘 복습 끝! 다음 복습: ${schedule(left)}.` : "오늘 복습 끝! 틀린 문제를 모두 익혔습니다.";
         end.hidden = !over;
       };
-      const answer = (id, q, right) => {
+      const answer = (id, q, right, card) => {
         markWrong(id, quizKey(q), !right);
         answered++;
         sidebar();
         count();
         showProgress();
+        // 맨 아래 문제로 끝났으면 그 아래에 생긴 '오늘 복습 끝!'이 보이게: 휴대폰에서는 해설만 보이고 끝났다는 말은 화면 밖에 있었습니다
+        if (!end.hidden && card === [...box.querySelectorAll(".question")].at(-1)) end.scrollIntoView({ block: "nearest" });
       };
       // 강의를 6개씩 한꺼번에 받고(하나씩 기다리면 휴대폰에서 10초 넘게 걸림), 다 오기를 기다리지 않고 순서대로 그립니다.
       const lectures = inTurns(todo, 6, (w) => fetch(`/api/videos/${w.id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
@@ -100,7 +102,7 @@
         if (!drawn++) loading.before(progress, rule);
         loading.before(el("section", { class: "review-lecture" },
           el("h2", {}, ...lectureName(lecture.title, `watch.html?id=${w.id}`)),
-          ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => answer(w.id, q, right), replay))));
+          ...shown.map((q) => { const card = quizCard(q, quiz.indexOf(q) + 1, (right) => answer(w.id, q, right, card), replay); return card; })));
       }
       loading.replaceWith(end);
       loaded = true;
