@@ -500,6 +500,26 @@ def test_opening_a_lecture_while_the_server_restarts_waits_instead_of_blaming_th
     assert round(now(page)) == 60
 
 
+def test_the_lecture_comes_back_with_the_video_after_a_server_restart(phone, site):
+    page = phone(390, 844)
+    server = re.compile(r"/(api|media)/")  # 강의 정보와 영상 모두 서버를 다시 켜는 중(시놀로지가 502)
+    page.route(server, lambda route: route.fulfill(status=502, content_type="text/html", body="<html>502</html>"))
+    page.clock.install()
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator("#status")).to_contain_text("서버에 연결하지 못했습니다")
+    expect(page.locator("#tab-guide")).to_contain_text("요점 정리를 불러오지 못했습니다")
+
+    page.unroute(server)  # 서버가 다시 켜짐
+    page.clock.run_for(5000)
+
+    expect(page.locator("#status")).to_contain_text("다시 연결되어")
+    expect(page.locator("#title")).to_have_text("제망매가")  # 영상만 돌아오고 나머지는 빈 채로 있던 것
+    expect(page.locator("#back")).to_have_text("미래엔")
+    expect(page.locator("#tab-guide .chapter")).to_have_count(3)
+    page.locator("[data-tab=quiz]").tap()
+    expect(page.locator("#tab-quiz .question")).to_have_count(2)
+
+
 def test_a_file_the_running_server_cannot_send_says_so_instead_of_waiting_forever(page, site):
     sent = []
 

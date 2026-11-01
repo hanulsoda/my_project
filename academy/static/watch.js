@@ -56,6 +56,7 @@ const reconnected = () => {
   lost = null;
   clearTimeout(retry);
   $("status").textContent = `다시 연결되어 ${fmt(video.currentTime)}부터 이어서 봅니다.`;
+  if (lectureFailed) loadLecture();  // 끊긴 동안 받지 못한 강의 정보(제목·요점 정리·퀴즈)
 };
 video.addEventListener("playing", reconnected);
 video.addEventListener("canplay", reconnected);
@@ -103,17 +104,27 @@ document.querySelector(".tabs").addEventListener("keydown", (e) => {
 });
 
 // ---- 데이터 불러오기 ----
-fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(선생님용 이용 통계)
-  .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-  // 화면을 그리다 난 오류는 '영상 없음'으로 덮지 않습니다(브라우저 콘솔에 그대로 나옴).
-  // 서버를 다시 켜는 중(502)이거나 인터넷이 끊긴 것을 '없는 강의'로 보이지 않게 404만 그렇게 알립니다.
-  .then(render, (status) => {
-    if (status === 404) {
-      missing = true;
-      $("title").textContent = "영상을 찾을 수 없습니다";
-      if ($("status").textContent === MISSING) $("status").textContent = "";  // 제목과 같은 말을 두 번 하지 않게
-    } else $("tab-guide").replaceChildren(notice(`요점 정리를 불러오지 못했습니다. ${OFFLINE}`));
-  });
+// 서버를 다시 켜는 중에 열어 강의 정보를 받지 못했으면(lectureFailed) 영상이 다시 연결될 때 한 번 더 받습니다(reconnected).
+// 그러지 않으면 영상만 돌아오고 제목·요점 정리·퀴즈는 빈 채로 남았습니다.
+let lectureFailed = false;
+function loadLecture() {
+  lectureFailed = false;
+  fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(선생님용 이용 통계)
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    // 화면을 그리다 난 오류는 '영상 없음'으로 덮지 않습니다(브라우저 콘솔에 그대로 나옴).
+    // 서버를 다시 켜는 중(502)이거나 인터넷이 끊긴 것을 '없는 강의'로 보이지 않게 404만 그렇게 알립니다.
+    .then(render, (status) => {
+      if (status === 404) {
+        missing = true;
+        $("title").textContent = "영상을 찾을 수 없습니다";
+        if ($("status").textContent === MISSING) $("status").textContent = "";  // 제목과 같은 말을 두 번 하지 않게
+      } else {
+        lectureFailed = true;
+        $("tab-guide").replaceChildren(notice(`요점 정리를 불러오지 못했습니다. ${OFFLINE}`));
+      }
+    });
+}
+loadLecture();
 
 function render({ title, analysis, references = [], prev = null, next = null, ask = false }) {
   document.title = title;
