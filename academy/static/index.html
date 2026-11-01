@@ -55,22 +55,27 @@
     const $ = (elementId) => document.getElementById(elementId);
     const search = $("search"), guideOnly = $("guide-only");
     const norm = (text) => text.toLowerCase().replace(/\s+/g, "");
-    // 검색어·찾을 곳·스위치는 강의를 보고 돌아와도 그대로 있도록 브라우저에 기억합니다.
+    // 찾을 곳·스위치·보기·정렬은 강의를 보고 돌아와도 그대로 있도록 브라우저에 기억합니다.
     const saved = store.get("list") || {};
-    search.value = saved.q || "";
+    // 검색어와 선생님 말 결과를 보던 중인지(found)는 찾던 그 화면(방문 기록의 한 칸, history.state)에 붙여 둡니다. 강의를 보고
+    // 뒤로 가기·새로 고침으로 돌아오면 그대로 보이고, 폴더 링크(플레이어의 '‹ 미래엔', 내 메모의 사이드바 등)나 홈 화면의 앱으로
+    // 새로 열면 찾던 것 없이 엽니다. 브라우저에 기억했을 때는 지난 찾기가 고른 폴더나 첫 화면 대신 보였습니다.
+    const visit = () => history.state?.list || {};
+    search.value = visit().q || "";
     guideOnly.checked = !!saved.guideOnly;
     let scope = saved.scope === "spoken" ? "spoken" : "title";
     let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
     $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
-    // foundAt: 선생님 말에서 찾은 결과를 보던 화면 주소(없으면 null). 강의를 보고 그 주소로 돌아오면 다시 찾아 보여 주고,
-    // 폴더 링크(플레이어의 '‹ 폴더' 등)로 오면 그 폴더를 엽니다. 폴더를 거쳐도 지우지 않고, 학생이 찾기를 닫을 때만 지웁니다.
-    let foundAt = saved.found ? saved.foundAt ?? "" : null;
-    const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value,
-                                           found: foundAt !== null, foundAt });
+    let foundHere = !!visit().found;  // 이 화면에서 선생님 말 결과를 보던 중: 돌아오면 다시 찾아 보여 줍니다
+    const save = () => {
+      store.set("list", { guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value });
+      if (visit().q === search.value && !!visit().found === foundHere) return;
+      try { history.replaceState({ ...history.state, list: { q: search.value, found: foundHere } }, ""); } catch {}  // 너무 자주 바꾸면 사파리가 막음
+    };
     let folders = [], total = 0, loaded = false, showingFound = false, side = null, searchSeq = 0;
-    const closeFound = () => { showingFound = false; foundAt = null; };
+    const closeFound = () => { showingFound = false; foundHere = false; };
     const findAgain = () => {  // 결과를 보던 화면으로 돌아왔으면 다시 찾아 보여 줍니다
-      if (foundAt === location.hash && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
+      if (foundHere && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
     };
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
     const PICK_FOLDER = "왼쪽에서 폴더를 고르세요.";
@@ -202,8 +207,10 @@
       render();
     });
     const reveal = () => { if (current().kind === "folder") side.reveal(current().name); };  // 고른 하위 폴더가 사이드바에 보이게
-    window.onhashchange = () => {  // 폴더를 고르면 찾은 결과 대신 그 폴더. 뒤로 가기로 결과를 보던 화면에 오면 다시 찾아 보여 줍니다.
+    window.onhashchange = () => {  // 폴더를 고르면 찾던 것 없이 그 폴더. 뒤로 가기로 찾던 화면에 오면 그때 찾던 것을 다시 보여 줍니다.
       showingFound = false;
+      search.value = visit().q || "";
+      foundHere = !!visit().found;
       reveal();
       render();
       scrollTo(0, 0);
@@ -260,8 +267,7 @@
       e.preventDefault();
       if (scope === "title") return;  // 제목은 입력하는 대로 걸러 보여 줍니다
       const q = search.value.trim(), box = $("found"), seq = ++searchSeq;
-      showingFound = true;
-      foundAt = location.hash;
+      showingFound = foundHere = true;
       render();
       box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
       const status = $("found-status");  // 결과 전체 대신 수만 화면 읽기 프로그램에 알립니다

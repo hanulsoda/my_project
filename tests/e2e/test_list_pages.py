@@ -261,6 +261,61 @@ def test_opening_a_folder_from_the_sidebar_clears_the_search(page, site):
     expect(page.locator(".video-list a:visible")).to_have_count(2)
 
 
+@pytest.mark.parametrize("width, height", [(1200, 900), (390, 844)], ids=["desktop", "phone"])
+def test_a_title_search_left_in_the_box_does_not_take_over_the_players_folder_link(phone, site, width, height):
+    page = phone(width, height)
+    page.goto(site.url + "/")
+    page.fill("#search", "제망")
+    expect(page.locator("#view-title")).to_have_text("찾기 결과")
+    page.locator(f'.content-body a[href="watch.html?id={site.ids[ZMG]}"]:visible').click()
+    expect(page.locator("#title")).to_have_text("제망매가")
+    page.locator("#next-lecture").click()
+    expect(page.locator("#title")).to_have_text("제망매가 학습활동")
+    expect(page.locator("#back")).to_have_text("미래엔")
+    page.locator("#back").click()
+
+    expect(page.locator("#view-title")).to_have_text("미래엔")  # '찾기 결과 · 강의 2개 · ‘제망’'이 아님
+    expect(page.locator("#search")).to_have_value("")
+    expect(page.locator(".content-body .video-list a:visible")).to_have_count(3)
+
+
+@pytest.mark.parametrize("start", ["notes.html", "review.html"])
+def test_a_folder_picked_in_another_screens_sidebar_is_not_hidden_by_a_title_search(page, site, start):
+    page.goto(site.url + "/")
+    page.fill("#search", "제망")
+    expect(page.locator("#view-title")).to_have_text("찾기 결과")
+    page.click(f'nav.sidebar a[href="{start}"]')
+    page.locator("nav.sidebar a", has_text="시험").click()
+
+    expect(page.locator("#view-title")).to_have_text("시험")
+    expect(page.locator(".content-body .video-list a:visible")).to_have_count(2)
+    page.go_back()
+    page.go_back()  # 찾던 화면으로 돌아가면 찾던 것 그대로
+    expect(page.locator("#search")).to_have_value("제망")
+    expect(page.locator("#view-title")).to_have_text("찾기 결과")
+
+
+def test_an_old_spoken_search_does_not_greet_the_student_when_the_app_opens(phone, site):
+    page = phone(390, 844)
+    page.goto(site.url + "/")
+    page.locator("#scope-spoken").tap()
+    page.fill("#search", "반어법")
+    page.locator("#find-btn").tap()
+    page.locator("#found li > a").first.tap()
+    expect(page.locator("#title")).to_have_text("제망매가")
+    page.locator("#next-lecture").tap()
+    expect(page.locator("#title")).to_have_text("제망매가 학습활동")
+    page.locator("#back").tap()  # '‹ 미래엔'
+    expect(page.locator("#view-title")).to_have_text("미래엔")
+
+    app = page.context.new_page()  # 다음 날 홈 화면의 앱을 엶(start_url ./)
+    app.goto(site.url + "/")
+    expect(app.locator("nav.sidebar a", has_text="2022개정")).to_be_visible()
+    expect(app.locator("#view-title")).to_have_text("강의")  # 지난 선생님 말 결과가 아님
+    expect(app.locator("#found")).to_be_hidden()
+    expect(app.locator("#search")).to_have_value("")
+
+
 def watched_four(page, site):
     """강의 넷을 보다 만 기록(제망매가를 가장 최근에)"""
     titles = [ZMG, ZMG + " 학습활동", "2022개정/고1/미래엔/청산별곡", "2022개정/고1/천재/성에꽃"]
