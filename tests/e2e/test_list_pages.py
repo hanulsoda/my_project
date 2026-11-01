@@ -819,6 +819,21 @@ def test_the_undo_bar_stays_while_it_has_the_keyboard_focus(page, site):
     expect(undo).to_be_hidden()
 
 
+@pytest.mark.parametrize("width", [1200, 390], ids=["mouse", "finger"])
+def test_the_undo_bar_goes_away_after_the_last_note_is_deleted_by_mouse_or_finger(phone, site, width):
+    page = phone(width, 844)
+    remember(page, site, {f"notes:{site.ids[ZMG]}": [{"t": 10, "text": "하나"}]})
+    page.clock.install()
+    page.goto(site.url + "/notes.html")
+    delete = page.get_by_role("button", name="00:10 메모 삭제")
+    delete.click() if width > 900 else delete.tap()  # 남은 메모가 없어 키보드였다면 초점이 되돌리기로 가는 때
+    undo = page.get_by_role("button", name="되돌리기")
+    expect(undo).to_be_visible()
+
+    page.clock.run_for(12000)
+    expect(undo).to_be_hidden()  # 초점이 되돌리기에 있다고 여겨 계속 떠 있던 것
+
+
 def test_coming_back_with_the_back_button_redraws_progress(page, site):
     page.goto(site.url + "/")
     expect(page.locator(".video-list a").first).to_be_attached()

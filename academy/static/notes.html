@@ -66,8 +66,9 @@
               offerUndo(id, n);
               // 키보드로 지웠을 때 초점이 화면 맨 처음으로 가지 않게 같은 자리의 다음 삭제 버튼으로.
               // 그 강의의 마지막 메모였으면 그 자리의 다른 강의 메모로, 메모가 하나도 없으면 되돌리기로 갑니다.
+              // 마우스·손가락으로 눌렀으면(detail 1 이상) 옮기지 않습니다: 되돌리기는 초점이 있는 동안 숨지 않아 계속 떠 있었습니다.
               const left = box.querySelectorAll(`section[data-id="${id}"] button.delete`), all = box.querySelectorAll("button.delete");
-              (left[Math.min(i, left.length - 1)] || all[Math.min(at, all.length - 1)] || undo.querySelector("button"))?.focus();
+              if (e.detail === 0) (left[Math.min(i, left.length - 1)] || all[Math.min(at, all.length - 1)] || undo.querySelector("button"))?.focus();
             },
           }, "삭제")))))));
     }
