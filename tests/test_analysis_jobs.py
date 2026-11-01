@@ -602,3 +602,51 @@ def test_a_moved_analysis_is_kept_even_if_tidying_up_after_the_move_fails(tmp_pa
 
     assert rec.transcribed == ["1강.mp4"] and len(rec.guided) == 1  # 옮긴 강의를 새로 사지 않음
     assert json.loads((data_dir / ".moved-lectures").read_text())  # 학생 기록도 따라감
+
+
+def test_force_makes_twin_lectures_a_new_summary_instead_of_passing_the_old_one_around(tmp_path):
+    for folder in ["고1", "고2"]:
+        (tmp_path / "videos" / folder).mkdir(parents=True)
+        (tmp_path / "videos" / folder / "1강.mp4").write_bytes(b"the recording")
+    nightly(tmp_path, Recorder())()
+    new = {**GUIDE, "summary": "새로 만든 요약"}
+    rec = Recorder(guide=new)
+
+    nightly(tmp_path, rec)(force=True, only="고1/1강")  # README: 그 강의만 처음부터 다시
+    assert rec.guided == ["고1/1강"]
+    nightly(tmp_path, rec)(force=True)  # 모두 다시: 한 번 사서 같은 영상에 복사
+
+    assert rec.guided == ["고1/1강", "고1/1강"]
+    assert all(load_analysis(tmp_path / "data", v["id"])["guide"] == new for v in find_videos(tmp_path / "videos"))
+
+
+def test_a_moved_lecture_keeps_its_page_pictures_even_if_saving_its_title_fails(tmp_path, monkeypatch):
+    import academy.analyze as analyze
+    videos, data_dir = moved_site(tmp_path, "고1/1강.mp4")
+    rec = Recorder()
+    run = lambda: analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, probe=lambda p: 120.0)
+    run()
+    old_id = find_videos(videos)[0]["id"]
+    (data_dir / old_id).mkdir()
+    (data_dir / old_id / "0.jpg").write_bytes(b"jpg")  # 페이지 그림
+    (videos / "2학기").mkdir()
+    (videos / "고1" / "1강.mp4").rename(videos / "2학기" / "1강.mp4")
+    real = analyze.save_analysis
+    monkeypatch.setattr(analyze, "save_analysis", lambda *a: (_ for _ in ()).throw(OSError(28, "No space left")))
+
+    run()
+
+    monkeypatch.setattr(analyze, "save_analysis", real)
+    assert (data_dir / find_videos(videos)[0]["id"] / "0.jpg").exists()  # 분석에 적힌 그림이 새 자리에 있음
+
+
+def test_an_infinite_failure_count_written_by_hand_does_not_stop_the_night_run(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4")
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / f"{ids['1강']}.json").write_text(
+        '{"title": "1강", "duration": 120.0, "segments": [], "guide": null, "guide_failures": Infinity}', encoding="utf-8")
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
+
+    assert "2강.mp4" in rec.transcribed

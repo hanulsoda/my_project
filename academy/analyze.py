@@ -79,7 +79,9 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
             replaced = _note_sizes(data_dir, mine, analyzed, settle_seconds)
             orphans = _orphans(data_dir, {v["id"] for v in videos})
             sizes = load_sizes(data_dir)
-            for v in videos:  # 크기 → 분석이 있는 강의(다른 반 폴더로 복사한 강의를 알아볼 때)
+            # 크기 → 분석이 있는 강의(다른 반 폴더로 복사한 강의를 알아볼 때). --force는 요점 정리를 새로 사려는 것이라
+            # 예전 것을 주고받지 않고, 이번에 새로 만든 강의만 같은 영상에 줍니다(_analyze_one 끝).
+            for v in videos if not force else ():
                 if v["id"] in analyzed and v["id"] in sizes and v["id"] not in replaced:
                     copies.setdefault(sizes[v["id"]], []).append(v["id"])
         return _analyze(mine, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references,
@@ -149,10 +151,10 @@ def _size(video):
 
 
 def _tries(data):
-    """Claude 답이 잘린 횟수. 손으로 "2"·null 등으로 고쳐도 밤 작업이 멈추지 않게."""
+    """Claude 답이 잘린 횟수. 손으로 "2"·null·Infinity 등으로 고쳐도 밤 작업이 멈추지 않게."""
     try:
         return int(data.get("guide_failures") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -201,10 +203,13 @@ def _adopt(video, data_dir, orphans, probe, copies):
     data = {**old["data"], "title": video["title"]}
     try:  # 분석 파일은 이미 옮겼으니 여기서 실패해도 이어 쓴 것으로 봅니다(옮긴 강의를 새로 사지 않게)
         save_analysis(data_dir, video["id"], data)
+    except OSError as e:
+        print(f"  예전 분석은 옮겼지만 제목을 고치지 못함: {e}", file=sys.stderr)
+    try:  # 제목을 못 고쳐도(디스크 가득 참) 그림은 옮깁니다: 분석에 적힌 페이지 그림은 다시 만들지 않습니다
         if (Path(data_dir) / old["id"]).is_dir() and not (Path(data_dir) / video["id"]).exists():
             (Path(data_dir) / old["id"]).rename(Path(data_dir) / video["id"])
     except OSError as e:
-        print(f"  예전 분석은 옮겼지만 제목·페이지 그림을 정리하지 못함: {e}", file=sys.stderr)
+        print(f"  예전 분석은 옮겼지만 페이지 그림을 옮기지 못함: {e}", file=sys.stderr)
     _record_sizes(data_dir, {video["id"]: size})
     try:  # 학생 기기의 이어 보기·메모와 '이번 주 강의'가 따라오게(못 남겨도 이어 쓴 분석은 그대로)
         record_move(data_dir, old["id"], video["id"])
