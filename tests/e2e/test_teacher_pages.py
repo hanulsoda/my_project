@@ -94,6 +94,33 @@ def test_toc_progress_wording(page, site, progress, says, never):
     expect(page.locator("#toc")).not_to_contain_text(never)
 
 
+def test_the_status_page_points_out_what_stopped(page, site):
+    from datetime import datetime, timedelta
+    old = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    fresh = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def stopped(route):
+        res = route.fetch()
+        route.fulfill(response=res, json={**res.json(), "guide_failed": ["고1/1강 제망매가"], "video_dir_empty": True,
+                                          "ops": {"backup": f"{old} 백업 완료", "night": f"{fresh} 자동 목차 3개 만듦",
+                                                  "new_videos": f"{old} 영상 분석 끝"}})
+    page.route("**/api/status", stopped)
+    open_status(page, site)
+
+    alerts = page.locator("#alerts")
+    expect(alerts).to_contain_text("NAS")  # 영상 폴더가 비어 보임
+    expect(alerts).to_contain_text("--retry-failed")  # 요점 정리가 두 번 잘린 강의
+    expect(alerts).to_contain_text("고1/1강 제망매가")
+    expect(page.locator("#ops-lines")).to_contain_text("3일 전 기록")  # 매일 도는 작업이 멈춘 듯함
+    expect(page.locator("#ops-lines dd").nth(1)).not_to_contain_text("전 기록")
+    expect(page.locator("#ops-lines dd").nth(2)).not_to_contain_text("전 기록")  # 새 강의 분석은 매일 돌지 않을 수 있음
+
+
+def test_the_status_page_has_no_alerts_when_nothing_stopped(page, site):
+    open_status(page, site)
+    expect(page.locator("#alerts")).to_be_hidden()
+
+
 # ---- 학원 정리 고치기 ----
 
 def open_fixes(page, site, key=TEACHER_KEY):

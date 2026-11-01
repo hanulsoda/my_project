@@ -10,19 +10,20 @@ import shutil
 import sys
 import time
 import unicodedata
+from datetime import datetime
 from itertools import groupby
 from pathlib import Path
 
 import numpy as np
 
 from academy.ai import IncompleteAnswer
-from academy.library import (VIDEO_EXTS, find_videos, folders_problem, load_analysis, load_sizes, record_move,
-                             record_sizes, save_analysis)
+from academy.library import (GUIDE_TRIES, VIDEO_EXTS, find_videos, folders_problem, load_analysis, load_sizes,
+                             record_move, record_sizes, save_analysis)
+from academy.settings import load_env_file
 
 # 예전에 소리 없는 강의에 넣던 빈 요점 정리. 지금은 "silent": true로 표시하고, 이것을 만나면 걷어 냅니다.
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
 SETTLE_SECONDS = 600  # 이보다 최근에 바뀐 영상은 아직 NAS로 복사 중일 수 있어 다음에 분석합니다
-GUIDE_TRIES = 2  # Claude가 답은 했지만(비용이 듦) 끝까지 못 쓴 강의는 이만큼만 다시 묻습니다(--retry-failed로 다시)
 def _try_lock(path):
     """그 잠금을 다른 프로세스가 쥐고 있으면 None. 돌려준 파일을 닫으면(프로세스가 끝나면) 풀립니다.
     윈도에는 이 잠금(fcntl)이 없어 잠그지 않습니다(분석을 겹쳐 돌리지 않게 조심)."""
@@ -47,7 +48,7 @@ def run_lock(data_dir, part):
 
 def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(1, 1),
                 detect_pages=None, read_screens=None, find_references=None, settle_seconds=0, probe=None,
-                retry_failed=False) -> int:
+                retry_failed=False, only=None) -> int:
     """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
 
     read_screens가 있으면 요점 정리를 만들 때 페이지마다 화면 글자를 읽어 근거로 함께 보냅니다.
@@ -56,6 +57,7 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
     probe(영상 경로)는 영상 길이(초). 주면 폴더를 옮기거나 이름을 바꾼 강의를 알아보고 예전 분석을 이어 쓰고, 다른 폴더로
     복사한 강의는 분석을 복사하고, 같은 자리에서 바뀐 영상(크기가 다름)은 새로 분석합니다.
     retry_failed: Claude 답이 잘려 GUIDE_TRIES번 실패한 강의도 다시 묻습니다.
+    only: 제목(폴더 이름 포함)에 이 글이 든 강의만 분석합니다.
     """
     videos = find_videos(video_dir)
     if not videos:
@@ -66,7 +68,9 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
         print("이 묶음의 분석이 이미 돌고 있어 이번에는 하지 않습니다.")
         return 0
     try:
-        mine = videos[part[0] - 1::part[1]]  # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
+        mine = _chosen(videos, part, only)
+        if only and not mine:
+            print(f"제목에 '{only}'이(가) 든 강의가 없습니다.")
         orphans, replaced, copies = [], set(), {}
         if probe:
             analyzed = {path.stem for path in Path(data_dir).glob("*.json")}  # 이번 분석을 시작할 때 분석이 있던 강의
@@ -80,6 +84,33 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
                         settle_seconds, lambda video: _adopt(video, data_dir, orphans, probe, copies), replaced, retry_failed)
     finally:
         lock.close()
+
+
+def _chosen(videos, part, only):
+    mine = videos[part[0] - 1::part[1]]  # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
+    if only:  # 맥 터미널에서 친 한글(자모로 나뉨)도 같은 글로 봅니다
+        word = unicodedata.normalize("NFC", only)
+        mine = [v for v in mine if word in unicodedata.normalize("NFC", v["title"])]
+    return mine
+
+
+def _redo_notice(video_dir, data_dir, part, only):
+    """--force가 다시 사게 될 요점 정리(이미 분석한 강의)의 수와 대략적인 비용. 다시 사는 것이 없으면 None."""
+    count = seconds = 0
+    for video in _chosen(find_videos(video_dir), part, only):
+        try:
+            data = load_analysis(data_dir, video["id"])
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            count += 1
+            seconds += float(data.get("duration") or 0)
+    if not count:
+        return None
+    hours = max(1, round(seconds / 3600))
+    return (f"--force: 이미 분석한 강의 {count:,}개(약 {hours:,}시간)를 처음부터 다시 받아쓰고 요점 정리를 다시 만듭니다. "
+            f"Claude 비용이 약 ${hours * 0.2:,.1f}~{hours * 0.4:,.1f} 듭니다(1시간에 $0.2~0.4). "
+            "맞으면 --yes를 붙여 다시 실행하세요. 몇 강의만 다시 하려면 --only <제목 일부>")
 
 
 def _note_sizes(data_dir, videos, analyzed):
@@ -379,13 +410,21 @@ def main():
                         help="Claude 없이 받아쓰기·페이지만 만듦 (나중에 이 옵션 없이 실행하면 요점 정리만 추가)")
     parser.add_argument("--retry-failed", action="store_true",
                         help=f"Claude 답이 {GUIDE_TRIES}번 잘려 건너뛰던 강의의 요점 정리도 다시 만듦")
+    parser.add_argument("--only", metavar="제목_일부", help="제목(폴더 이름 포함)에 이 글이 든 강의만 분석 (예: --only 제망매가)")
+    parser.add_argument("--yes", action="store_true", help="--force로 Claude 비용이 드는 다시 분석을 비용 안내 없이 시작")
     args = parser.parse_args()
+    load_env_file()  # 서버·밤 작업과 같은 설정 파일
     video_dir = Path(os.environ.get("VIDEO_DIR", "videos"))
     data_dir = Path(os.environ.get("DATA_DIR", "data"))
     if not video_dir.is_dir():
         sys.exit(f"영상 폴더가 없습니다: {video_dir.resolve()} (VIDEO_DIR 설정을 확인하세요)")
+    if not args.no_guide and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        sys.exit("Claude API 키(ANTHROPIC_API_KEY)가 없어 분석을 시작하지 않습니다(README '2. Claude API 키 설정'). "
+                 "키 없이 받아쓰기·페이지만 만들려면 --no-guide를 붙이세요")
     if problem := folders_problem(video_dir, data_dir):
         sys.exit(problem)
+    if args.force and not args.no_guide and not args.yes and (notice := _redo_notice(video_dir, data_dir, args.part, args.only)):
+        sys.exit(notice)
 
     make_guide = read_screens = find_references = None
     if not args.no_guide:
@@ -413,9 +452,12 @@ def main():
         settle_seconds=SETTLE_SECONDS,
         probe=video_duration,
         retry_failed=args.retry_failed,
+        only=args.only,
     )
+    # 현황 화면의 '새 강의 분석'에 나오는 날짜 줄
+    print(f"{datetime.now():%Y-%m-%d %H:%M} 영상 분석 끝"
+          + (f", 실패 {failures}개(다시 실행하면 실패한 영상만 이어서 분석합니다)" if failures else ""), flush=True)
     if failures:
-        print(f"{failures}개 영상 분석 실패. 다시 실행하면 실패한 영상만 이어서 분석합니다.", file=sys.stderr)
         sys.exit(1)
 
 

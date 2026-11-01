@@ -9,6 +9,7 @@ from pathlib import Path
 
 # 브라우저에서 바로 재생되는 형식만 다룹니다.
 VIDEO_EXTS = {".mp4", ".m4v", ".webm", ".mov"}
+GUIDE_TRIES = 2  # Claude가 답은 했지만(비용이 듦) 끝까지 못 쓴 강의는 이만큼만 다시 묻습니다(--retry-failed로 다시). 현황 화면도 씀
 
 
 def _lecture_order(path: Path):

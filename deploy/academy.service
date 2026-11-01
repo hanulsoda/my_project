@@ -1,0 +1,15 @@
+# 학습 플레이어 서버를 컴퓨터가 켜질 때 저절로 켜고, 멈추면 다시 켭니다(README '재부팅 뒤 저절로 켜기').
+# 설정(영상·분석 폴더, 열쇠 등)은 서버가 ~/.config/academy/academy.env에서 읽습니다.
+# 아래 저장소 경로(%h는 집 폴더)와 DS918주소만 학원에 맞게 고치세요. 인터넷으로 열지 않으면
+# '--proxy-headers --forwarded-allow-ips DS918주소'는 지워도 됩니다.
+[Unit]
+Description=학원 학습 플레이어
+
+[Service]
+WorkingDirectory=%h/my_project
+ExecStart=%h/my_project/.venv/bin/uvicorn academy.server:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips DS918주소
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

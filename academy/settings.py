@@ -1,11 +1,45 @@
 """서버 설정(환경 변수·열쇠 파일) 확인. 서버(academy.server)와 설정 점검(academy.check)이 함께 씁니다."""
 
 import logging
+import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
 
 from academy.entry import MIN_SECRET_LEN
+
+
+ENV_FILE = "~/.config/academy/academy.env"
+
+
+def load_env_file(env=os.environ):
+    """설정 파일(ACADEMY_ENV, 없으면 ~/.config/academy/academy.env)의 '이름=값' 줄을 env에 채우고 그 파일을 돌려줍니다.
+
+    서버·밤 작업(cron)·설정 점검이 같은 파일을 읽어, 예약 줄마다 설정을 옮겨 적다 빠뜨리지 않게 합니다.
+    명령 앞에 적은 값이 이깁니다. # 줄은 설명, 'export '와 값을 감싼 따옴표는 빼고, ~로 시작하는 값은 집 폴더로 풉니다.
+    기본 파일이 없으면 None."""
+    named = env.get("ACADEMY_ENV", "").strip()
+    path = Path(named or ENV_FILE).expanduser()
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except FileNotFoundError:
+        if named:
+            raise SystemExit(f"설정 파일이 없습니다: {path} (ACADEMY_ENV 경로 확인)")
+        return None
+    except (OSError, UnicodeDecodeError) as e:
+        raise SystemExit(f"설정 파일을 읽지 못했습니다: {path} ({e}). UTF-8로 저장했는지, 읽기 권한이 있는지 확인하세요")
+    for n, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, equals, value = line.removeprefix("export ").partition("=")
+        name, value = name.strip(), value.strip()
+        if not equals or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise SystemExit(f"설정 파일 {path}의 {n}번째 줄을 읽지 못했습니다. '이름=값'으로 적어 주세요: {line[:40]}")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        env.setdefault(name, os.path.expanduser(value) if value.startswith("~") else value)  # 셸처럼 ~는 집 폴더
+    return path
 
 
 def entry_settings(env: Mapping[str, str]) -> tuple[str, str]:
@@ -32,6 +66,8 @@ def teacher_key(path):
     except OSError as e:  # 경로가 틀리면 열쇠가 늘 '맞지 않습니다'로 나오므로 서버 기록에 남깁니다
         logging.warning("선생님 열쇠 파일을 읽지 못해 열쇠 없이 켭니다(TEACHER_KEY_FILE 경로 확인): %s (%s)", path, e.strerror)
         return None
+    except UnicodeDecodeError:  # 메모장에서 '유니코드(UTF-16)'로 저장함
+        raise SystemExit(f"선생님 열쇠 파일을 UTF-8로 저장해 주세요(메모장: 다른 이름으로 저장 › 인코딩 UTF-8): {path}") from None
     if key and not all(" " <= c <= "~" for c in key):  # 브라우저는 머리글(X-Teacher-Key)에 한글 등을 보내지 못합니다
         raise SystemExit(f"선생님 열쇠는 영문·숫자·기호로만 정해 주세요(한글은 쓸 수 없음): {path}")
     return key

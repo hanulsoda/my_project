@@ -1,4 +1,6 @@
 import json
+import re
+import time
 from datetime import datetime
 
 from academy.library import find_videos, load_analysis, save_analysis
@@ -78,7 +80,8 @@ def test_adds_a_toc_to_every_lecture_without_a_claude_guide(tmp_path):
     add_tocs(video_dir, data_dir, ask, has_summary=lambda title: title == "제망매가")
 
     toc = lambda name: (load_analysis(data_dir, ids[name]) or {}).get("toc")
-    assert toc("1강") == {"model": MODEL, "chapters": [{"start": 5.0, "title": "도입"}, {"start": 300.0, "title": "전개"}]}
+    assert toc("1강")["model"] == MODEL
+    assert toc("1강")["chapters"] == [{"start": 5.0, "title": "도입"}, {"start": 300.0, "title": "전개"}]
     # 50분짜리 3강도, 학원 정리가 있는 제망매가도 만듭니다(학원 정리에는 챕터가 없어서).
     assert toc("6강")["chapters"] and toc("3강")["chapters"] and toc("제망매가")["chapters"]
     assert toc("2강") is None  # Claude 요점 정리에는 챕터가 있음
@@ -123,7 +126,7 @@ def test_remembers_unusable_answers_and_counts_failures(tmp_path):
 
     assert (failures, finished) == (1, True)
     assert "toc" not in load_analysis(data_dir, ids["1강"])  # 실패한 강의는 다음에 다시 시도합니다
-    assert load_analysis(data_dir, ids["6강"])["toc"] == {"model": MODEL, "chapters": []}  # 매일 밤 다시 묻지 않습니다
+    assert load_analysis(data_dir, ids["6강"])["toc"]["chapters"] == []  # 매일 밤 다시 묻지 않습니다
 
 
 def test_chapter_times_with_hours_are_read_in_full():
@@ -132,3 +135,35 @@ def test_chapter_times_with_hours_are_read_in_full():
     assert _seconds("61:40") == 3700
     assert _seconds("1:01:40") == 3700  # 모델이 시:분:초로 적어도
     assert _seconds("[01:40]") == 100
+
+
+def test_stops_for_the_night_when_ollama_does_not_answer_three_lectures_in_a_row(tmp_path, capsys):
+    video_dir, data_dir, ids = lectures(tmp_path)
+    asked = []
+
+    def down(prompt, schema):
+        asked.append(prompt)
+        raise ConnectionError("ollama가 응답하지 않음")
+
+    failures, finished = add_tocs(video_dir, data_dir, down, has_summary=lambda title: False)
+
+    assert (failures, finished) == (3, False) and len(asked) == 3  # 넷째 강의부터는 묻지 않음
+    last = capsys.readouterr().out.strip().splitlines()[-1]
+    assert re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d ", last) and "멈춥니다" in last and "ollama" in last  # 현황 화면이 '멈춤'으로 보여 줌
+
+
+def test_an_empty_video_folder_stops_with_a_dated_line(tmp_path, capsys):
+    (tmp_path / "videos").mkdir()
+
+    assert add_tocs(tmp_path / "videos", tmp_path / "data", answer(), has_summary=lambda title: False) == (0, False)
+    last = capsys.readouterr().out.strip().splitlines()[-1]
+    assert re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d ", last) and "멈춥니다" in last and "NAS" in last
+
+
+def test_a_toc_remembers_when_it_was_made(tmp_path):
+    video_dir, data_dir, ids = lectures(tmp_path)
+
+    add_tocs(video_dir, data_dir, answer(("00:05", "도입"), ("05:00", "전개")), has_summary=lambda title: False)
+
+    # 현황의 '최근 3일 동안 만든 목차'는 파일 날짜(백업을 되살리거나 복사하면 바뀜)가 아니라 이것으로 셉니다.
+    assert abs(load_analysis(data_dir, ids["1강"])["toc"]["at"] - time.time()) < 60

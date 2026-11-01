@@ -717,7 +717,8 @@ def test_status_counts_what_students_get_for_each_lecture(tmp_path):
     # 자동 목차 대상: 대본이 있고 Claude 요점 정리가 없는 강의(제망매가, 목차, 짧은 강의, 긴 강의)
     assert client.get("/api/status").json() == {
         "total": 7, "analyzed": 6, "guide": 1, "summary": 1, "toc": 1, "pages": 3,
-        "toc_progress": {"target": 4, "done": 1, "last_3_days": 1}, "unanalyzed": ["망가진 파일"]}
+        "toc_progress": {"target": 4, "done": 1, "last_3_days": 1}, "unanalyzed": ["망가진 파일"],
+        "guide_failed": [], "video_dir_empty": False}
 
 
 def test_serves_page_thumbnails(setup, tmp_path):
@@ -745,7 +746,7 @@ def test_video_detail(setup):
     assert analyzed["analysis"]["guide"] == GUIDE
     assert "segments" not in analyzed["analysis"]  # 받아쓰기 대본은 학생 브라우저로 보내지 않습니다
     assert not_yet == {"id": ids["2강"], "title": "2강", "analysis": None, "references": [],
-                       "prev": {"id": ids["1강"], "title": "1강"}, "next": None}
+                       "prev": {"id": ids["1강"], "title": "1강"}, "next": None, "ask": True}
     assert client.get("/api/videos/nope").status_code == 404
 
 

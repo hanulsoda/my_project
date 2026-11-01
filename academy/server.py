@@ -31,8 +31,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from academy.entry import PASS_TTL, entry_link_problem, make_pass, pass_ok
-from academy.library import find_videos, load_analysis, load_moves, write_atomic
-from academy.settings import entry_settings, teacher_key as _teacher_key
+from academy.library import GUIDE_TRIES, find_videos, load_analysis, load_moves, write_atomic
+from academy.settings import entry_settings, load_env_file, teacher_key as _teacher_key
 from academy.references import (matcher, read_references, ref_key, reference_sections, same_text, suspects,
                                unmatched_fixes, usable_references)
 from academy.timelink import link_times
@@ -41,7 +41,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 # NAS 영상 폴더를 한 번 훑는 데 18초쯤 걸려서 목록을 기억해 둡니다.
 REFRESH_SECONDS = 300  # 이보다 오래된 목록은 뒤에서 다시 훑습니다
 MISS_SECONDS = 30  # 모르는 id가 와도 이 안에 훑었으면 다시 훑지 않습니다
-INDEX_VERSION = 1  # 저장해 두는 서버 요약(.server-index.cache)에 넣는 항목을 바꾸면 올립니다
+INDEX_SAVE_SECONDS = 3600  # 켜져 있는 동안 서버 요약을 이만큼마다(바뀐 것이 있을 때만) 다시 저장합니다
+INDEX_VERSION = 2  # 저장해 두는 서버 요약(.server-index.cache)에 넣는 항목을 바꾸면 올립니다
 # 질문하기 제한: 질문마다 Claude API 비용이 들어서, 다시 켰을 때 한 사람이나 프로그램이 마구 보내지 못하게 합니다.
 ASK_PER_PERSON = 10    # 한 사람이 ASK_WINDOW 동안 할 수 있는 질문 수
 ASK_WINDOW = 600       # 초 (10분)
@@ -277,13 +278,14 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                        httponly=True, samesite="lax", secure=https)
         return res
 
-    library = {"at": None, "videos": [], "by_id": {}}
+    library = {"at": None, "videos": [], "by_id": {}, "empty": False}  # empty: 마지막으로 훑을 때 영상 폴더가 비어 보임
     scan_lock = Lock()
 
     def scan(max_age):
         with scan_lock:  # 한 번에 하나만 훑고, 기다리는 사이 다른 요청이 훑었으면 그 결과를 씁니다.
             if library["at"] is None or monotonic() - library["at"] > max_age:
                 videos = find_videos(video_dir)
+                library["empty"] = not videos
                 if not videos and library["videos"]:
                     # NAS 연결이 잠깐 끊기면 영상 폴더가 비어 보입니다. 학생 목록을 비우지 않고 1분 뒤 다시 훑습니다.
                     logging.warning("영상 폴더가 비어 보여 이전 목록을 그대로 씁니다(NAS 연결 확인): %s", video_dir)
@@ -327,12 +329,15 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     except (OSError, ValueError, TypeError, AttributeError, KeyError):
         pass  # 없거나 망가졌거나 예전 형식이면 처음부터 읽습니다
 
+    index_state = {"at": monotonic(), "dirty": False}  # 마지막 저장 시각, 그 뒤 다시 읽은 분석이 있는지
+
     def save_index():
         # 지금 목록에 있는 강의만 둡니다(지우거나 옮긴 강의의 요약이 해마다 쌓여 켜는 시간·메모리가 늘지 않게).
         # 영상 폴더가 비어 보이면(NAS 연결이 잠깐 끊김) 저장하지 않습니다: 다음에 켤 때 모두 처음부터 읽지 않게.
         listed = {v["id"] for v in current_library()["videos"]}
         if not Path(data_dir).is_dir() or not listed:
             return
+        index_state.update(at=monotonic(), dirty=False)
         entries = {video_id: entry for video_id, entry in dict(status_cache).items() if video_id in listed}
         try:
             write_atomic(index_path, json.dumps({"version": INDEX_VERSION, "entries": entries}, ensure_ascii=False))
@@ -366,6 +371,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                     entry = {
                         "guide": bool(data.get("guide")), "toc": bool((data.get("toc") or {}).get("chapters")),
                         "toc_tried": "toc" in data, "duration": float(data.get("duration") or 0), "modified": stamp[0] / 1e9,
+                        "toc_at": float((data.get("toc") or {}).get("at") or 0),  # 목차를 만든 때(예전 목차는 0: 파일 날짜로)
+                        "guide_failed": int(data.get("guide_failures") or 0) >= GUIDE_TRIES and not data.get("guide"),
                         "chapters": sorted((float(c["start"]), str(c["title"])) for c in chapters),
                         "text": "".join(t for t, _ in spoken),
                         "offsets": list(accumulate((len(t) for t, _ in spoken), initial=0))[:-1],
@@ -373,6 +380,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             except (KeyError, TypeError, ValueError, AttributeError) as e:
                 logging.warning("분석 파일 모양이 달라 '분석 전'으로 봅니다: %s.json (%r)", video_id, e)
             status_cache[video_id] = (stamp, entry)
+            index_state["dirty"] = True
         return status_cache[video_id][1]
 
     def analysis_status(video_id):
@@ -417,6 +425,10 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             if list_cache["key"] != key:
                 body = json.dumps(built_list(), ensure_ascii=False, separators=(",", ":")).encode()
                 list_cache.update(key=key, body=body, gzip=gzip.compress(body, 6))
+            # 몇 주씩 켜 두는 동안 밤마다 분석된 강의도 요약에 넣어 둡니다(정전 뒤 처음부터 다시 읽지 않게).
+            if index_state["dirty"] and monotonic() - index_state["at"] > INDEX_SAVE_SECONDS:
+                index_state["at"] = monotonic()  # 저장하는 동안 다른 요청이 또 띄우지 않게
+                Thread(target=save_index, daemon=True).start()
         return list_cache
 
     @app.get("/api/videos")
@@ -932,22 +944,25 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         counts = {"guide": 0, "summary": 0, "toc": 0, "pages": 0}
         target = done = recent = 0
         since = wall_clock() - 3 * 86400
-        unanalyzed, fixes = [], read_fixes()
+        unanalyzed, guide_failed, fixes = [], [], read_fixes()
         videos = current_library()["videos"]
         for v in videos:
             entry = analysis_entry(v["id"])
             if not entry:
                 unanalyzed.append(v["title"])
                 continue
+            if entry["guide_failed"]:
+                guide_failed.append(v["title"])
             summary = not entry["guide"] and shows_summary(v, fixes)
             counts["guide" if entry["guide"] else "summary" if summary else "toc" if entry["toc"] else "pages"] += 1
             # 밤 작업(academy.toc)과 같은 대상: 대본이 있고 Claude 요점 정리가 없는 강의
             if not entry["guide"] and entry["times"]:
                 target += 1
                 done += entry["toc_tried"]
-                recent += entry["toc_tried"] and entry["modified"] >= since
+                recent += entry["toc_tried"] and (entry["toc_at"] or entry["modified"]) >= since
         found = {"total": len(videos), "analyzed": len(videos) - len(unanalyzed), **counts,
-                 "toc_progress": {"target": target, "done": done, "last_3_days": recent}, "unanalyzed": unanalyzed}
+                 "toc_progress": {"target": target, "done": done, "last_3_days": recent}, "unanalyzed": unanalyzed,
+                 "guide_failed": guide_failed, "video_dir_empty": library["empty"]}
         if log_dir:
             # 밤 작업 로그에는 강의마다 '목차:' 줄이 쌓여서 날짜로 시작하는 상태 줄만 봅니다.
             found["ops"] = {"backup": _last_line(Path(log_dir) / "backup.log", dated=True),
@@ -997,7 +1012,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         at = ids.index(video_id) if video_id in ids else len(siblings) + 1  # 목록을 막 다시 훑은 순간이면 앞뒤 없음
         near = lambda i: {"id": siblings[i]["id"], "title": siblings[i]["title"]} if 0 <= i < len(siblings) else None
         return {"id": video_id, "title": video["title"], "analysis": analysis, "references": summaries,
-                "prev": near(at - 1), "next": near(at + 1)}
+                "prev": near(at - 1), "next": near(at + 1), "ask": answer is not None}  # ask: 플레이어의 질문하기 탭
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")
     def page_thumbnail(video_id: str, n: int):
@@ -1183,11 +1198,13 @@ def _ignored_hosts(text):
     return tuple(host.strip() for host in text.split(",") if host.strip())
 
 
+load_env_file()  # 분석·밤 작업·설정 점검과 같은 설정 파일(~/.config/academy/academy.env 또는 ACADEMY_ENV)
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
-                 None,  # 질문하기는 Claude API 크레딧을 써서 막아 둡니다. 다시 열려면 _claude_answer()를 넘깁니다.
+                 # 질문하기는 Claude API 크레딧을 써서 ASK_ENABLED=1일 때만 켭니다(그때만 플레이어에 탭이 나옴).
+                 _claude_answer() if os.environ.get("ASK_ENABLED", "").strip() not in ("", "0") else None,
                  read_references(os.environ.get("REFERENCES_FILE")),  # 쓸 수 있는 정리 고르기는 create_app이 한 번만
-                 os.environ.get("LOG_DIR"),
+                 Path(os.environ["LOG_DIR"]).expanduser() if os.environ.get("LOG_DIR") else None,
                  _ignored_hosts(os.environ.get("USAGE_IGNORE", "")),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
                  _teacher_key(os.environ.get("TEACHER_KEY_FILE")),
                  *entry_settings(os.environ),  # 인터넷으로 열 때만: 학원 사이트 입장 확인(docs/인터넷-열기.md)

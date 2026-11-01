@@ -115,6 +115,7 @@ def test_the_night_toc_ends_with_a_dated_line_the_status_page_reads(tmp_path, ca
     last = capsys.readouterr().out.strip().splitlines()[-1]
     assert re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d ", last)  # 현황 화면은 날짜로 시작하는 줄만 읽음
     assert "1개" in last and "멈춤" in last and "멈춥니다" not in last  # 매일 아침의 정상 종료를 '고장'으로 보이지 않게
+    assert "남은 강의 1개" in last  # 아직 목차가 없는 강의 수
 
 
 def test_a_video_without_an_audio_track_gets_an_empty_transcript(tmp_path):

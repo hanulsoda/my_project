@@ -3,7 +3,7 @@
 import json
 import os
 
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5-5")
+MODEL = "claude-opus-5-5"  # CLAUDE_MODEL로 바꿉니다(설정 파일이 늦게 읽혀도 맞도록 물을 때마다 봅니다)
 
 GUIDE_PROMPT = """당신은 학원 강의를 학생용 학습 자료로 정리하는 선생님입니다.
 강의 받아쓰기 대본이 주어집니다. 각 줄 앞의 [분:초]는 그 말이 나온 시점입니다.
@@ -148,7 +148,8 @@ class IncompleteAnswer(RuntimeError):
 def _ask_claude(client, stream=False, **request) -> str:
     """stream: 답이 길 수 있는 요청(요점 정리)은 스트리밍으로 받습니다. 한도(max_tokens)를 크게 잡으면 SDK가 보통 요청을 막습니다."""
     # 안전 필터가 드물게 요청을 거절하면 Anthropic이 권장하는 다른 모델로 자동 재시도합니다.
-    request = {"model": MODEL, "betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default", **request}
+    request = {"model": os.environ.get("CLAUDE_MODEL", MODEL), "betas": ["server-side-fallback-2026-07-01"],
+               "fallbacks": "default", **request}
     if stream:
         with client.beta.messages.stream(**request) as answer:
             response = answer.get_final_message()

@@ -18,6 +18,7 @@
     <div class="content-body"><div class="list-page">
     <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 페이지만 순서로 하나에만 셉니다.</p>
     <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
+    <ul id="alerts" class="plain" role="status" hidden></ul>
     <section id="teacher">
       <h2>이번 주 강의 지정 (선생님)</h2>
       <p class="notice">고른 강의는 모든 학생의 사이드바 맨 위에 '이번 주 강의'로 나옵니다. 바꾸려면 선생님 열쇠가 필요하고, 넣은 열쇠는 이 브라우저에 기억합니다.</p>
@@ -156,6 +157,12 @@
       const rows = [["전체 강의", s.total], ["분석 끝남", s.analyzed], ["Claude 요점 정리", s.guide], ["학원 정리", s.summary],
                     ["자동 목차", s.toc], ["페이지만", s.pages], ["분석 안 됨", s.total - s.analyzed]];
       document.getElementById("counts").replaceChildren(...rows.flatMap(([name, n]) => [el("dt", {}, name), el("dd", {}, n.toLocaleString())]));
+      const alerts = [], failed = s.guide_failed || [];
+      if (s.video_dir_empty) alerts.push("영상 폴더가 비어 보입니다. NAS 연결을 확인하세요(학생 목록은 그동안 이전 것을 그대로 씁니다).");
+      if (failed.length) alerts.push(`Claude 요점 정리가 두 번 잘려 밤마다 건너뛰는 강의 ${failed.length.toLocaleString()}개: `
+        + `${failed.slice(0, 5).join(", ")}${failed.length > 5 ? " 등" : ""}. 다시 만들려면 python -m academy.analyze --retry-failed`);
+      $("alerts").replaceChildren(...alerts.map((text) => el("li", { class: "storage-warning" }, text)));
+      $("alerts").hidden = !alerts.length;
       // 쓸 수 없는 답이 나와 빈 목차로 남긴 강의도 처리한 것으로 셉니다.
       const { target, done, last_3_days: recent } = s.toc_progress;
       // 최근 3일 속도로 남은 날을 어림합니다. 밤 작업 마지막 기록이 '…멈춥니다'(팬·NAS 문제로 멈춤)면 어림하지 않습니다.
@@ -173,7 +180,14 @@
       bar.value = done;
       if (s.ops) {  // 서버에 로그 폴더(LOG_DIR)를 알려 준 경우에만 옵니다
         const lines = [["마지막 백업", s.ops.backup], ["밤 작업", s.ops.night], ["새 강의 분석", s.ops.new_videos]];
-        document.getElementById("ops-lines").replaceChildren(...lines.flatMap(([name, line]) => [el("dt", {}, name), el("dd", {}, line || "기록 없음")]));
+        // 매일 도는 작업(백업·밤 작업)의 마지막 기록이 하루 반보다 오래됐으면 멈춘 것일 수 있어 덧붙입니다.
+        const age = (line) => {
+          const m = /^(\d{4}-\d\d-\d\d) (\d\d:\d\d)/.exec(line || "");
+          const days = m ? (Date.now() - new Date(`${m[1]}T${m[2]}`)) / 86400000 : 0;
+          return days > 1.5 ? ` (${Math.round(days)}일 전 기록: 매일 도는 작업이 멈췄을 수 있습니다)` : "";
+        };
+        document.getElementById("ops-lines").replaceChildren(...lines.flatMap(([name, line], i) => [el("dt", {}, name),
+          el("dd", {}, (line || "기록 없음") + (i < 2 ? age(line) : ""))]));  // 새 강의 분석은 매일 돌지 않을 수 있음
         document.getElementById("ops").hidden = false;
       }
       if (s.quiz) {

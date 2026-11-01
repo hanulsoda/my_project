@@ -17,8 +17,18 @@ PARTS = [("features", "핵심 특징"), ("stages", "구조"), ("stanzas", "연�
 
 
 def read_references(path) -> list:
-    """정리 파일을 읽기만 합니다(~: 집 폴더). 쓸 수 있는 정리만 고르는 것은 usable_references."""
-    return json.loads(Path(path).expanduser().read_text(encoding="utf-8")) if path else []
+    """정리 파일을 읽기만 합니다(~: 집 폴더, 메모장의 BOM은 뺌). 쓸 수 있는 정리만 고르는 것은 usable_references.
+    없거나 깨졌으면 한 줄 안내로 멈춥니다(서버·분석·밤 작업이 함께 씀)."""
+    if not path:
+        return []
+    try:
+        refs = json.loads(Path(path).expanduser().read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as e:  # ValueError: JSON 형식 오류·글자 깨짐
+        raise SystemExit(f"학원 정리 파일을 읽지 못했습니다: {path} ({e}). REFERENCES_FILE 경로와 파일 형식을 확인하세요"
+                         "(python -m academy.check)") from None
+    if not isinstance(refs, list):
+        raise SystemExit(f"학원 정리 파일이 정리 목록([...])이 아닙니다: {path} (REFERENCES_FILE 확인)")
+    return refs
 
 
 def load_references(path) -> list[dict]:

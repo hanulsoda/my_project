@@ -10,17 +10,20 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from academy.library import find_videos, folders_problem, load_analysis, save_analysis
+from academy.settings import load_env_file
 
-MODEL = os.environ.get("TOC_MODEL", "exaone3.5:7.8b")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+MODEL = "exaone3.5:7.8b"  # TOC_MODEL로 바꿉니다(설정 파일이 늦게 읽혀도 맞도록 쓸 때마다 봅니다)
+OLLAMA_URL = "http://localhost:11434"  # OLLAMA_URL로 바꿉니다
 WHOLE_SECONDS = 40 * 60  # 이보다 긴 강의는
 PART_SECONDS = 20 * 60  # 이만큼씩 나눠 묻습니다(5분이 안 되는 끝자락은 앞 조각에 붙임)
 MIN_GAP = 60  # 이보다 가까운 챕터는 앞 챕터에 합칩니다
+STOP_AFTER = 3  # 이만큼 이어 실패하면(ollama가 꺼짐) 그 밤은 멈춥니다
 PART_GAP = 120  # 나눠 물은 긴 강의는 챕터가 Claude의 두 배로 잘게 나뉘어 2분(시험에서 Claude 챕터 일치 98%→93%, 개수 19→15)
 SCHEMA = {"type": "object", "properties": {"chapters": {"type": "array", "items": {
     "type": "object", "properties": {"start": {"type": "string"}, "title": {"type": "string"}},
@@ -81,12 +84,17 @@ def _ask(segments, ask):
     return found
 
 
+def _model():
+    return os.environ.get("TOC_MODEL", MODEL)
+
+
 def ollama_ask(prompt, schema):
     # 같은 모델을 다른 서비스도 쓰고 있어, 떠 있는 설정(문맥 32768, 계속 유지)과 똑같이 요청해야 모델이 다시 올라가지 않습니다.
-    body = {"model": MODEL, "stream": False, "keep_alive": -1, "format": schema,
+    body = {"model": _model(), "stream": False, "keep_alive": -1, "format": schema,
             "options": {"num_ctx": 32768, "temperature": 0.2},
             "messages": [{"role": "user", "content": prompt}]}
-    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", json.dumps(body).encode(), {"Content-Type": "application/json"})
+    url = os.environ.get("OLLAMA_URL", OLLAMA_URL)
+    req = urllib.request.Request(f"{url}/api/chat", json.dumps(body).encode(), {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=1800) as res:
         return json.load(res)["message"]["content"]
 
@@ -104,36 +112,50 @@ def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now
         hour, minute = map(int, until.split(":"))
         deadline = began.replace(hour=hour, minute=minute, second=0, microsecond=0)
         deadline += timedelta(days=1) if deadline <= began else timedelta()
-    failures = made = 0
+    failures = made = in_a_row = 0
 
-    def summary(stopped):  # 현황 화면은 날짜로 시작하는 줄만 읽습니다. 매일 아침의 정상 종료는 '멈춤'(고장은 '멈춥니다')
-        print(f"{datetime.now():%Y-%m-%d %H:%M} 자동 목차 {made}개 만듦" + (f", 실패 {failures}개" if failures else "")
-              + (f", {until}이 되어 멈춤(다음에 이어서)" if stopped else ", 남은 강의 없음"), flush=True)
+    def summary(end):  # 현황 화면은 날짜로 시작하는 줄만 읽습니다. 매일 아침의 정상 종료는 '멈춤'(고장은 '멈춥니다')
+        print(f"{datetime.now():%Y-%m-%d %H:%M} " + end, flush=True)
 
-    for video in sorted(find_videos(video_dir), key=lambda v: has_summary(v["title"])):  # False(정리 없음) 먼저
+    videos = sorted(find_videos(video_dir), key=lambda v: has_summary(v["title"]))  # False(정리 없음) 먼저
+    if not videos:
+        summary("자동 목차를 멈춥니다: 영상 폴더에 강의가 없음(NAS 연결 확인)")
+        return failures, False
+    made_text = lambda: f"자동 목차 {made}개 만듦" + (f", 실패 {failures}개" if failures else "")
+    for n, video in enumerate(videos):
         data = _load(data_dir, video)
-        if not data or not data.get("segments") or data.get("guide") or "toc" in data:
+        if not _needs_toc(data):
             continue
         if deadline and now() >= deadline:
-            summary(stopped=True)
+            left = 1 + sum(_needs_toc(_load(data_dir, v)) for v in videos[n + 1:])
+            summary(f"{made_text()}, {until}이 되어 멈춤(남은 강의 {left:,}개, 다음에 이어서)")
             return failures, False
         print(f"목차: {video['title']}", flush=True)
         try:
             chapters = make_toc(data["segments"], data["duration"], ask)
         except Exception as e:  # ollama가 꺼져 있거나 응답이 늦을 때. 다음에 다시 시도합니다.
             failures += 1
+            in_a_row += 1
             print(f"  실패: {e}", flush=True)
+            if in_a_row >= STOP_AFTER:  # 밤새 강의마다 30분씩 기다리지 않게
+                summary(f"자동 목차를 멈춥니다: 로컬 AI(ollama)가 {in_a_row}번 이어 응답하지 않음({made_text()})")
+                return failures, False
             continue
+        in_a_row = 0
         # ollama를 기다리는 동안 분석이 Claude 요점 정리를 저장했을 수 있어, 다시 읽어 목차만 더합니다.
         data = _load(data_dir, video)
         if not data or data.get("guide"):
             continue
-        # 쓸 수 없는 답이었어도 빈 목차로 남겨 매일 밤 다시 묻지 않습니다.
-        data["toc"] = {"model": MODEL, "chapters": chapters or []}
+        # 쓸 수 없는 답이었어도 빈 목차로 남겨 매일 밤 다시 묻지 않습니다. at: 만든 때(현황의 최근 3일)
+        data["toc"] = {"model": _model(), "chapters": chapters or [], "at": int(time.time())}
         save_analysis(data_dir, video["id"], data)
         made += 1
-    summary(stopped=False)
+    summary(f"{made_text()}, 남은 강의 없음")
     return failures, True
+
+
+def _needs_toc(data):
+    return bool(data and data.get("segments") and not data.get("guide") and "toc" not in data)
 
 
 def _load(data_dir, video):
@@ -152,6 +174,7 @@ def main():
     parser = argparse.ArgumentParser(description="요점 정리 없는 강의에 로컬 AI 자동 목차 붙이기")
     parser.add_argument("--until", metavar="HH:MM", help="이 시각이 지나면 새 강의를 시작하지 않음 (예: 07:00)")
     args = parser.parse_args()
+    load_env_file()  # 서버·분석과 같은 설정 파일
     video_dir, data_dir = Path(os.environ.get("VIDEO_DIR", "videos")), Path(os.environ.get("DATA_DIR", "data"))
     if problem := folders_problem(video_dir, data_dir, write=False):  # 분석과 다른 폴더를 보면 목록을 다시 만들게 됨
         print(f"{datetime.now():%Y-%m-%d %H:%M} 자동 목차를 멈춥니다: 폴더 설정을 확인하세요", flush=True)
