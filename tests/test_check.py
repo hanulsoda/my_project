@@ -108,3 +108,14 @@ def test_a_short_teacher_key_is_pointed_out(tmp_path):
     notes = [text for level, text in checks(env) if level == "참고"]
 
     assert any("선생님 열쇠" in text and "짧" in text for text in notes)  # 학원 PC에서도 맞혀 보기 어렵게
+
+
+def test_damaged_move_and_size_records_are_problems_with_the_right_advice(tmp_path):
+    env, _ = setup(tmp_path)
+    (tmp_path / "data" / ".moved-lectures").write_text("{", encoding="utf-8")
+    (tmp_path / "data" / ".lecture-sizes").write_text("[1,", encoding="utf-8")
+
+    found = " / ".join(problems(env))
+
+    assert "옮긴 강의 기록" in found and "영상 크기 기록" in found
+    assert "깨지기 전" not in found and "백업" in found  # .broken은 깨진 파일 그대로라 되살릴 것이 아님

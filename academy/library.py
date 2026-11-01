@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import unicodedata
 from pathlib import Path
 
@@ -64,7 +65,8 @@ MOVES_FILE = ".moved-lectures"  # 폴더를 옮기거나 이름을 바꾼 강의
 
 
 def load_moves(data_dir: Path, listed=()) -> dict:
-    """옮긴 강의 {예전 번호: 지금 번호}. 두 번 옮긴 강의(가→나→다)도 지금 번호로 이어 줍니다.
+    """옮긴 강의 {예전 번호: 지금 번호}. 두 번 옮긴 강의(가→나→다)도 지금 번호로 이어 줍니다. 다만 그 뒤에 다시 옮긴 것만
+    따라갑니다: 나→다가 가→나보다 먼저 적혔으면 가가 나에 온 것은 나의 녹화가 떠난 뒤라 가는 나에 머뭅니다(파일에 적힌 순서).
     listed(지금 목록의 번호)에 다시 있는 예전 번호는 옮긴 것으로 보지 않습니다: 예전 자리에 새 강의가 올라온 것이라
     학생 기록·'이번 주 강의'를 예전 녹화로 넘기면 안 됩니다."""
     try:
@@ -74,21 +76,23 @@ def load_moves(data_dir: Path, listed=()) -> dict:
     if not isinstance(raw, dict):
         return {}
     lecture = lambda value: isinstance(value, str) and _LECTURE_ID.fullmatch(value)  # 손으로 고친 줄은 건너뜀
-    raw = {old: new for old, new in raw.items() if lecture(old) and lecture(new) and old not in listed}
+    entries = [(old, new) for old, new in raw.items() if lecture(old) and lecture(new)]
+    at = {old: (n, new) for n, (old, new) in enumerate(entries)}
     moves = {}
-    for old, new in raw.items():
-        seen = {old}
-        while new in raw and new not in seen:
-            seen.add(new)
-            new = raw[new]
+    for n, (old, new) in enumerate(entries):
+        if old in listed:
+            continue
+        while new in at and at[new][0] > n:  # 가운데 자리에 새 강의가 와도(listed) 그 뒤에 옮긴 곳까지 따라감
+            n, new = at[new]
         if new != old:
             moves[old] = new
     return moves
 
 
 def record_move(data_dir: Path, old_id: str, new_id: str) -> None:
-    # 되돌려 옮기면(가→나 뒤에 나→가) 나에서 옮겼다는 줄은 지웁니다(둘이 서로를 가리켜 아무 데도 옮기지 않게).
-    _update(data_dir, MOVES_FILE, lambda moves: {**{k: v for k, v in moves.items() if k != new_id}, old_id: new_id})
+    # 늘 맨 뒤에 적습니다(같은 예전 번호를 다시 옮기면 지우고 다시): load_moves가 적힌 순서로 따라갈지 정합니다.
+    # 되돌려 옮긴 것(가→나 뒤에 나→가)도 그 순서로 풀려 가의 기록은 가에 머뭅니다.
+    _update(data_dir, MOVES_FILE, lambda moves: {**{k: v for k, v in moves.items() if k != old_id}, old_id: new_id})
 
 
 SIZES_FILE = ".lecture-sizes"  # 강의 번호 → 영상 파일 크기: 옮긴 강의를 알아볼 때 씁니다(분석 파일을 다시 쓰지 않게 따로)
@@ -107,9 +111,13 @@ def record_sizes(data_dir: Path, sizes: dict) -> None:
         _update(data_dir, SIZES_FILE, lambda saved: {**saved, **sizes})
 
 
+class BrokenRecord(ValueError):
+    """분석 폴더의 작은 기록 파일이 깨짐. 덮어쓰면 그 안의 기록을 모두 잃어 고쳐 쓰지 않습니다."""
+
+
 def _update(data_dir: Path, name: str, change) -> None:
     """분석 폴더의 작은 기록 파일(JSON 사전)을 change로 고쳐 씁니다. 함께 도는 --part 묶음이 서로의 것을 지우지 않게
-    잠근 채 읽고 씁니다(윈도에는 이 잠금이 없어 잠그지 않습니다)."""
+    잠근 채 읽고 씁니다(윈도에는 이 잠금이 없어 잠그지 않습니다). 깨진 파일은 .broken으로 복사하고 BrokenRecord."""
     path = Path(data_dir) / name
     with open(Path(data_dir) / ".records.lock", "w") as lock:
         try:
@@ -119,9 +127,18 @@ def _update(data_dir: Path, name: str, change) -> None:
             pass
         try:
             current = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             current = {}
-        write_atomic(path, json.dumps(change(current if isinstance(current, dict) else {})))
+        except (OSError, ValueError):
+            current = None
+        if not isinstance(current, dict):
+            try:
+                shutil.copyfile(path, path.with_name(name + ".broken"))
+            except OSError:
+                pass
+            raise BrokenRecord(f"{name} 파일이 깨져 고쳐 쓰지 않았습니다(쉼표·따옴표를 고치거나 백업에서 되살리세요. "
+                               f"깨진 파일은 {name}.broken으로 복사해 둠)")
+        write_atomic(path, json.dumps(change(current)))
 
 
 def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:

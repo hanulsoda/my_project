@@ -818,26 +818,38 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # {정리 열쇠: {칸 이름: {원래 항목: {"text": 고친 글, "hidden": true}}}} — 학생에게 보낼 때 덮어씁니다.
     fixes_path, fixes_lock = Path(data_dir) / ".reference-fixes", Lock()
 
-    def read_fixes():  # 깨졌거나 모양이 다른 값은 건너뜁니다(손으로 고친 파일 하나가 목록·강의 화면을 멈추지 않게)
-        raw = _read_record(fixes_path) or {}
-        return {key: {name: {item: entry for item, entry in items.items() if isinstance(entry, dict)}
+    fixes_cache = {"stamp": None, "fixes": {}}
+
+    def read_fixes():
+        """깨졌거나 모양이 다른 값은 건너뜁니다(손으로 고친 파일 하나가 목록·강의 화면을 멈추지 않게).
+        파일이 그대로면 읽어 둔 것을 씁니다(목록을 만들 때 강의마다 부름). 돌려준 값은 고치지 마세요."""
+        key = stamp(fixes_path)
+        if fixes_cache["stamp"] != key:
+            raw = _read_record(fixes_path) or {}
+            fixes_cache.update(stamp=key, fixes={
+                key: {name: _SectionFixes({item: entry for item, entry in items.items() if isinstance(entry, dict)})
                       for name, items in sections.items() if isinstance(items, dict)}
-                for key, sections in raw.items() if isinstance(sections, dict)}
+                for key, sections in raw.items() if isinstance(sections, dict)})
+        return fixes_cache["fixes"]
 
     def refuse_broken(path, what):
-        """깨진 기록 파일 위에는 저장하지 않습니다: 그대로 덮어쓰면 예전에 고친 내용이 모두 사라집니다."""
+        """깨진 기록 파일 위에는 저장하지 않습니다: 그대로 덮어쓰면 예전에 고친 내용이 모두 사라집니다.
+        지금 깨진 파일을 .broken으로 복사해 둡니다(지난번 것이 있어도 새로: 고칠 것은 지금 파일)."""
         if _read_record(path) is None:
             backup = path.with_name(path.name + ".broken")
-            if not backup.exists():
-                shutil.copyfile(path, backup)
+            shutil.copyfile(path, backup)
             raise HTTPException(409, f"{what} 파일({path.name})이 깨져 있어 저장하지 않았습니다. 원장님께 알려 주세요"
                                      f"(깨진 파일은 {backup.name}으로 복사해 두었습니다).")
 
-    def fix_of(section_fixes, item):  # 정리 파일을 다시 뽑아 띄어쓰기·끝 마침표만 달라진 항목에도 고친 내용을 씁니다
+    def fix_of(section_fixes, item, items=()):
+        """정리 파일을 다시 뽑아 띄어쓰기·끝 마침표만 달라진 항목에도 고친 내용을 씁니다. 다만 그 고침의 원래 항목이
+        지금도 따로 있으면(items: 이 칸의 지금 항목들, PDF에서 두 번 뽑힌 항목) 그 항목의 고침이라 빌려 쓰지 않습니다."""
         if item in section_fixes:
             return section_fixes[item]
-        same = same_text(item)
-        return next((entry for original, entry in section_fixes.items() if same_text(original) == same), {})
+        same = (section_fixes.same() if isinstance(section_fixes, _SectionFixes)
+                else {same_text(original): original for original in section_fixes})
+        original = same.get(same_text(item))
+        return section_fixes[original] if original is not None and original not in items else {}
 
 
     def fixed(summaries, fixes=None):  # 목록·검색처럼 강의마다 부를 때는 fixes를 한 번 읽어 넘깁니다
@@ -846,8 +858,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         for r in summaries:
             sections = []
             for s in r["sections"]:
-                mine = fixes.get(r.get("key"), {}).get(s["name"], {})
-                items = [fix_of(mine, i).get("text", i) for i in s["items"] if not fix_of(mine, i).get("hidden")]
+                mine, current = fixes.get(r.get("key"), {}).get(s["name"], {}), set(s["items"])
+                items = [fix_of(mine, i, current).get("text", i) for i in s["items"]
+                         if not fix_of(mine, i, current).get("hidden")]
                 if items := [i for i in items if i]:
                     sections.append({**s, "items": items})
             if r["sections"] and not sections:  # 선생님이 항목을 모두 숨긴 정리는 쓰지 않습니다(빈칸 문제·어휘 퀴즈도)
@@ -893,31 +906,42 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     def reference_body(key):
         ref, fixes = ref_by_key(key), read_fixes().get(key, {})
-        flagged = suspects(ref)
-        entry = lambda section, item: fix_of(fixes.get(section, {}), item)
+        flagged, sections = suspects(ref), reference_sections(ref)
+        current = {s["name"]: set(s["items"]) for s in sections}
+        entry = lambda section, item: fix_of(fixes.get(section, {}), item, current[section])
         return {"key": key, "title": ref["title"], "grade": ref["grade"], "sections": [
             {"name": s["name"], "items": [{"original": i, "text": entry(s["name"], i).get("text", i),
                                            "hidden": bool(entry(s["name"], i).get("hidden")),
                                            "suspect": flagged.get(s["name"], {}).get(i)} for i in s["items"]]}
-            for s in reference_sections(ref)],  # 빈칸 문제는 요점 정리가 아니라 퀴즈로 나가고, 숨기기만 됩니다
+            for s in sections],  # 빈칸 문제는 요점 정리가 아니라 퀴즈로 나가고, 숨기기만 됩니다
             "unmatched": unmatched_fixes(ref, fixes)}
 
     @app.put("/api/references/{key}/fix")
     def fix_reference(key: str, req: FixRequest, request: Request):
         require_teacher(request)
         ref = ref_by_key(key)
-        if req.original not in next((s["items"] for s in reference_sections(ref) if s["name"] == req.section), []):
+        current = next((s["items"] for s in reference_sections(ref) if s["name"] == req.section), [])
+        if req.original not in current:
             raise HTTPException(404, "그 항목을 찾을 수 없습니다")
         if req.section == "빈칸 문제" and req.text not in (None, req.original):  # 빈칸 표시(두 칸 띄어쓰기)가 깨지기 쉬워
             raise HTTPException(400, "빈칸 문제는 숨기기만 할 수 있습니다")
         with fixes_lock:
             refuse_broken(fixes_path, "학원 정리 고침")
-            fixes = read_fixes()
-            section = fixes.setdefault(key, {}).setdefault(req.section, {})
-            twin = next((o for o in section if o != req.original and same_text(o) == same_text(req.original)), None)
-            if req.original not in section and twin is not None:  # 띄어쓰기만 달라진 예전 항목의 고침을 이 항목으로
+            # 파일 그대로를 고칩니다: 서버가 쓰지 않는 모양으로 손으로 적은 다른 줄도 지우지 않게(이 항목 자리만 바로잡음)
+            fixes = _read_record(fixes_path) or {}
+            if not isinstance(fixes.get(key), dict):
+                fixes[key] = {}
+            if not isinstance(fixes[key].get(req.section), dict):
+                fixes[key][req.section] = {}
+            section = fixes[key][req.section]
+            # 띄어쓰기만 달라진 예전 항목(지금은 없는)의 고침을 이 항목으로. 지금도 있는 비슷한 항목의 고침은 그대로 둡니다.
+            twin = next((o for o in section if o != req.original and o not in current
+                         and same_text(o) == same_text(req.original)), None)
+            if req.original not in section and twin is not None:
                 section[req.original] = section.pop(twin)
-            entry = section.setdefault(req.original, {})
+            if not isinstance(section.get(req.original), dict):
+                section[req.original] = {}
+            entry = section[req.original]
             if req.text is not None:
                 entry["text"] = req.text.strip()
             if req.hidden is not None:
@@ -1108,6 +1132,16 @@ def _recent_start(f, size, since):
     if lo:
         f.readline()  # lo가 걸친 줄은 그다음 줄보다 앞선 시각이라 버려도 됩니다
     return f.tell()
+
+
+class _SectionFixes(dict):
+    """학원 정리 한 칸의 고침 {원래 항목: 고침}. 띄어쓰기·마침표를 무시하고 찾는 표를 한 번만 만듭니다(목록을 만들 때
+    강의·항목마다 모든 고침을 훑으면 고침이 많은 학원에서 목록이 몇 초씩 걸림)."""
+
+    def same(self):
+        if not hasattr(self, "_same"):
+            self._same = {same_text(original): original for original in self}
+        return self._same
 
 
 def _last_line(path, dated=False):

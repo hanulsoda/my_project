@@ -91,7 +91,7 @@ def test_a_folder_copied_from_a_mac_and_a_pc_keeps_lecture_order(tmp_path):
     assert [v["title"] for v in find_videos(tmp_path)] == ["고1/1강 제망매가", "고1/2강 청산별곡"]
 
 
-A, B, C = "aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"
+A, B, C, D = "aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"
 
 
 def test_moving_a_folder_back_leaves_one_move(tmp_path):
@@ -139,3 +139,34 @@ def test_moves_recorded_at_the_same_time_by_two_batches_are_all_kept(tmp_path):
         run.join()
 
     assert errors == [] and len(load_moves(tmp_path)) == 80
+
+
+def test_a_lecture_moved_twice_follows_to_its_last_place_even_when_the_middle_place_is_reused(tmp_path):
+    from academy.library import load_moves, record_move
+    record_move(tmp_path, A, B)  # 1학기 폴더 → 2학기 폴더
+    record_move(tmp_path, B, C)  # 2학기 폴더 → 보관 폴더
+    # 그 뒤 2학기 폴더(B 자리)에 새 강의가 올라옴: A의 기록은 B의 새 강의가 아니라 C로
+    assert load_moves(tmp_path, listed={B, C}) == {A: C}
+
+
+def test_a_lecture_moved_again_from_the_same_old_place_goes_to_the_newest_place(tmp_path):
+    from academy.library import load_moves, record_move
+    record_move(tmp_path, B, C)
+    record_move(tmp_path, A, B)  # A가 B 자리로 옴(그 전에 B는 C로 감)
+    record_move(tmp_path, A, D)  # A 자리에 다시 생긴 강의가 D로 감
+
+    assert load_moves(tmp_path) == {B: C, A: D}
+
+
+def test_a_damaged_moves_file_is_kept_instead_of_replaced(tmp_path):
+    from academy.library import MOVES_FILE, BrokenRecord, record_move, record_sizes
+    (tmp_path / MOVES_FILE).write_text(f'{{"{A}": "{B}",', encoding="utf-8")  # 손으로 고치다 깨짐
+
+    with pytest.raises(BrokenRecord):
+        record_move(tmp_path, C, D)
+
+    assert (tmp_path / MOVES_FILE).read_text(encoding="utf-8") == f'{{"{A}": "{B}",'  # 학생 기록 이어 주기를 잃지 않음
+    assert (tmp_path / (MOVES_FILE + ".broken")).exists()
+    (tmp_path / ".lecture-sizes").write_text("[", encoding="utf-8")
+    with pytest.raises(BrokenRecord):
+        record_sizes(tmp_path, {A: 10})

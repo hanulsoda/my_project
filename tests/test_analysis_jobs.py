@@ -247,7 +247,8 @@ def test_a_force_run_without_claude_does_not_buy_the_guide_again_the_next_night(
 
 def test_a_video_moved_away_during_the_run_does_not_stop_the_rest(tmp_path):
     make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4", "3강.mp4")
-    for path in (tmp_path / "videos").iterdir():
+    for n, path in enumerate(sorted((tmp_path / "videos").iterdir())):
+        path.write_bytes(b"x" * (n + 1))  # 서로 다른 강의(크기·길이가 같으면 같은 영상의 복사본으로 봄)
         age(path, 3600)
     rec = Recorder()
 
@@ -478,3 +479,126 @@ def test_a_spelling_fix_does_not_touch_words_already_written_right():
     _apply_corrections(segments, {"corrections": [{"wrong": "관동별", "right": "관동별곡"}]})
 
     assert [s["text"] for s in segments] == ["오늘은 관동별곡을 봅시다", "관동별곡 첫 구절"]  # '관동별곡곡'이 되지 않음
+
+
+# ---- 재검토: 같은 자리에 다시 올린 영상·복사한 강의를 한 번만 사고, 옛 요점 정리를 새 영상에 남기지 않게 ----
+
+def nightly(tmp_path, rec, **extra):
+    return lambda **more: analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide,
+                                      probe=lambda p: 120.0, **{**extra, **more})
+
+
+def test_a_replaced_video_not_analyzed_that_night_is_tried_again_the_next(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder()
+    run = nightly(tmp_path, rec)
+    run()
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"re-recorded")
+
+    run(settle_seconds=600)  # 올린 지 10분이 안 돼 다음으로 미룸
+    rec.fail_on = "1강.mp4"
+    run()  # 받아쓰기가 한 번 실패함
+    rec.fail_on = None
+    run()
+    run()
+
+    # 새 영상에 옛 요점 정리가 계속 남지 않고, 성공한 뒤에는 다시 사지 않음
+    assert rec.transcribed == ["1강.mp4"] * 3 and len(rec.guided) == 2
+    assert not load_analysis(tmp_path / "data", ids["1강"]).get("guide_stale")
+
+
+def test_the_same_file_seen_half_copied_is_not_bought_again_when_the_copy_finishes(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4")
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"the whole recording")
+    rec = Recorder()
+    run = nightly(tmp_path, rec)
+    run()
+
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"the whole")  # 같은 파일을 다시 덮어쓰는 중에 밤 작업이 봄
+    run(settle_seconds=600)
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"the whole recording")  # 복사가 끝나 예전과 똑같은 파일
+    run()
+
+    assert rec.transcribed == ["1강.mp4"] and len(rec.guided) == 1
+
+
+def test_two_runs_that_both_saw_a_replaced_video_buy_it_once(tmp_path):
+    make_videos(tmp_path / "videos", "0강.mp4", "1강.mp4")
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"another lecture")  # 크기가 다른 두 강의(같으면 복사본으로 봄)
+    rec = Recorder()
+    nightly(tmp_path, rec)()
+    for name, recording in [("0강.mp4", b"re-recorded"), ("1강.mp4", b"re-recorded, a longer one")]:
+        (tmp_path / "videos" / name).write_bytes(recording)
+    nested = []
+
+    def transcribe(path):  # 밤 작업(묶음 1/1)이 0강을 받아쓰는 동안 GPU 둘째 묶음(2/2)이 1강을 맡음
+        if not nested:
+            nested.append(True)
+            analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, part=(2, 2),
+                        probe=lambda p: 120.0)
+        return rec.transcribe(path)
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", transcribe, rec.make_guide, probe=lambda p: 120.0)
+
+    assert sorted(rec.transcribed) == ["0강.mp4", "0강.mp4", "1강.mp4", "1강.mp4"] and len(rec.guided) == 4
+
+
+def test_the_same_file_put_in_two_class_folders_on_one_day_is_bought_once(tmp_path):
+    for folder in ["고1", "고2"]:
+        (tmp_path / "videos" / folder).mkdir(parents=True)
+        (tmp_path / "videos" / folder / "1강.mp4").write_bytes(b"the recording")
+    rec = Recorder()
+
+    nightly(tmp_path, rec)()
+
+    assert rec.transcribed == ["1강.mp4"] and len(rec.guided) == 1
+    assert all(load_analysis(tmp_path / "data", v["id"])["guide"] == GUIDE for v in find_videos(tmp_path / "videos"))
+
+
+def test_twin_lectures_analyzed_without_claude_get_one_paid_summary(tmp_path):
+    for folder in ["고1", "고2"]:
+        (tmp_path / "videos" / folder).mkdir(parents=True)
+        (tmp_path / "videos" / folder / "1강.mp4").write_bytes(b"the recording")
+    for v in find_videos(tmp_path / "videos"):  # README대로 --no-guide로 먼저 따로따로 받아씀
+        save_analysis(tmp_path / "data", v["id"], {"title": v["title"], "duration": 120.0, "segments": SEGMENTS,
+                                                   "guide": None})
+    rec = Recorder()
+
+    nightly(tmp_path, rec)()  # 이제 요점 정리를 붙임
+
+    assert len(rec.guided) == 1
+    assert all(load_analysis(tmp_path / "data", v["id"])["guide"] == GUIDE for v in find_videos(tmp_path / "videos"))
+
+
+def test_an_odd_failure_count_written_by_hand_does_not_stop_the_night_run(tmp_path):
+    ids = make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4")
+    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "duration": 120.0, "segments": SEGMENTS, "guide": None,
+                                                  "guide_failures": "2"})
+    rec = Recorder()
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
+
+    assert "2강.mp4" in rec.transcribed  # 뒤의 강의도 계속 분석
+
+
+def test_a_moved_analysis_is_kept_even_if_tidying_up_after_the_move_fails(tmp_path, monkeypatch):
+    import academy.analyze as analyze
+    videos, data_dir = moved_site(tmp_path, "고1/1강.mp4")
+    rec = Recorder()
+    run = lambda: analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, probe=lambda p: 120.0)
+    run()
+    (videos / "2학기").mkdir()
+    (videos / "고1" / "1강.mp4").rename(videos / "2학기" / "1강.mp4")
+    real, calls = analyze.save_analysis, []
+
+    def full_disk_once(*args):  # 분석 파일을 옮긴 바로 뒤 디스크가 잠깐 가득 참
+        calls.append(args)
+        if len(calls) == 1:
+            raise OSError(28, "No space left on device")
+        return real(*args)
+    monkeypatch.setattr(analyze, "save_analysis", full_disk_once)
+
+    run()
+
+    assert rec.transcribed == ["1강.mp4"] and len(rec.guided) == 1  # 옮긴 강의를 새로 사지 않음
+    assert json.loads((data_dir / ".moved-lectures").read_text())  # 학생 기록도 따라감

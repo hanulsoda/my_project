@@ -217,3 +217,48 @@ def test_odd_values_in_the_fixes_file_do_not_break_the_list(lectures):
 
     assert client.get("/api/videos").status_code == 200
     assert client.get(f"/api/videos/{ids[0]}").json()["references"][0]["sections"][0]["items"] == ["누이의 죽음"]
+
+
+def test_hiding_one_of_two_nearly_identical_items_hides_only_that_one(lectures):
+    video_dir, data_dir, ids = lectures
+    ref = {"title": "제망매가", "grade": "고1",  # PDF에서 두 번 뽑혀 끝 마침표만 다른 항목
+           "features": [{"text": "누이의 죽음을 다룸"}, {"text": "누이의 죽음을 다룸."}, {"text": "향가"}]}
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-123"), client=LAN)
+    key, fix = ref_key(ref), lambda **body: client.put(f"/api/references/{ref_key(ref)}/fix",
+                                                       json={"section": "핵심 특징", **body}, headers=TEACHER)
+
+    fix(original="누이의 죽음을 다룸.", hidden=True)
+    fix(original="누이의 죽음을 다룸", text="누이의 죽음을 종교로 극복함")
+
+    items = client.get(f"/api/references/{key}").json()["sections"][0]["items"]
+    assert [(i["text"], i["hidden"]) for i in items] == [
+        ("누이의 죽음을 종교로 극복함", False), ("누이의 죽음을 다룸.", True), ("향가", False)]
+    assert client.get(f"/api/videos/{ids[0]}").json()["references"][0]["sections"][0]["items"] == [
+        "누이의 죽음을 종교로 극복함", "향가"]
+
+
+def test_odd_entries_written_by_hand_survive_a_teacher_save(lectures):
+    video_dir, data_dir, ids = lectures
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "향가"}]}
+    odd = {"other-ref": {"핵심 특징": {"x": "글만 적음"}, "어휘": ["목록"]}}  # 서버가 쓰지 않는 모양이지만 원장님이 적어 둔 것
+    (data_dir / ".reference-fixes").write_text(json.dumps(odd, ensure_ascii=False), encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-123"), client=LAN)
+
+    client.put(f"/api/references/{ref_key(ref)}/fix", json={"section": "핵심 특징", "original": "향가", "hidden": True},
+               headers=TEACHER)
+
+    saved = json.loads((data_dir / ".reference-fixes").read_text(encoding="utf-8"))
+    assert saved["other-ref"] == odd["other-ref"] and saved[ref_key(ref)] == {"핵심 특징": {"향가": {"hidden": True}}}
+
+
+def test_the_broken_copy_is_the_file_as_it_is_now(lectures):
+    video_dir, data_dir, ids = lectures
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "향가"}]}
+    (data_dir / ".reference-fixes.broken").write_text("지난번에 깨졌던 것", encoding="utf-8")
+    (data_dir / ".reference-fixes").write_text('{"이번에": ', encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-123"), client=LAN)
+
+    client.put(f"/api/references/{ref_key(ref)}/fix", json={"section": "핵심 특징", "original": "향가", "hidden": True},
+               headers=TEACHER)
+
+    assert (data_dir / ".reference-fixes.broken").read_text(encoding="utf-8") == '{"이번에": '

@@ -17,8 +17,8 @@ from pathlib import Path
 import numpy as np
 
 from academy.ai import IncompleteAnswer
-from academy.library import (GUIDE_TRIES, VIDEO_EXTS, find_videos, folders_problem, load_analysis, load_sizes,
-                             record_move, record_sizes, save_analysis)
+from academy.library import (GUIDE_TRIES, VIDEO_EXTS, BrokenRecord, find_videos, folders_problem, load_analysis,
+                             load_sizes, record_move, record_sizes, save_analysis)
 from academy.settings import load_env_file
 
 # 예전에 소리 없는 강의에 넣던 빈 요점 정리. 지금은 "silent": true로 표시하고, 이것을 만나면 걷어 냅니다.
@@ -76,14 +76,15 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
         orphans, replaced, copies = [], set(), {}
         if probe:
             analyzed = {path.stem for path in Path(data_dir).glob("*.json")}  # 이번 분석을 시작할 때 분석이 있던 강의
-            replaced = _note_sizes(data_dir, mine, analyzed)  # 나중에 이 강의를 옮기거나 복사하면 알아볼 수 있게
+            replaced = _note_sizes(data_dir, mine, analyzed, settle_seconds)
             orphans = _orphans(data_dir, {v["id"] for v in videos})
             sizes = load_sizes(data_dir)
             for v in videos:  # 크기 → 분석이 있는 강의(다른 반 폴더로 복사한 강의를 알아볼 때)
                 if v["id"] in analyzed and v["id"] in sizes and v["id"] not in replaced:
                     copies.setdefault(sizes[v["id"]], []).append(v["id"])
         return _analyze(mine, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references,
-                        settle_seconds, lambda video: _adopt(video, data_dir, orphans, probe, copies), replaced, retry_failed)
+                        settle_seconds, lambda video: _adopt(video, data_dir, orphans, probe, copies), replaced, retry_failed,
+                        copies if probe else None)
     finally:
         lock.close()
 
@@ -115,16 +116,44 @@ def _redo_notice(video_dir, data_dir, part, only):
             "맞으면 --yes를 붙여 다시 실행하세요. 몇 강의만 다시 하려면 --only <제목 일부>")
 
 
-def _note_sizes(data_dir, videos, analyzed):
-    """영상 크기를 적어 두고, 분석이 있는데 적어 둔 크기와 달라진 강의(같은 자리에 다시 녹화한 파일 등)를 돌려줍니다."""
-    before, sizes = load_sizes(data_dir), {}
+def _note_sizes(data_dir, videos, analyzed, settle_seconds=0):
+    """분석이 있는데 적어 둔 크기와 달라진 강의(같은 자리에 다시 녹화한 파일 등)를 돌려줍니다.
+    크기는 그 크기의 영상을 분석(또는 이어 쓰기·복사)한 뒤에만 적습니다: 먼저 적으면 그 밤에 분석하지 못한(복사 중, 실패)
+    바뀐 영상을 다음 밤에 알아보지 못해 새 영상에 옛 요점 정리가 남습니다. 여기서는 크기를 적기 전에 분석해 둔 강의의
+    크기만 처음 적습니다(복사 중일 수 있는 방금 바뀐 파일은 빼고)."""
+    before, current, first = load_sizes(data_dir), {}, {}
     for video in videos:
         try:
-            sizes[video["id"]] = video["path"].stat().st_size
+            stat = video["path"].stat()
         except OSError:  # 그사이 옮겨진 영상
-            pass
-    record_sizes(data_dir, sizes)
-    return {i for i, size in sizes.items() if i in analyzed and before.get(i) not in (None, size)}
+            continue
+        current[video["id"]] = stat.st_size
+        if video["id"] in analyzed and video["id"] not in before and time.time() - stat.st_mtime >= settle_seconds:
+            first[video["id"]] = stat.st_size
+    _record_sizes(data_dir, first)
+    return {i for i, size in current.items() if i in analyzed and before.get(i) not in (None, size)}
+
+
+def _record_sizes(data_dir, sizes):
+    try:  # 기록 파일이 깨져도 밤 작업은 계속합니다(설정 점검이 알려 줌)
+        record_sizes(data_dir, sizes)
+    except (BrokenRecord, OSError) as e:
+        print(f"  영상 크기를 적지 못함(옮기거나 바꾼 영상을 알아보지 못할 수 있음): {e}", file=sys.stderr)
+
+
+def _size(video):
+    try:
+        return video["path"].stat().st_size
+    except OSError:
+        return None
+
+
+def _tries(data):
+    """Claude 답이 잘린 횟수. 손으로 "2"·null 등으로 고쳐도 밤 작업이 멈추지 않게."""
+    try:
+        return int(data.get("guide_failures") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _orphans(data_dir, known):
@@ -160,29 +189,33 @@ def _adopt(video, data_dir, orphans, probe, copies):
         fits = lambda o: abs(o["duration"] - duration) <= 2
         named, sized = [o for o in named if fits(o)], [o for o in sized if fits(o)]
         if not named and not sized:
-            return _copy(video, data_dir, copies.get(size, []), duration)
+            return _copy(video, data_dir, copies.get(size, []), duration, size)
         if len(named) != 1 and not (not named and len(sized) == 1):
             return None
         old = (named or sized)[0]
         # 분석 파일을 먼저 옮긴 쪽만 이어 씁니다(함께 도는 --part 묶음이 같은 분석을 둘 다 가져가지 않게).
         (Path(data_dir) / f"{old['id']}.json").rename(Path(data_dir) / f"{video['id']}.json")
-        data = {**old["data"], "title": video["title"]}
-        save_analysis(data_dir, video["id"], data)
-        if (Path(data_dir) / old["id"]).is_dir() and not (Path(data_dir) / video["id"]).exists():
-            (Path(data_dir) / old["id"]).rename(Path(data_dir) / video["id"])
     except Exception as e:  # 영상 길이를 못 읽음 등: 이어 쓰지 않고 새로 분석합니다
         print(f"  예전 분석을 이어 쓰지 못함, 새로 분석: {e}", file=sys.stderr)
         return None
+    data = {**old["data"], "title": video["title"]}
+    try:  # 분석 파일은 이미 옮겼으니 여기서 실패해도 이어 쓴 것으로 봅니다(옮긴 강의를 새로 사지 않게)
+        save_analysis(data_dir, video["id"], data)
+        if (Path(data_dir) / old["id"]).is_dir() and not (Path(data_dir) / video["id"]).exists():
+            (Path(data_dir) / old["id"]).rename(Path(data_dir) / video["id"])
+    except OSError as e:
+        print(f"  예전 분석은 옮겼지만 제목·페이지 그림을 정리하지 못함: {e}", file=sys.stderr)
+    _record_sizes(data_dir, {video["id"]: size})
     try:  # 학생 기기의 이어 보기·메모와 '이번 주 강의'가 따라오게(못 남겨도 이어 쓴 분석은 그대로)
         record_move(data_dir, old["id"], video["id"])
-    except OSError as e:
+    except (OSError, BrokenRecord) as e:
         print(f"  옮긴 기록을 남기지 못함(학생 기록이 따라오지 않을 수 있음): {e}", file=sys.stderr)
     orphans.remove(old)
     print(f"  옮긴 강의로 보여 예전 분석을 이어 씁니다: {old['data']['title']}")
     return data
 
 
-def _copy(video, data_dir, sources, duration):
+def _copy(video, data_dir, sources, duration, size=None):
     """같은 영상(크기·길이가 같음)이 다른 폴더에 분석과 함께 있으면 그 분석과 페이지 그림을 복사합니다."""
     for source in sources:
         try:
@@ -197,13 +230,16 @@ def _copy(video, data_dir, sources, duration):
         except (OSError, ValueError, TypeError) as e:
             print(f"  같은 영상의 분석을 복사하지 못함, 새로 분석: {e}", file=sys.stderr)
             return None
+        if size is not None:
+            _record_sizes(data_dir, {video["id"]: size})
         print(f"  다른 폴더의 같은 영상이라 분석을 복사합니다: {data.get('title', source)}")
         return copied
     return None
 
 
 def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds,
-             adopt, replaced=(), retry_failed=False):
+             adopt, replaced=(), retry_failed=False, copies=None):
+    """copies: 크기 → 분석이 있는 강의(영상 길이를 읽을 수 있을 때만). 이번에 분석한 강의도 더해 같은 밤의 복사본이 씁니다."""
     failures = 0
     for n, video in enumerate(videos, 1):
         print(f"[{n}/{len(videos)}] {video['title']}", flush=True)
@@ -214,15 +250,19 @@ def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read
             continue
         try:
             failures += _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, read_screens,
-                                     find_references, settle_seconds, adopt, video["id"] in replaced, retry_failed)
+                                     find_references, settle_seconds, adopt, video["id"] in replaced, retry_failed, copies)
         finally:
             lock.close()
     return failures
 
 
 def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references,
-                 settle_seconds, adopt, replaced, retry_failed) -> int:
+                 settle_seconds, adopt, replaced, retry_failed, copies) -> int:
     """강의 하나를 분석합니다. 실패하면 1."""
+    size = _size(video)
+    # 시작할 때 바뀐 것으로 보았어도, 잠근 뒤 다시 봅니다: 함께 도는 다른 분석이 그사이 새 영상을 분석해 크기를 적었으면
+    # 그 분석을 씁니다(두 분석이 같은 영상을 두 번 사지 않게).
+    replaced = replaced and load_sizes(data_dir).get(video["id"]) not in (None, size)
     try:
         old = load_analysis(data_dir, video["id"])
         if old is not None and not isinstance(old, dict):
@@ -244,7 +284,7 @@ def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, r
     # 소리 없는 강의(받아쓴 말 없음)는 Claude에 묻지 않습니다. 요점 정리 칸은 비워 두어 학원 정리가 보이게 합니다.
     # guide_stale: --force로 새로 받아쓴 뒤 아직 새 요점 정리를 못 만든 강의(예전 것을 보여 주는 중): 다음 실행에서 이어 만듭니다.
     need_guide = make_guide is not None and (not done.get("guide") or done.get("guide_stale")) and not done.get("silent")
-    if need_guide and done.get("guide_failures", 0) >= GUIDE_TRIES and not retry_failed:
+    if need_guide and _tries(done) >= GUIDE_TRIES and not retry_failed:
         print(f"  Claude 답이 {GUIDE_TRIES}번 잘려 요점 정리는 건너뜀(다시 하려면 --retry-failed)")
         need_guide = False
     if data and not (need_pages or need_guide):
@@ -265,8 +305,10 @@ def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, r
             if data["guide"] and (make_guide is not None or old.get("guide_stale")):
                 data["guide_stale"] = True
             _apply_corrections(data["segments"], data["guide"])  # 예전 요점 정리 때 찾은 받아쓰기 오타도 그대로 고침
-            # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다.
+            # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다. 크기는 받아쓴 영상의 것이라 이제 적습니다.
             save_analysis(data_dir, video["id"], data)
+            if size is not None:
+                _record_sizes(data_dir, {video["id"]: size})
         if need_pages:
             print("  페이지 찾는 중...", flush=True)
             try:
@@ -278,9 +320,21 @@ def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, r
                 page.update(next(({"label": p["label"]} for p in (old or {}).get("pages", [])
                                   if p.get("label") and abs(p["start"] - page["start"]) <= 1), {}))
             save_analysis(data_dir, video["id"], data)
+        twin = (_twin(video, data, data_dir, copies.get(size, []))
+                if copies is not None and need_guide and data["segments"] else None)
         if need_guide and not data["segments"]:  # 소리 없는 강의: Claude에 묻지 않고 표시만 해 둡니다(다시 묻지 않게)
             data["silent"] = True
             save_analysis(data_dir, video["id"], data)
+        elif twin:  # 다른 반 폴더의 같은 영상에 이미 요점 정리가 있음: 다시 사지 않고 가져옵니다
+            data["guide"] = twin["guide"]
+            for page in data.get("pages", []):
+                page.update(next(({"label": p["label"]} for p in twin.get("pages", [])
+                                  if p.get("label") and abs(p["start"] - page["start"]) <= 1), {}))
+            _apply_corrections(data["segments"], data["guide"])
+            data.pop("guide_stale", None)
+            data.pop("guide_failures", None)
+            save_analysis(data_dir, video["id"], data)
+            print(f"  다른 폴더의 같은 영상에서 요점 정리를 가져옵니다: {twin.get('title', '')}")
         elif need_guide:
             screens = None
             if data["segments"] and read_screens and data.get("pages"):
@@ -299,7 +353,7 @@ def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, r
             try:
                 data["guide"] = make_guide(data["title"], data["segments"], screens, [r["text"] for r in refs] or None)
             except IncompleteAnswer:  # 답을 받았지만(비용이 듦) 쓸 수 없음: 몇 번 그랬는지 적어 매일 밤 다시 사지 않게
-                data["guide_failures"] = data.get("guide_failures", 0) + 1
+                data["guide_failures"] = _tries(data) + 1
                 save_analysis(data_dir, video["id"], data)
                 raise
             if refs:
@@ -312,11 +366,28 @@ def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, r
             data.pop("guide_stale", None)
             data.pop("guide_failures", None)
             save_analysis(data_dir, video["id"], data)
+        if copies is not None and size is not None and video["id"] not in copies.get(size, []):  # 같은 밤의 복사본이 씀
+            copies.setdefault(size, []).append(video["id"])
         print("  완료")
     except Exception as e:
         print(f"  실패: {e}", file=sys.stderr)
         return 1
     return 0
+
+
+def _twin(video, data, data_dir, candidates):
+    """크기·길이가 같은 다른 폴더의 같은 영상 가운데 요점 정리가 다 된 분석(없으면 None)."""
+    for other in candidates:
+        if other == video["id"]:
+            continue
+        try:
+            twin = load_analysis(data_dir, other)
+            if (isinstance(twin, dict) and twin.get("guide") and not twin.get("guide_stale")
+                    and abs(float(twin.get("duration") or 0) - float(data.get("duration") or 0)) <= 2):
+                return twin
+        except (OSError, ValueError, TypeError):
+            continue
+    return None
 
 
 def _apply_corrections(segments, guide):

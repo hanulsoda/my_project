@@ -66,10 +66,13 @@ def checks(env) -> list[tuple[str, str]]:
                          + (" 등" if len(broken) > 5 else ""))
         if orphans:
             say(NOTE, f"지금 영상 폴더에 없는 강의의 분석 {orphans:,}개(옮기거나 이름을 바꾼 강의는 다음 분석 때 이어 씁니다)")
-        for name, what in [(".reference-fixes", "학원 정리 고침"), (".teacher-picks", "이번 주 강의")]:
+        for name, what, stops in [(".reference-fixes", "학원 정리 고침", "선생님이 고친 내용을 저장할 수 없습니다"),
+                                  (".teacher-picks", "이번 주 강의", "선생님이 이번 주 강의를 저장할 수 없습니다"),
+                                  (".moved-lectures", "옮긴 강의 기록", "옮긴 강의의 학생 기록을 이어 주지 못합니다"),
+                                  (".lecture-sizes", "영상 크기 기록", "옮기거나 다시 올린 영상을 알아보지 못합니다")]:
             if (data_dir / name).exists() and not isinstance(_json(data_dir / name), dict):
-                say(PROBLEM, f"{what} 파일이 깨졌습니다: {data_dir / name}. 선생님이 저장할 수 없습니다"
-                             f"({name}.broken이 있으면 그것이 깨지기 전의 파일입니다)")
+                say(PROBLEM, f"{what} 파일이 깨졌습니다: {data_dir / name}. {stops}. 그 파일의 쉼표·따옴표를 고치거나 "
+                             f"백업에서 되살리세요({name}.broken은 깨진 파일을 복사해 둔 것입니다)")
         free = shutil.disk_usage(data_dir).free
         if free < 5e9:
             say(PROBLEM, f"분석 폴더 디스크가 {free / 1e9:.1f}GB밖에 남지 않았습니다")
