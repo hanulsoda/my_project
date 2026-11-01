@@ -19,6 +19,14 @@ const MISSING = "이 영상을 찾을 수 없습니다. 선생님께 알려 주�
 // 서버가 다른 답(파일 없음 404, 파일을 읽지 못한 500 등)을 하면 다시 받아도 소용없어 그만두고 알립니다.
 const serverDown = (res) => !res || [502, 503, 504].includes(res.status);
 const giveUp = (text) => { lost = null; clearTimeout(retry); $("status").textContent = text; };
+// 알리기만 하는 안내(이어 보기·북마크·다시 연결됨 등)는 5초 뒤 지웁니다. 옆으로 눕힌 휴대폰에서는 안내가 단추 위에 있어
+// 남겨 두면 챕터·속도 단추가 화면 아래로 밀렸습니다. 오류·연결 안내는 그대로 두고, 그사이 바뀐 안내도 지우지 않습니다.
+let briefly = null;
+function sayBriefly(text) {
+  $("status").textContent = text;
+  clearTimeout(briefly);
+  briefly = setTimeout(() => { if ($("status").textContent === text) $("status").textContent = ""; }, 5000);
+}
 video.addEventListener("error", async () => {
   const code = video.error?.code;
   if (code === 3) return void ($("status").textContent = UNPLAYABLE);  // 받은 영상이 깨져 있음
@@ -55,7 +63,7 @@ const reconnected = () => {
   if (!lost?.reloaded || video.seeking || video.readyState < 3) return;  // 자리를 옮기기 전에 쌓인 canplay는 건너뜁니다
   lost = null;
   clearTimeout(retry);
-  $("status").textContent = `다시 연결되어 ${fmt(video.currentTime)}부터 이어서 봅니다.`;
+  sayBriefly(`다시 연결되어 ${fmt(video.currentTime)}부터 이어서 봅니다.`);
   if (lectureFailed) loadLecture();  // 끊긴 동안 받지 못한 강의 정보(제목·요점 정리·퀴즈)
 };
 video.addEventListener("playing", reconnected);
@@ -485,8 +493,8 @@ $("note-form").onsubmit = (e) => {
   if (!lost && ![UNPLAYABLE, MISSING].includes($("status").textContent)) $("status").textContent = "";
 };
 $("bookmark-btn").onclick = () => {
-  $("status").textContent = addNote("") ? `${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`
-    : `북마크를 ${notSaved}`;
+  if (addNote("")) sayBriefly(`${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`);
+  else $("status").textContent = `북마크를 ${notSaved}`;
 };
 renderNotes();
 recordsMoved.then(renderNotes);  // 옮긴 강의를 처음 열 때: 예전 번호의 메모를 옮겨 온 뒤 다시 그립니다
@@ -503,7 +511,7 @@ function stepLoop() {
     if (t <= loopStart + 1) {
       loopStart = null;
       $("loop-label").textContent = "구간 반복";
-      $("status").textContent = "구간 반복 시작점을 지웠습니다. 끝점은 시작점보다 뒤에서 찍어 주세요.";
+      sayBriefly("구간 반복 시작점을 지웠습니다. 끝점은 시작점보다 뒤에서 찍어 주세요.");
       return;
     }
     loopEnd = t;
@@ -614,10 +622,10 @@ video.addEventListener("loadedmetadata", () => {
   const from = params.has("t") ? Number(params.get("t")) : NaN;  // 내용 검색 결과·메모에서 고른 시각(0초도)
   if (from >= 0) {
     video.currentTime = from;
-    $("status").textContent = `${fmt(from)}부터 봅니다.`;
+    sayBriefly(`${fmt(from)}부터 봅니다.`);
   } else if (saved && saved.t > 5 && saved.t < video.duration - 5) {
     video.currentTime = saved.t;
-    $("status").textContent = `지난번에 보던 ${fmt(saved.t)}부터 이어서 봅니다.`;
+    sayBriefly(`지난번에 보던 ${fmt(saved.t)}부터 이어서 봅니다.`);
   }
 }, { once: true });
 video.addEventListener("pause", savePosition);

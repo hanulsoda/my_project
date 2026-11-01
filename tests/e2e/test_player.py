@@ -498,12 +498,14 @@ def test_reconnecting_keeps_trying_while_the_server_is_still_restarting(page, si
 
     page.route("**/media/**", restarting)
     page.clock.install()
-    page.evaluate("() => { delete document.querySelector('video').error; window.dispatchEvent(new Event('online')); }")
+    page.evaluate("""() => { const status = document.getElementById('status'); window.said = [];  // 다시 연결되었다는 안내는 5초 뒤 지워짐
+        new MutationObserver(() => said.push(status.textContent)).observe(status, { childList: true, characterData: true, subtree: true });
+        delete document.querySelector('video').error; window.dispatchEvent(new Event('online')); }""")
     for _ in range(4):  # 5초마다 다시
         page.wait_for_timeout(300)
         page.clock.run_for(5000)
 
-    expect(page.locator("#status")).to_contain_text("다시 연결되어 00:40부터")
+    page.wait_for_function("said.some((s) => s.includes('다시 연결되어 00:40부터'))")
     page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 40) < 3")
 
 
@@ -676,6 +678,62 @@ def test_messages_under_the_video_stay_in_view_on_a_phone_on_its_side(phone, sit
 def test_messages_under_the_video_stay_in_view_in_a_short_window(page, site):
     page.set_viewport_size({"width": 853, "height": 380})  # 옆으로 눕힌 휴대폰과 같은 모양
     messages_stay_in_view(page, site)
+
+
+CHAPTER_BUTTONS = ["#prev-chapter", "#next-chapter"]
+
+
+@pytest.mark.parametrize("width, height, buttons", [
+    (844, 390, CHAPTER_BUTTONS), (740, 360, CHAPTER_BUTTONS),
+    (667, 375, CHAPTER_BUTTONS + ["#speed button[data-rate='2']", "#loop-btn"])], ids=["844x390", "740x360", "667x375"])
+def test_the_resume_message_steps_aside_for_the_buttons_on_a_phone_on_its_side(phone, site, width, height, buttons):
+    page = phone(width, height)
+    remember(page, site, {f"pos:{site.ids[ZMG]}": {"t": 60, "d": 150, "at": 1}})  # 다시 열 때마다 '지난번에 보던 …'
+    page.clock.install()
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator(".chapter").first).to_be_visible()
+    expect(page.locator("#status")).to_contain_text("지난번에 보던 01:00부터")
+
+    page.clock.run_for(6000)
+    expect(page.locator("#status")).to_have_text("")  # 안내는 단추 위에 있어 남겨 두면 단추가 화면 아래로 밀림
+    for button in buttons:
+        assert on_screen(page, page.locator(button)), button
+
+
+def test_a_newer_message_is_not_wiped_by_an_older_ones_timer(phone, site):
+    page = phone(844, 390)
+    remember(page, site, {f"pos:{site.ids[ZMG]}": {"t": 60, "d": 150, "at": 1}})
+    page.clock.install()
+    open_player(page, site)
+    status = page.locator("#status")
+    expect(status).to_contain_text("지난번에 보던 01:00부터")
+    page.clock.run_for(3000)
+    page.locator("#bookmark-btn").tap()
+    expect(status).to_contain_text("북마크했습니다")
+
+    page.clock.run_for(3000)  # 이어 보기 안내가 지워질 때를 지남
+    expect(status).to_contain_text("북마크했습니다")
+    page.clock.run_for(3000)
+    expect(status).to_have_text("")
+
+    page.locator("#bookmark-btn").tap()
+    expect(status).to_contain_text("북마크했습니다")
+    cut_off(page)  # 알리기만 하는 안내가 지워지기 전에 끊김
+    page.route("**/media/**", lambda route: route.abort("internetdisconnected"))  # 서버는 아직 꺼져 있음
+    page.clock.run_for(10000)
+    expect(status).to_contain_text("인터넷 연결이 끊겼습니다")  # 연결 안내는 다시 연결될 때까지
+
+
+def test_a_message_that_the_video_cannot_play_stays(phone, site):
+    page = phone(844, 390)
+    page.route("**/media/**", lambda route: route.fulfill(status=200, content_type="video/mp4", body="아직 올리는 중"))
+    page.clock.install()
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    status = page.locator("#status")
+    expect(status).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")
+
+    page.clock.run_for(10000)
+    expect(status).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")
 
 
 BLOCKED_STORAGE = """Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
