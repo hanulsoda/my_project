@@ -173,6 +173,14 @@ def test_the_study_tabs_move_with_the_arrow_keys(page, site):
     assert page.evaluate("[...document.querySelectorAll('[role=tab]')].filter((t) => t.tabIndex === 0).map((t) => t.id)") == ["tab-btn-guide"]
 
 
+def test_speed_buttons_are_read_as_speeds(page, site):
+    open_player(page, site)  # 화면 읽기 프로그램이 '1.25×'를 '1.25 곱하기'로 읽던 것
+    names = page.evaluate("[...document.querySelectorAll('#speed button')].map((b) => b.getAttribute('aria-label'))")
+    assert names == ["0.8배속", "1배속", "1.25배속", "1.5배속", "2배속"]
+    page.get_by_role("button", name="1.5배속").click()
+    assert page.evaluate(f"{VIDEO}.playbackRate") == 1.5
+
+
 def test_a_section_repeat_keeps_looping(page, site):
     open_player(page, site)
     go(page, 20)

@@ -536,8 +536,8 @@ function setSpeed(rate) {
   store.set("speed", rate);
   for (const b of $("speed").children) b.setAttribute("aria-pressed", String(Number(b.dataset.rate) === rate));
 }
-$("speed").replaceChildren(...[0.8, 1, 1.25, 1.5, 2].map((rate) =>
-  el("button", { "data-rate": rate, onclick: () => setSpeed(rate) }, `${rate}×`)));
+$("speed").replaceChildren(...[0.8, 1, 1.25, 1.5, 2].map((rate) =>  // '×'는 화면 읽기 프로그램이 '곱하기'로 읽어 '배속'으로 알립니다
+  el("button", { "data-rate": rate, "aria-label": `${rate}배속`, onclick: () => setSpeed(rate) }, `${rate}×`)));
 setSpeed(store.get("speed") || 1);
 
 // 글을 쓰는 중이면 단축키를 쓰지 않습니다. 키보드(Tab)로 버튼에 간 학생의 스페이스는 그 버튼을 누릅니다(퀴즈 보기 고르기 등).
