@@ -194,3 +194,24 @@ def test_deleting_in_the_player_keeps_a_note_added_in_another_tab(page, site):
     page.evaluate("key => localStorage.setItem(key, JSON.stringify([{t: 10, text: '하나'}, {t: 20, text: '둘'}]))", f"notes:{vid}")
     page.get_by_role("button", name="00:10 메모 삭제").click()
     assert stored(page, f"notes:{vid}") == [{"t": 20, "text": "둘"}]
+
+
+def test_fixes_that_no_longer_apply_are_listed_and_a_refused_save_says_why(page, site):
+    remember(page, site, {"teacher-key": TEACHER_KEY})
+    detail = {"key": "k1", "title": "연습 작품", "grade": "고1",
+              "sections": [{"name": "핵심 특징", "items": [{"original": "신라 향가", "text": "신라 향가", "hidden": False,
+                                                          "suspect": None}]}],
+              "unmatched": [{"section": "핵심 특징", "original": "향가", "text": "10구체 향가", "hidden": False}]}
+    page.route("**/api/references", lambda route: route.fulfill(
+        json=[{"key": "k1", "title": "연습 작품", "grade": "고1", "suspects": 0, "unmatched": 1}]))
+    page.route("**/api/references/k1", lambda route: route.fulfill(json=detail))
+    page.route("**/api/references/k1/fix", lambda route: route.fulfill(
+        status=409, json={"detail": "학원 정리 고침 파일(.reference-fixes)이 깨져 있어 저장하지 않았습니다."}))
+    page.goto(site.url + "/fixes.html")
+
+    expect(page.locator("#ref-list")).to_contain_text("적용 안 된 고침 1")  # '의심 항목 있는 것만'에도 나옴
+    page.get_by_role("button", name="고1 · 연습 작품").click()
+    expect(page.locator("#ref-detail")).to_contain_text("적용되지 않는 고침")
+    expect(page.locator("#ref-detail")).to_contain_text("향가 → 10구체 향가")
+    page.locator(".fix-item").first.get_by_role("button", name="숨기기").click()
+    expect(page.locator(".fix-item .fix-msg").first).to_contain_text("깨져 있어")  # '잠시 뒤 다시'가 아니라 까닭

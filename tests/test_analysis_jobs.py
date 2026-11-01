@@ -383,3 +383,97 @@ def test_a_force_run_without_claude_keeps_the_old_guides_spelling_fixes(tmp_path
     analyze_all(tmp_path / "videos", data_dir, rec.transcribe, None, force=True)  # --force --no-guide
 
     assert load_analysis(data_dir, ids["1강"])["segments"][0]["text"] == "오늘은 제망매가를 봅니다"  # 대본 탭·검색
+
+
+def test_the_analysis_will_not_start_without_its_data_folder_or_with_another_video_folder(tmp_path, monkeypatch):
+    import sys
+
+    from academy import analyze
+    make_videos(tmp_path / "videos" / "고1", "1강.mp4")
+    monkeypatch.setenv("VIDEO_DIR", str(tmp_path / "videos"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))  # 예약 줄에서 DATA_DIR을 빠뜨리거나 잘못 적음
+    monkeypatch.setattr(sys, "argv", ["academy.analyze", "--no-guide"])
+    with pytest.raises(SystemExit) as stop:
+        analyze.main()
+    assert "분석 폴더" in str(stop.value.code) and not (tmp_path / "data").exists()  # 강의 전부를 다시 사지 않게
+
+    (tmp_path / "data").mkdir()  # 처음 분석: 원장님이 폴더를 만들면 시작
+    assert analyze.folders_problem(tmp_path / "videos", tmp_path / "data") is None
+    problem = analyze.folders_problem(tmp_path / "videos" / "고1", tmp_path / "data")  # 하위 폴더만 분석하려 함
+    assert "영상 폴더" in problem and str((tmp_path / "videos").resolve()) in problem
+
+
+def test_two_analysis_runs_with_different_parts_do_not_analyze_one_lecture_twice(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4", "3강.mp4")
+    rec, nested = Recorder(), []
+
+    def transcribe(path):
+        if not nested:  # 밤의 --part 1/2가 1강을 받아쓰는 동안 원장님이 손으로 분석을 돌림
+            nested.append(True)
+            analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
+        return rec.transcribe(path)
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", transcribe, rec.make_guide, part=(1, 2))
+
+    assert sorted(rec.transcribed) == ["1강.mp4", "2강.mp4", "3강.mp4"] and len(rec.guided) == 3  # 두 번 사지 않음
+
+
+def test_a_lecture_whose_paid_answer_came_back_incomplete_is_not_bought_every_night(tmp_path):
+    from academy.ai import IncompleteAnswer
+    make_videos(tmp_path / "videos", "1강.mp4")
+    rec, asked = Recorder(), []
+
+    def cut_off(*args):  # Claude가 답은 했지만(비용이 듦) 한도에 닿아 끝까지 쓰지 못함
+        asked.append(True)
+        raise IncompleteAnswer("Claude 응답이 완료되지 않았습니다 (max_tokens)")
+
+    for _ in range(4):  # 나흘 밤
+        analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, cut_off)
+    assert len(asked) == 2
+
+    analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, cut_off, retry_failed=True)
+    assert len(asked) == 3 and rec.transcribed == ["1강.mp4"]
+
+
+def test_a_video_replaced_at_the_same_place_is_analyzed_again(tmp_path):
+    make_videos(tmp_path / "videos", "1강.mp4")
+    rec = Recorder()
+    run = lambda: analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide, probe=lambda p: 120.0)
+    run()
+
+    (tmp_path / "videos" / "1강.mp4").write_bytes(b"re-recorded")  # 같은 자리에 다시 녹화한 파일(크기가 다름)
+    run()
+    run()
+
+    assert rec.transcribed == ["1강.mp4", "1강.mp4"] and len(rec.guided) == 2  # 바뀐 밤에만 한 번 더
+
+
+def test_a_renamed_or_copied_lecture_file_reuses_its_analysis(tmp_path):
+    import shutil
+    videos, data_dir = moved_site(tmp_path, "고1/1강.mp4")
+    (videos / "고1" / "1강.mp4").write_bytes(b"the recording")
+    rec = Recorder()
+    run = lambda: analyze_all(videos, data_dir, rec.transcribe, rec.make_guide, detect_pages=rec.detect_pages,
+                              probe=lambda p: 120.0)
+    run()
+
+    (videos / "고1" / "1강.mp4").rename(videos / "고1" / "1강 제망매가.mp4")  # 파일 이름만 바꿈
+    run()
+    renamed = find_videos(videos)[0]["id"]
+    assert rec.transcribed == ["1강.mp4"] and load_analysis(data_dir, renamed)["guide"] == GUIDE
+    assert json.loads((data_dir / ".moved-lectures").read_text())  # 학생 기록도 따라감
+
+    (videos / "고2").mkdir()
+    shutil.copyfile(videos / "고1" / "1강 제망매가.mp4", videos / "고2" / "1강 제망매가.mp4")  # 다른 반 폴더로 복사
+    run()
+    assert rec.transcribed == ["1강.mp4"] and len(rec.guided) == 1  # 받아쓰기·Claude 비용 없음
+    assert all(load_analysis(data_dir, v["id"])["guide"] == GUIDE for v in find_videos(videos))
+
+
+def test_a_spelling_fix_does_not_touch_words_already_written_right():
+    from academy.analyze import _apply_corrections
+    segments = [{"text": "오늘은 관동별곡을 봅시다"}, {"text": "관동별 첫 구절"}]
+
+    _apply_corrections(segments, {"corrections": [{"wrong": "관동별", "right": "관동별곡"}]})
+
+    assert [s["text"] for s in segments] == ["오늘은 관동별곡을 봅시다", "관동별곡 첫 구절"]  # '관동별곡곡'이 되지 않음

@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 from bisect import bisect_right
 from collections import Counter, deque
 from contextlib import asynccontextmanager
@@ -32,7 +33,8 @@ from pydantic import BaseModel, Field, model_validator
 from academy.entry import PASS_TTL, entry_link_ok, make_pass, pass_ok
 from academy.library import find_videos, load_analysis, load_moves
 from academy.settings import entry_settings, teacher_key as _teacher_key
-from academy.references import matcher, read_references, ref_key, reference_sections, suspects, usable_references
+from academy.references import (matcher, read_references, ref_key, reference_sections, same_text, suspects,
+                               unmatched_fixes, usable_references)
 from academy.timelink import link_times
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -687,20 +689,24 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             raise HTTPException(404, "코드가 없거나 시간이 지났습니다")
         return {"data": data}
 
-    def saved_picks():
-        try:
-            return json.loads(picks_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+    def saved_picks():  # 깨졌거나 모양이 다른 파일이면 비어 있는 것으로 봅니다(저장은 set_picks가 막음)
+        raw = _read_record(picks_path) or {}
+        ids, grades = raw.get("ids"), raw.get("grades")
+        return {"ids": [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else [],
+                "grades": {k: v for k, v in grades.items() if isinstance(v, str)} if isinstance(grades, dict) else {},
+                "note": raw.get("note") if isinstance(raw.get("note"), str) else "",
+                "at": raw.get("at") if isinstance(raw.get("at"), (int, float)) else None}
 
     @app.get("/api/moves")
     def moves():
-        """폴더를 옮기거나 이름을 바꾼 강의 {예전 번호: 지금 번호}: 학생 기기가 이어 보기·메모·틀린 문제를 새 번호로 옮깁니다."""
-        return load_moves(data_dir, current_library()["by_id"])
+        """폴더를 옮기거나 이름을 바꾼 강의 {예전 번호: 지금 번호}: 학생 기기가 이어 보기·메모·틀린 문제를 새 번호로 옮깁니다.
+        강의 목록이 비어 있으면(정전 뒤 NAS가 늦게 붙음) 어느 번호가 다시 쓰이는지 몰라 아무것도 옮기지 않습니다."""
+        listed = current_library()["by_id"]
+        return load_moves(data_dir, listed) if listed else {}
 
     @app.get("/api/picks")
     def picks():
-        saved, moved = saved_picks(), load_moves(data_dir, current_library()["by_id"])
+        saved, moved = saved_picks(), moves()
         by_id, grades = current_library()["by_id"], saved.get("grades", {})
         # 고른 뒤 폴더를 옮긴 강의도 새 자리로 보여 줍니다(대상 학년은 예전 번호에 적혀 있음)
         chosen = {}  # 지금 번호 → 고를 때 번호(같은 강의는 한 번)
@@ -717,6 +723,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         ids = [i for i in dict.fromkeys(req.ids) if i in by_id]  # 화면을 연 뒤 NAS에서 빠진 강의는 버립니다
         grades = {i: g for i, g in req.grades.items() if i in ids and g}
         with picks_lock:  # 두 PC에서 동시에 저장해도 같은 임시 파일을 서로 지우지 않게
+            refuse_broken(picks_path, "이번 주 강의")
             if "at" in req.model_fields_set and req.at != saved_picks().get("at"):
                 raise HTTPException(409, "다른 화면에서 먼저 바꿨습니다. 새로 고침해 바뀐 목록을 본 뒤 다시 저장해 주세요")
             picks_path.parent.mkdir(parents=True, exist_ok=True)
@@ -730,11 +737,27 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # {정리 열쇠: {칸 이름: {원래 항목: {"text": 고친 글, "hidden": true}}}} — 학생에게 보낼 때 덮어씁니다.
     fixes_path, fixes_lock = Path(data_dir) / ".reference-fixes", Lock()
 
-    def read_fixes():
-        try:
-            return json.loads(fixes_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+    def read_fixes():  # 깨졌거나 모양이 다른 값은 건너뜁니다(손으로 고친 파일 하나가 목록·강의 화면을 멈추지 않게)
+        raw = _read_record(fixes_path) or {}
+        return {key: {name: {item: entry for item, entry in items.items() if isinstance(entry, dict)}
+                      for name, items in sections.items() if isinstance(items, dict)}
+                for key, sections in raw.items() if isinstance(sections, dict)}
+
+    def refuse_broken(path, what):
+        """깨진 기록 파일 위에는 저장하지 않습니다: 그대로 덮어쓰면 예전에 고친 내용이 모두 사라집니다."""
+        if _read_record(path) is None:
+            backup = path.with_name(path.name + ".broken")
+            if not backup.exists():
+                shutil.copyfile(path, backup)
+            raise HTTPException(409, f"{what} 파일({path.name})이 깨져 있어 저장하지 않았습니다. 원장님께 알려 주세요"
+                                     f"(깨진 파일은 {backup.name}으로 복사해 두었습니다).")
+
+    def fix_of(section_fixes, item):  # 정리 파일을 다시 뽑아 띄어쓰기·끝 마침표만 달라진 항목에도 고친 내용을 씁니다
+        if item in section_fixes:
+            return section_fixes[item]
+        same = same_text(item)
+        return next((entry for original, entry in section_fixes.items() if same_text(original) == same), {})
+
 
     def fixed(summaries, fixes=None):  # 목록·검색처럼 강의마다 부를 때는 fixes를 한 번 읽어 넘깁니다
         fixes = read_fixes() if fixes is None else fixes
@@ -743,7 +766,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             sections = []
             for s in r["sections"]:
                 mine = fixes.get(r.get("key"), {}).get(s["name"], {})
-                items = [mine.get(i, {}).get("text", i) for i in s["items"] if not mine.get(i, {}).get("hidden")]
+                items = [fix_of(mine, i).get("text", i) for i in s["items"] if not fix_of(mine, i).get("hidden")]
                 if items := [i for i in items if i]:
                     sections.append({**s, "items": items})
             if r["sections"] and not sections:  # 선생님이 항목을 모두 숨긴 정리는 쓰지 않습니다(빈칸 문제·어휘 퀴즈도)
@@ -752,8 +775,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             # (숨긴 낱말을 묻거나 고치기 전의 틀린 뜻을 정답으로 내지 않게).
             words = fixes.get(r.get("key"), {}).get("어휘", {})
             fills = fixes.get(r.get("key"), {}).get("빈칸 문제", {})  # 선생님이 숨긴 빈칸 문제도 뺍니다
-            quiz = [q for q in r.get("quiz", []) if ("choices" not in q or q["explanation"] not in words)
-                    and not fills.get(q.get("item"), {}).get("hidden")]
+            quiz = [q for q in r.get("quiz", []) if ("choices" not in q or not fix_of(words, q["explanation"]))
+                    and not fix_of(fills, q.get("item", "")).get("hidden")]
             out.append({**r, "sections": sections, "quiz": quiz})
         return out
 
@@ -772,19 +795,22 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
         def open_suspects(r):  # 선생님이 아직 고치거나 숨기지 않은 의심 항목
             mine = fixes.get(ref_key(r), {})
-            return sum(1 for name, items in suspects(r).items() for item in items if not mine.get(name, {}).get(item))
-        return [{"key": ref_key(r), "title": r["title"], "grade": r["grade"], "suspects": open_suspects(r)}
+            return sum(1 for name, items in suspects(r).items() for item in items if not fix_of(mine.get(name, {}), item))
+        return [{"key": ref_key(r), "title": r["title"], "grade": r["grade"], "suspects": open_suspects(r),
+                 "unmatched": len(unmatched_fixes(r, fixes.get(ref_key(r), {})))}
                 for r in references if reference_sections(r)]
 
     @app.get("/api/references/{key}")
     def reference_detail(key: str):
         ref, fixes = ref_by_key(key), read_fixes().get(key, {})
         flagged = suspects(ref)
+        entry = lambda section, item: fix_of(fixes.get(section, {}), item)
         return {"key": key, "title": ref["title"], "grade": ref["grade"], "sections": [
-            {"name": s["name"], "items": [{"original": i, "text": fixes.get(s["name"], {}).get(i, {}).get("text", i),
-                                           "hidden": bool(fixes.get(s["name"], {}).get(i, {}).get("hidden")),
+            {"name": s["name"], "items": [{"original": i, "text": entry(s["name"], i).get("text", i),
+                                           "hidden": bool(entry(s["name"], i).get("hidden")),
                                            "suspect": flagged.get(s["name"], {}).get(i)} for i in s["items"]]}
-            for s in reference_sections(ref)]}  # 빈칸 문제는 요점 정리가 아니라 퀴즈로 나가고, 숨기기만 됩니다
+            for s in reference_sections(ref)],  # 빈칸 문제는 요점 정리가 아니라 퀴즈로 나가고, 숨기기만 됩니다
+            "unmatched": unmatched_fixes(ref, fixes)}
 
     @app.put("/api/references/{key}/fix")
     def fix_reference(key: str, req: FixRequest, request: Request):
@@ -795,8 +821,13 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if req.section == "빈칸 문제" and req.text not in (None, req.original):  # 빈칸 표시(두 칸 띄어쓰기)가 깨지기 쉬워
             raise HTTPException(400, "빈칸 문제는 숨기기만 할 수 있습니다")
         with fixes_lock:
+            refuse_broken(fixes_path, "학원 정리 고침")
             fixes = read_fixes()
-            entry = fixes.setdefault(key, {}).setdefault(req.section, {}).setdefault(req.original, {})
+            section = fixes.setdefault(key, {}).setdefault(req.section, {})
+            twin = next((o for o in section if o != req.original and same_text(o) == same_text(req.original)), None)
+            if req.original not in section and twin is not None:  # 띄어쓰기만 달라진 예전 항목의 고침을 이 항목으로
+                section[req.original] = section.pop(twin)
+            entry = section.setdefault(req.original, {})
             if req.text is not None:
                 entry["text"] = req.text.strip()
             if req.hidden is not None:
@@ -941,6 +972,17 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     app.mount("/", RevalidatedStaticFiles(directory=STATIC_DIR, html=True))
     return app
+
+
+def _read_record(path):
+    """분석 폴더의 작은 기록 파일(JSON 사전). 없으면 {}, 깨졌거나 사전이 아니면 None."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _log_row(line, keys):

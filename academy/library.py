@@ -119,3 +119,27 @@ def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
+
+
+ROOT_FILE = ".video-root"  # 분석 폴더에 적어 두는 맨 위 영상 폴더: 다른 영상 폴더로 돌려 강의 번호가 바뀌지 않게
+
+
+def folders_problem(video_dir, data_dir, write=True):
+    """분석을 시작하면 안 되는 까닭(없으면 None). 분석 폴더 설정을 빠뜨리거나 잘못 적으면 모든 강의를 처음부터 다시
+    받아쓰고 Claude 비용을 다시 내고, 하위 폴더를 영상 폴더로 주면 강의 번호가 바뀌어 학생 화면에서 '분석 전'이 됩니다.
+    write: 처음 분석하는 분석 폴더에 맨 위 영상 폴더를 적어 둡니다."""
+    data_dir, root = Path(data_dir), str(Path(video_dir).resolve())
+    if not data_dir.is_dir():
+        return (f"분석 폴더(DATA_DIR)가 없습니다: {data_dir.resolve()}\n설정(DATA_DIR)을 확인하세요. 처음 분석하는 것이면 "
+                f"그 폴더를 먼저 만드세요: mkdir -p \"{data_dir.resolve()}\"")
+    marker = data_dir / ROOT_FILE
+    try:
+        saved = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        saved = None
+    if saved and saved != root:
+        return (f"이 분석 폴더는 영상 폴더 {saved}의 분석입니다. 지금 영상 폴더(VIDEO_DIR)는 {root}입니다.\n"
+                "서버·분석·자동 목차에는 같은 맨 위 영상 폴더를 적어 주세요(한 폴더의 강의만 하려면 --only).")
+    if not saved and write:
+        marker.write_text(root, encoding="utf-8")
+    return None

@@ -66,13 +66,14 @@
 
     function renderList() {
       const words = $("ref-search").value.split(/\s+/).filter(Boolean).map(flat);
-      const shown = refs.filter((r) => (!$("suspect-only").checked || r.suspects)
+      const shown = refs.filter((r) => (!$("suspect-only").checked || r.suspects || r.unmatched)  // 볼 것이 있는 정리
                                        && words.every((w) => flat(`${r.grade} ${r.title}`).includes(w)));
       const flagged = refs.filter((r) => r.suspects).length;
       $("view-sub").textContent = `학원 정리 ${refs.length.toLocaleString()}개 · 의심 항목 있는 정리 ${flagged.toLocaleString()}개`;
       $("ref-list").replaceChildren(...shown.slice(0, 50).map((r) => el("li", {},
         el("button", { type: "button", class: "link", onclick: () => openRef(r.key) }, `${r.grade} · ${r.title}`),
-        ...(r.suspects ? [" ", el("span", { class: "chip warn" }, `의심 ${r.suspects}`)] : []))));
+        ...(r.suspects ? [" ", el("span", { class: "chip warn" }, `의심 ${r.suspects}`)] : []),
+        ...(r.unmatched ? [" ", el("span", { class: "chip warn" }, `적용 안 된 고침 ${r.unmatched}`)] : []))));
       if (shown.length > 50) $("ref-list").append(el("li", { class: "notice" }, `${shown.length.toLocaleString()}개 중 50개만 보입니다. 작품 이름으로 찾아 주세요.`));
       if (!shown.length) $("ref-list").append(el("li", { class: "notice" }, "찾은 정리가 없습니다."));
     }
@@ -95,7 +96,10 @@
         localStorage.removeItem("teacher-key");
         return askKey(card, "선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.");
       }
-      if (!res.ok) return tell(card, "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      if (!res.ok) {  // 고침 파일이 깨졌을 때(409) 등은 서버가 까닭을 알려 줍니다
+        const body = await res.json().catch(() => ({}));
+        return tell(card, typeof body.detail === "string" ? body.detail : "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      }
       const ref = await res.json(), all = ref.sections.flatMap((s) => s.items);
       const listed = refs.find((r) => r.key === key);  // 목록의 의심 수: 고치거나 숨긴 항목은 빼고
       if (listed) listed.suspects = all.filter((it) => it.suspect && it.text === it.original && !it.hidden).length;
@@ -138,7 +142,11 @@
         el("button", { type: "button", class: "more", onclick: () => { keyHome(); $("ref-detail").hidden = true; $("ref-list").hidden = false; renderList(); } },
           "‹ 정리 목록"),
         el("h2", {}, `${ref.grade} 「${ref.title}」`),
-        ...ref.sections.flatMap((s) => [el("h3", {}, s.name), ...s.items.map((it) => itemCard(ref.key, s.name, it))]));
+        ...ref.sections.flatMap((s) => [el("h3", {}, s.name), ...s.items.map((it) => itemCard(ref.key, s.name, it))]),
+        // 정리 파일을 다시 뽑으며 고쳤던 항목 글이 바뀌거나 빠진 고침(띄어쓰기·끝 마침표만 달라진 것은 그대로 적용됨)
+        ...(ref.unmatched?.length ? [el("h3", {}, "적용되지 않는 고침"),
+          el("p", { class: "notice" }, "정리 파일을 다시 뽑으며 고쳤던 항목의 글이 바뀌거나 빠져 학생에게 적용되지 않습니다. 위에서 해당 항목을 다시 고쳐 주세요."),
+          el("ul", {}, ...ref.unmatched.map((u) => el("li", {}, `${u.section}: ${u.original} → ${u.hidden ? "숨김" : u.text}`)))] : []));
     }
 
     fetch("/api/references").then((r) => r.json()).then((list) => { refs = list; renderList(); });

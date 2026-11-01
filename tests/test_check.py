@@ -85,3 +85,18 @@ def test_a_log_folder_the_server_cannot_create_is_a_problem(tmp_path):
     env["LOG_DIR"] = str(tmp_path / "logs.txt" / "logs")  # 위가 폴더가 아니라 파일
 
     assert any("로그 폴더" in text for text in problems(env))
+
+
+def test_the_check_reports_damaged_teacher_files_and_fixes_that_no_longer_apply(tmp_path):
+    from academy.references import ref_key
+    refs = [{"title": "제망매가", "grade": "고1", "features": [{"text": "신라 향가"}]}]
+    env, _ = setup(tmp_path, refs=refs)
+    (tmp_path / "data" / ".reference-fixes").write_text(json.dumps({
+        ref_key(refs[0]): {"핵심 특징": {"향가": {"text": "10구체 향가"}}},  # 정리 파일을 다시 뽑아 항목 글이 바뀜
+        "0000000000": {"개요": {"x": {"hidden": True}}}}), encoding="utf-8")  # 학년·제목이 바뀐 정리
+    (tmp_path / "data" / ".teacher-picks").write_text("{", encoding="utf-8")
+
+    found = checks(env)
+
+    assert any(level == "문제" and "이번 주 강의" in text and "깨졌" in text for level, text in found)
+    assert any(level == "참고" and "적용되지 않는 학원 정리 고침 2개" in text for level, text in found)

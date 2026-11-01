@@ -167,3 +167,50 @@ def test_a_teacher_key_path_with_a_tilde_or_a_typo_is_handled(tmp_path, monkeypa
     assert server._teacher_key("~/.config/teacher-key") == "plain-key-123"  # 따옴표 안의 ~도 집 폴더로
     assert server._teacher_key(str(tmp_path / "오타")) is None
     assert "선생님 열쇠" in caplog.text  # 경로가 틀리면 조용히 넘어가지 않고 서버 기록에 남김
+
+
+def test_a_fix_still_applies_after_the_summary_file_is_exported_again(lectures):
+    video_dir, data_dir, ids = lectures
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "누이의 죽음을 다룸"}, {"text": "향가"}]}
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-123"), client=LAN)
+    key = ref_key(ref)
+    client.put(f"/api/references/{key}/fix", json={"section": "핵심 특징", "original": "누이의 죽음을 다룸", "hidden": True},
+               headers=TEACHER)
+    client.put(f"/api/references/{key}/fix", json={"section": "핵심 특징", "original": "향가", "text": "10구체 향가"},
+               headers=TEACHER)
+    # 정리 파일을 다시 뽑음: 띄어쓰기·끝 마침표만 바뀐 항목과, 글이 바뀐 항목
+    again = {**ref, "features": [{"text": "누이의  죽음을 다룸."}, {"text": "신라 향가"}]}
+    client = TestClient(create_app(video_dir, data_dir, None, [again], teacher_key="teacher-key-123"), client=LAN)
+
+    assert client.get(f"/api/videos/{ids[0]}").json()["references"][0]["sections"][0]["items"] == ["신라 향가"]  # 숨김 그대로
+    assert client.get(f"/api/references/{key}").json()["unmatched"] == [  # 적용되지 않는 고침은 선생님에게 보여 줌
+        {"section": "핵심 특징", "original": "향가", "text": "10구체 향가", "hidden": False}]
+    assert client.get("/api/references").json()[0]["unmatched"] == 1
+
+
+def test_a_damaged_fixes_or_picks_file_is_not_overwritten(lectures):
+    video_dir, data_dir, ids = lectures
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "누이의 죽음"}]}
+    broken = '{"abc": {"핵심 특징": {"x": {"hidden": true}}'  # 저장 도중 끊겼거나 손으로 고치다 깨짐
+    (data_dir / ".reference-fixes").write_text(broken, encoding="utf-8")
+    (data_dir / ".teacher-picks").write_text("[]", encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-123"), client=LAN)
+
+    assert client.get("/api/videos").status_code == 200 and client.get("/api/picks").status_code == 200
+    res = client.put(f"/api/references/{ref_key(ref)}/fix", json={"section": "핵심 특징", "original": "누이의 죽음", "hidden": True},
+                     headers=TEACHER)
+    assert res.status_code == 409 and "깨져" in res.json()["detail"]
+    assert (data_dir / ".reference-fixes").read_text(encoding="utf-8") == broken  # 예전 고침을 덮어쓰지 않음
+    assert (data_dir / ".reference-fixes.broken").read_text(encoding="utf-8") == broken  # 살릴 수 있게 따로 둠
+    assert client.put("/api/picks", json={"ids": [ids[0]]}, headers=TEACHER).status_code == 409
+    assert (data_dir / ".teacher-picks").read_text(encoding="utf-8") == "[]"
+
+
+def test_odd_values_in_the_fixes_file_do_not_break_the_list(lectures):
+    video_dir, data_dir, ids = lectures
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "누이의 죽음"}]}
+    (data_dir / ".reference-fixes").write_text(json.dumps({ref_key(ref): {"핵심 특징": []}, "x": 1}), encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None, [ref]), client=LAN)
+
+    assert client.get("/api/videos").status_code == 200
+    assert client.get(f"/api/videos/{ids[0]}").json()["references"][0]["sections"][0]["items"] == ["누이의 죽음"]

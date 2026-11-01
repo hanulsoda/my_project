@@ -14,7 +14,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from academy.library import find_videos, load_analysis, save_analysis
+from academy.library import find_videos, folders_problem, load_analysis, save_analysis
 
 MODEL = os.environ.get("TOC_MODEL", "exaone3.5:7.8b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
@@ -152,8 +152,12 @@ def main():
     parser = argparse.ArgumentParser(description="요점 정리 없는 강의에 로컬 AI 자동 목차 붙이기")
     parser.add_argument("--until", metavar="HH:MM", help="이 시각이 지나면 새 강의를 시작하지 않음 (예: 07:00)")
     args = parser.parse_args()
+    video_dir, data_dir = Path(os.environ.get("VIDEO_DIR", "videos")), Path(os.environ.get("DATA_DIR", "data"))
+    if problem := folders_problem(video_dir, data_dir, write=False):  # 분석과 다른 폴더를 보면 목록을 다시 만들게 됨
+        print(f"{datetime.now():%Y-%m-%d %H:%M} 자동 목차를 멈춥니다: 폴더 설정을 확인하세요", flush=True)
+        sys.exit(problem)
     references = load_references(os.environ.get("REFERENCES_FILE"))
-    failures, finished = add_tocs(Path(os.environ.get("VIDEO_DIR", "videos")), Path(os.environ.get("DATA_DIR", "data")),
+    failures, finished = add_tocs(video_dir, data_dir,
                                   ollama_ask, lambda title: bool(find_references(title, [], references)), args.until)
     if failures:
         print(f"{failures}개 강의 실패. 다시 실행하면 이어서 합니다.", file=sys.stderr)

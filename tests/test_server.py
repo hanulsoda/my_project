@@ -658,7 +658,7 @@ def test_teachers_fix_or_hide_summary_items_without_touching_the_original(tmp_pa
     client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="k"))
     shown = lambda: {s["name"]: s["items"] for s in client.get(f"/api/videos/{video_id}").json()["references"][0]["sections"]}
 
-    assert client.get("/api/references").json() == [{"key": key, "title": "홍계월전", "grade": "고1", "suspects": 1}]
+    assert client.get("/api/references").json() == [{"key": key, "title": "홍계월전", "grade": "고1", "suspects": 1, "unmatched": 0}]
     features = {s["name"]: s["items"] for s in client.get(f"/api/references/{key}").json()["sections"]}["핵심 특징"]
     assert features[0] == {"original": "여성 영웅", "text": "여성 영웅", "hidden": False, "suspect": None}
     assert features[1]["suspect"] == "너무 긴 항목(256자)"  # '남장 모티프'(띄어쓰기 포함 6자) + 250자
@@ -882,3 +882,15 @@ def test_video_detail_keeps_teacher_only_edits_on_the_server(tmp_path):
 
     assert "edits" not in sent
     assert sent["overview"] == [{"name": "갈래", "value": "수필"}]
+
+
+def test_no_records_are_moved_while_the_lecture_list_is_still_empty(tmp_path):
+    from academy.library import record_move
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    video_dir.mkdir()
+    data_dir.mkdir()
+    record_move(data_dir, "aaaaaaaaaaaa", "bbbbbbbbbbbb")  # 작년에 옮긴 강의(예전 자리에는 올해 새 강의)
+
+    client = TestClient(create_app(video_dir, data_dir, None))  # 정전 뒤 NAS보다 먼저 켜져 영상 폴더가 비어 보임
+
+    assert client.get("/api/moves").json() == {}  # 올해 강의의 기록을 작년 녹화로 옮기지 않음

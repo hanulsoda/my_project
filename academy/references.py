@@ -144,8 +144,17 @@ def reference_sections(ref) -> list[dict]:
 _SPACES = re.compile(r"\s+")
 
 
-def _same(text):
-    """띄어쓰기·끝 마침표만 다른 글은 같은 글로 봅니다(PDF에서 두 번 뽑힌 뜻)."""
+def unmatched_fixes(ref, ref_fixes):
+    """선생님이 고쳤던 항목이 정리 파일을 다시 뽑으며 바뀌거나 빠져 학생에게 적용되지 않는 고침(띄어쓰기·끝 마침표만
+    달라진 항목에는 그대로 적용되므로 빼고) [{"section", "original", "text", "hidden"}]."""
+    items = {s["name"]: {same_text(i) for i in s["items"]} for s in reference_sections(ref)}
+    return [{"section": name, "original": original, "text": entry.get("text", original), "hidden": bool(entry.get("hidden"))}
+            for name, entries in ref_fixes.items() if isinstance(entries, dict)
+            for original, entry in entries.items() if isinstance(entry, dict) and same_text(original) not in items.get(name, set())]
+
+
+def same_text(text):
+    """띄어쓰기·끝 마침표만 다른 글은 같은 글로 봅니다(PDF에서 두 번 뽑힌 뜻, 다시 뽑은 정리 파일의 항목)."""
     return _SPACES.sub(" ", text).strip().rstrip(".")
 
 
@@ -173,8 +182,8 @@ def reference_quiz(ref) -> list[dict]:
     for w in words:
         first.setdefault(w["w"], w)
     for name, word in first.items():
-        senses = {_same(w["def"]) for w in words if w["w"] == name}
-        others = list({_same(w["def"]): w["def"] for w in words if _same(w["def"]) not in senses}.values())
+        senses = {same_text(w["def"]) for w in words if w["w"] == name}
+        others = list({same_text(w["def"]): w["def"] for w in words if same_text(w["def"]) not in senses}.values())
         if len(others) < 3:
             continue
         meaning = word["def"]

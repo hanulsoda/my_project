@@ -141,6 +141,10 @@ def transcript_text(segments: list[dict]) -> str:
     return "\n".join(f"[{fmt_time(s['start'])}] {s['text']}" for s in segments)
 
 
+class IncompleteAnswer(RuntimeError):
+    """Claude가 답은 했지만(비용이 듦) 한도에 닿거나 거절해 끝까지 쓰지 못함."""
+
+
 def _ask_claude(client, stream=False, **request) -> str:
     """stream: 답이 길 수 있는 요청(요점 정리)은 스트리밍으로 받습니다. 한도(max_tokens)를 크게 잡으면 SDK가 보통 요청을 막습니다."""
     # 안전 필터가 드물게 요청을 거절하면 Anthropic이 권장하는 다른 모델로 자동 재시도합니다.
@@ -151,7 +155,7 @@ def _ask_claude(client, stream=False, **request) -> str:
     else:
         response = client.beta.messages.create(**request)
     if response.stop_reason in ("refusal", "max_tokens"):
-        raise RuntimeError(f"Claude 응답이 완료되지 않았습니다 ({response.stop_reason})")
+        raise IncompleteAnswer(f"Claude 응답이 완료되지 않았습니다 ({response.stop_reason})")
     return "".join(b.text for b in response.content if b.type == "text")
 
 

@@ -6,6 +6,7 @@
 
 import argparse
 import os
+import shutil
 import sys
 import time
 import unicodedata
@@ -14,19 +15,19 @@ from pathlib import Path
 
 import numpy as np
 
-from academy.library import (VIDEO_EXTS, find_videos, load_analysis, load_sizes, record_move, record_sizes,
-                             save_analysis)
+from academy.ai import IncompleteAnswer
+from academy.library import (VIDEO_EXTS, find_videos, folders_problem, load_analysis, load_sizes, record_move,
+                             record_sizes, save_analysis)
 
 # 예전에 소리 없는 강의에 넣던 빈 요점 정리. 지금은 "silent": true로 표시하고, 이것을 만나면 걷어 냅니다.
 SILENT_GUIDE = {"summary": "음성이 없는 영상입니다.", "chapters": [], "quiz": []}
 SETTLE_SECONDS = 600  # 이보다 최근에 바뀐 영상은 아직 NAS로 복사 중일 수 있어 다음에 분석합니다
-
-
-def run_lock(data_dir, part):
-    """같은 묶음(--part)의 분석이 이미 돌고 있으면 None. 돌려준 파일을 닫으면(프로세스가 끝나면) 풀립니다.
+GUIDE_TRIES = 2  # Claude가 답은 했지만(비용이 듦) 끝까지 못 쓴 강의는 이만큼만 다시 묻습니다(--retry-failed로 다시)
+def _try_lock(path):
+    """그 잠금을 다른 프로세스가 쥐고 있으면 None. 돌려준 파일을 닫으면(프로세스가 끝나면) 풀립니다.
     윈도에는 이 잠금(fcntl)이 없어 잠그지 않습니다(분석을 겹쳐 돌리지 않게 조심)."""
-    Path(data_dir).mkdir(parents=True, exist_ok=True)
-    lock = open(Path(data_dir) / f".analyze-{part[0]}of{part[1]}.lock", "w")
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    lock = open(path, "w")
     try:
         import fcntl
     except ImportError:
@@ -39,14 +40,22 @@ def run_lock(data_dir, part):
     return lock
 
 
+def run_lock(data_dir, part):
+    """같은 묶음(--part)의 분석이 이미 돌고 있으면 None."""
+    return _try_lock(Path(data_dir) / f".analyze-{part[0]}of{part[1]}.lock")
+
+
 def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(1, 1),
-                detect_pages=None, read_screens=None, find_references=None, settle_seconds=0, probe=None) -> int:
+                detect_pages=None, read_screens=None, find_references=None, settle_seconds=0, probe=None,
+                retry_failed=False) -> int:
     """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
 
     read_screens가 있으면 요점 정리를 만들 때 페이지마다 화면 글자를 읽어 근거로 함께 보냅니다.
     find_references(제목, 화면 글자 줄)는 짝지어지는 학원 요점 정리를 {"source", "text"} 목록으로 돌려줍니다.
     settle_seconds: 이보다 최근에 바뀐 영상은 복사 중일 수 있어 받아쓰지 않습니다(반쯤 받아쓴 것이 '분석됨'으로 남지 않게).
-    probe(영상 경로)는 영상 길이(초). 주면 폴더를 옮기거나 이름을 바꾼 강의를 알아보고 예전 분석을 이어 씁니다.
+    probe(영상 경로)는 영상 길이(초). 주면 폴더를 옮기거나 이름을 바꾼 강의를 알아보고 예전 분석을 이어 쓰고, 다른 폴더로
+    복사한 강의는 분석을 복사하고, 같은 자리에서 바뀐 영상(크기가 다름)은 새로 분석합니다.
+    retry_failed: Claude 답이 잘려 GUIDE_TRIES번 실패한 강의도 다시 묻습니다.
     """
     videos = find_videos(video_dir)
     if not videos:
@@ -58,24 +67,31 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
         return 0
     try:
         mine = videos[part[0] - 1::part[1]]  # GPU마다 프로세스를 하나씩 띄울 때 서로 다른 영상을 맡도록 나눕니다.
-        orphans = []
+        orphans, replaced, copies = [], set(), {}
         if probe:
-            _note_sizes(data_dir, mine)  # 나중에 이 강의를 옮기면 알아볼 수 있게
+            analyzed = {path.stem for path in Path(data_dir).glob("*.json")}  # 이번 분석을 시작할 때 분석이 있던 강의
+            replaced = _note_sizes(data_dir, mine, analyzed)  # 나중에 이 강의를 옮기거나 복사하면 알아볼 수 있게
             orphans = _orphans(data_dir, {v["id"] for v in videos})
+            sizes = load_sizes(data_dir)
+            for v in videos:  # 크기 → 분석이 있는 강의(다른 반 폴더로 복사한 강의를 알아볼 때)
+                if v["id"] in analyzed and v["id"] in sizes and v["id"] not in replaced:
+                    copies.setdefault(sizes[v["id"]], []).append(v["id"])
         return _analyze(mine, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references,
-                        settle_seconds, lambda video: _adopt(video, data_dir, orphans, probe))
+                        settle_seconds, lambda video: _adopt(video, data_dir, orphans, probe, copies), replaced, retry_failed)
     finally:
         lock.close()
 
 
-def _note_sizes(data_dir, videos):
-    sizes = {}
+def _note_sizes(data_dir, videos, analyzed):
+    """영상 크기를 적어 두고, 분석이 있는데 적어 둔 크기와 달라진 강의(같은 자리에 다시 녹화한 파일 등)를 돌려줍니다."""
+    before, sizes = load_sizes(data_dir), {}
     for video in videos:
         try:
             sizes[video["id"]] = video["path"].stat().st_size
         except OSError:  # 그사이 옮겨진 영상
             pass
     record_sizes(data_dir, sizes)
+    return {i for i, size in sizes.items() if i in analyzed and before.get(i) not in (None, size)}
 
 
 def _orphans(data_dir, known):
@@ -93,20 +109,28 @@ def _orphans(data_dir, known):
     return found
 
 
-def _adopt(video, data_dir, orphans, probe):
-    """옮긴 강의: 주인 없는 분석 가운데 파일 이름이 같고 길이가 2초 안이고 파일 크기가 같은 것이 꼭 하나면,
-    그 분석(과 페이지 그림)을 이 강의로 옮깁니다. 받아쓰기·요점 정리를 다시 만들지 않아 비용이 들지 않습니다.
-    둘 이상이거나 길이·크기가 다르면 짐작하지 않고 None. 크기를 적기 전의 분석은 이름과 길이로만 봅니다."""
+def _adopt(video, data_dir, orphans, probe, copies):
+    """새로 보이는 강의가 예전 분석을 이어 쓸 수 있으면 그 분석을, 아니면 None(새로 분석). 비용이 들지 않습니다.
+    - 옮긴 강의: 주인 없는 분석 가운데 파일 이름이 같고 길이가 2초 안이고 파일 크기가 같은 것이 꼭 하나면, 그 분석(과
+      페이지 그림)을 이 강의로 옮깁니다. 크기를 적기 전의 분석은 이름과 길이로만 봅니다.
+    - 파일 이름을 바꾼 강의: 이름이 같은 것이 없으면 크기가 바이트까지 같고 길이가 2초 안인 것이 꼭 하나일 때 옮깁니다.
+    - 다른 반 폴더로 복사한 강의: 위가 아니고, 분석이 있는 강의 가운데 크기·길이가 같은 것이 있으면 그 분석을 복사합니다.
+    후보가 둘 이상이거나 길이·크기가 다르면 짐작하지 않습니다."""
     name = video["title"].rsplit("/", 1)[-1]
-    same = [o for o in orphans if o["name"] == name]
-    if not same:
-        return None
     try:
-        duration, size = probe(video["path"]), video["path"].stat().st_size
-        same = [o for o in same if abs(o["duration"] - duration) <= 2 and o["size"] in (None, size)]
-        if len(same) != 1:
+        size = video["path"].stat().st_size
+        named = [o for o in orphans if o["name"] == name and o["size"] in (None, size)]
+        sized = [o for o in orphans if o["size"] == size and o["name"] != name]
+        if not (named or sized or copies.get(size)):
             return None
-        old = same[0]
+        duration = probe(video["path"])
+        fits = lambda o: abs(o["duration"] - duration) <= 2
+        named, sized = [o for o in named if fits(o)], [o for o in sized if fits(o)]
+        if not named and not sized:
+            return _copy(video, data_dir, copies.get(size, []), duration)
+        if len(named) != 1 and not (not named and len(sized) == 1):
+            return None
+        old = (named or sized)[0]
         # 분석 파일을 먼저 옮긴 쪽만 이어 씁니다(함께 도는 --part 묶음이 같은 분석을 둘 다 가져가지 않게).
         (Path(data_dir) / f"{old['id']}.json").rename(Path(data_dir) / f"{video['id']}.json")
         data = {**old["data"], "title": video["title"]}
@@ -125,100 +149,152 @@ def _adopt(video, data_dir, orphans, probe):
     return data
 
 
-def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds, adopt):
+def _copy(video, data_dir, sources, duration):
+    """같은 영상(크기·길이가 같음)이 다른 폴더에 분석과 함께 있으면 그 분석과 페이지 그림을 복사합니다."""
+    for source in sources:
+        try:
+            data = load_analysis(data_dir, source)
+            if not (isinstance(data, dict) and abs(float(data.get("duration") or 0) - duration) <= 2):
+                continue
+            pictures = Path(data_dir) / source
+            if pictures.is_dir() and not (Path(data_dir) / video["id"]).exists():
+                shutil.copytree(pictures, Path(data_dir) / video["id"])
+            copied = {**data, "title": video["title"]}
+            save_analysis(data_dir, video["id"], copied)
+        except (OSError, ValueError, TypeError) as e:
+            print(f"  같은 영상의 분석을 복사하지 못함, 새로 분석: {e}", file=sys.stderr)
+            return None
+        print(f"  다른 폴더의 같은 영상이라 분석을 복사합니다: {data.get('title', source)}")
+        return copied
+    return None
+
+
+def _analyze(videos, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references, settle_seconds,
+             adopt, replaced=(), retry_failed=False):
     failures = 0
     for n, video in enumerate(videos, 1):
         print(f"[{n}/{len(videos)}] {video['title']}", flush=True)
+        # 다른 분석(다른 --part, 손으로 돌린 분석)이 이 강의를 하는 중이면 건너뜁니다: 같은 강의를 두 번 사지 않게
+        lock = _try_lock(Path(data_dir) / ".locks" / f"{video['id']}.lock")
+        if lock is None:
+            print("  다른 분석이 이 강의를 하는 중이라 건너뜀")
+            continue
         try:
-            old = load_analysis(data_dir, video["id"])
-            if old is not None and not isinstance(old, dict):
-                raise ValueError("JSON 객체가 아님")
-        except ValueError as e:  # 손으로 고치다 형식이 깨진 파일: 덮어쓰지 않고 이 강의만 건너뜁니다
-            failures += 1
-            print(f"  분석 파일 형식 오류, 건너뜀(고친 곳의 쉼표·따옴표를 확인하세요): {e}", file=sys.stderr)
-            continue
-        if old and old.get("guide") == SILENT_GUIDE:  # 예전에는 소리 없는 강의에 빈 요점 정리를 넣어 학원 정리가 가려졌습니다
-            old = {**old, "guide": None, "silent": True}
-            save_analysis(data_dir, video["id"], old)
-        data = None if force else old
-        if data is None and not force:
-            data = adopt(video)  # 폴더를 옮기거나 이름을 바꾼 강의면 예전 분석을 이어 씀
-        done = data or {}
-        need_pages = detect_pages is not None and "pages" not in done
-        # 소리 없는 강의(받아쓴 말 없음)는 Claude에 묻지 않습니다. 요점 정리 칸은 비워 두어 학원 정리가 보이게 합니다.
-        # guide_stale: --force로 새로 받아쓴 뒤 아직 새 요점 정리를 못 만든 강의(예전 것을 보여 주는 중): 다음 실행에서 이어 만듭니다.
-        need_guide = make_guide is not None and (not done.get("guide") or done.get("guide_stale")) and not done.get("silent")
-        if data and not (need_pages or need_guide):
-            print("  이미 분석됨, 건너뜀")
-            continue
-        try:  # 영상이 그사이 옮겨졌거나 NAS가 답하지 않으면 이 강의만 실패로 셉니다
-            if not data and time.time() - video["path"].stat().st_mtime < settle_seconds:
-                print("  방금 바뀐 영상이라(복사 중일 수 있음) 다음에 분석합니다")
-                continue
-            if not data:
-                print("  받아쓰는 중...", flush=True)
-                segments, duration = transcribe(video["path"])
-                data = {"title": video["title"], "duration": duration,
-                        "segments": segments, "guide": None}
-                # 다시 분석(--force)해도 새 요점 정리가 생길 때까지 예전 요점 정리·목차(비용을 들인 결과)를 둡니다.
-                data.update({key: old[key] for key in ("guide", "toc") if old and key in old})
-                # --no-guide로 받아쓰기만 새로 했으면 예전 요점 정리를 계속 씁니다(다음 밤에 강의마다 다시 사지 않게).
-                if data["guide"] and (make_guide is not None or old.get("guide_stale")):
-                    data["guide_stale"] = True
-                _apply_corrections(data["segments"], data["guide"])  # 예전 요점 정리 때 찾은 받아쓰기 오타도 그대로 고침
-                # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다.
-                save_analysis(data_dir, video["id"], data)
-            if need_pages:
-                print("  페이지 찾는 중...", flush=True)
-                try:
-                    data["pages"] = detect_pages(video["path"], Path(data_dir) / video["id"])
-                except Exception as e:  # 페이지는 덤이라 실패해도 요점 정리는 만듭니다. 매번 다시 시도하지도 않습니다.
-                    print(f"  페이지 찾기 실패, 건너뜀: {e}", file=sys.stderr)
-                    data["pages"] = []
-                for page in data["pages"]:  # 다시 찾은 페이지에 예전 교재 쪽수 이름표를 이어 붙입니다(새 요점 정리가 다시 붙임)
-                    page.update(next(({"label": p["label"]} for p in (old or {}).get("pages", [])
-                                      if p.get("label") and abs(p["start"] - page["start"]) <= 1), {}))
-                save_analysis(data_dir, video["id"], data)
-            if need_guide and not data["segments"]:  # 소리 없는 강의: Claude에 묻지 않고 표시만 해 둡니다(다시 묻지 않게)
-                data["silent"] = True
-                save_analysis(data_dir, video["id"], data)
-            elif need_guide:
-                screens = None
-                if data["segments"] and read_screens and data.get("pages"):
-                    if "text" not in data["pages"][0]:  # 요점 정리에서 실패해도 다시 읽지 않도록 저장해 둡니다.
-                        print("  화면 글자 읽는 중...", flush=True)
-                        texts = read_screens(video["path"], data["pages"], data["duration"])
-                        for page, lines in zip(data["pages"], texts):
-                            page["text"] = lines
-                        save_analysis(data_dir, video["id"], data)
-                    screens = [{"start": p["start"], "text": p["text"]} for p in data["pages"]]
-                refs = []
-                if data["segments"] and find_references:
-                    lines = [line for page in data.get("pages", []) for line in page.get("text", [])]
-                    refs = find_references(data["title"], lines)
-                print("  요점 정리·퀴즈 만드는 중..." + (f" (학원 정리 {len(refs)}개 활용)" if refs else ""), flush=True)
-                data["guide"] = make_guide(data["title"], data["segments"], screens, [r["text"] for r in refs] or None)
-                if refs:
-                    data["guide"]["sources"] = [r["source"] for r in refs]
-                for label in data["guide"].pop("page_labels", []):
-                    for page in data.get("pages", []):
-                        if abs(page["start"] - label["start"]) <= 1:  # 이름표 시점은 페이지 시작을 초 단위로 버린 값
-                            page["label"] = label["label"]
-                _apply_corrections(data["segments"], data["guide"])
-                data.pop("guide_stale", None)
-                save_analysis(data_dir, video["id"], data)
-            print("  완료")
-        except Exception as e:
-            failures += 1
-            print(f"  실패: {e}", file=sys.stderr)
+            failures += _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, read_screens,
+                                     find_references, settle_seconds, adopt, video["id"] in replaced, retry_failed)
+        finally:
+            lock.close()
     return failures
 
 
+def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, read_screens, find_references,
+                 settle_seconds, adopt, replaced, retry_failed) -> int:
+    """강의 하나를 분석합니다. 실패하면 1."""
+    try:
+        old = load_analysis(data_dir, video["id"])
+        if old is not None and not isinstance(old, dict):
+            raise ValueError("JSON 객체가 아님")
+    except ValueError as e:  # 손으로 고치다 형식이 깨진 파일: 덮어쓰지 않고 이 강의만 건너뜁니다
+        print(f"  분석 파일 형식 오류, 건너뜀(고친 곳의 쉼표·따옴표를 확인하세요): {e}", file=sys.stderr)
+        return 1
+    if old and old.get("guide") == SILENT_GUIDE:  # 예전에는 소리 없는 강의에 빈 요점 정리를 넣어 학원 정리가 가려졌습니다
+        old = {**old, "guide": None, "silent": True}
+        save_analysis(data_dir, video["id"], old)
+    if old and replaced:  # 같은 자리의 영상이 바뀜: 예전 요점 정리·목차는 다른 영상의 것이라 이어 쓰지 않습니다
+        print("  같은 자리의 영상 파일이 바뀌어(크기가 다름) 새로 분석합니다")
+        old = None
+    data = None if force else old
+    if data is None and not force and not replaced:
+        data = adopt(video)  # 폴더를 옮기거나 이름을 바꾸거나 복사한 강의면 예전 분석을 이어 씀
+    done = data or {}
+    need_pages = detect_pages is not None and "pages" not in done
+    # 소리 없는 강의(받아쓴 말 없음)는 Claude에 묻지 않습니다. 요점 정리 칸은 비워 두어 학원 정리가 보이게 합니다.
+    # guide_stale: --force로 새로 받아쓴 뒤 아직 새 요점 정리를 못 만든 강의(예전 것을 보여 주는 중): 다음 실행에서 이어 만듭니다.
+    need_guide = make_guide is not None and (not done.get("guide") or done.get("guide_stale")) and not done.get("silent")
+    if need_guide and done.get("guide_failures", 0) >= GUIDE_TRIES and not retry_failed:
+        print(f"  Claude 답이 {GUIDE_TRIES}번 잘려 요점 정리는 건너뜀(다시 하려면 --retry-failed)")
+        need_guide = False
+    if data and not (need_pages or need_guide):
+        print("  이미 분석됨, 건너뜀")
+        return 0
+    try:  # 영상이 그사이 옮겨졌거나 NAS가 답하지 않으면 이 강의만 실패로 셉니다
+        if not data and time.time() - video["path"].stat().st_mtime < settle_seconds:
+            print("  방금 바뀐 영상이라(복사 중일 수 있음) 다음에 분석합니다")
+            return 0
+        if not data:
+            print("  받아쓰는 중...", flush=True)
+            segments, duration = transcribe(video["path"])
+            data = {"title": video["title"], "duration": duration,
+                    "segments": segments, "guide": None}
+            # 다시 분석(--force)해도 새 요점 정리가 생길 때까지 예전 요점 정리·목차(비용을 들인 결과)를 둡니다.
+            data.update({key: old[key] for key in ("guide", "toc") if old and key in old})
+            # --no-guide로 받아쓰기만 새로 했으면 예전 요점 정리를 계속 씁니다(다음 밤에 강의마다 다시 사지 않게).
+            if data["guide"] and (make_guide is not None or old.get("guide_stale")):
+                data["guide_stale"] = True
+            _apply_corrections(data["segments"], data["guide"])  # 예전 요점 정리 때 찾은 받아쓰기 오타도 그대로 고침
+            # 요점 정리에서 실패해도 오래 걸린 받아쓰기는 남겨 둡니다.
+            save_analysis(data_dir, video["id"], data)
+        if need_pages:
+            print("  페이지 찾는 중...", flush=True)
+            try:
+                data["pages"] = detect_pages(video["path"], Path(data_dir) / video["id"])
+            except Exception as e:  # 페이지는 덤이라 실패해도 요점 정리는 만듭니다. 매번 다시 시도하지도 않습니다.
+                print(f"  페이지 찾기 실패, 건너뜀: {e}", file=sys.stderr)
+                data["pages"] = []
+            for page in data["pages"]:  # 다시 찾은 페이지에 예전 교재 쪽수 이름표를 이어 붙입니다(새 요점 정리가 다시 붙임)
+                page.update(next(({"label": p["label"]} for p in (old or {}).get("pages", [])
+                                  if p.get("label") and abs(p["start"] - page["start"]) <= 1), {}))
+            save_analysis(data_dir, video["id"], data)
+        if need_guide and not data["segments"]:  # 소리 없는 강의: Claude에 묻지 않고 표시만 해 둡니다(다시 묻지 않게)
+            data["silent"] = True
+            save_analysis(data_dir, video["id"], data)
+        elif need_guide:
+            screens = None
+            if data["segments"] and read_screens and data.get("pages"):
+                if "text" not in data["pages"][0]:  # 요점 정리에서 실패해도 다시 읽지 않도록 저장해 둡니다.
+                    print("  화면 글자 읽는 중...", flush=True)
+                    texts = read_screens(video["path"], data["pages"], data["duration"])
+                    for page, lines in zip(data["pages"], texts):
+                        page["text"] = lines
+                    save_analysis(data_dir, video["id"], data)
+                screens = [{"start": p["start"], "text": p["text"]} for p in data["pages"]]
+            refs = []
+            if data["segments"] and find_references:
+                lines = [line for page in data.get("pages", []) for line in page.get("text", [])]
+                refs = find_references(data["title"], lines)
+            print("  요점 정리·퀴즈 만드는 중..." + (f" (학원 정리 {len(refs)}개 활용)" if refs else ""), flush=True)
+            try:
+                data["guide"] = make_guide(data["title"], data["segments"], screens, [r["text"] for r in refs] or None)
+            except IncompleteAnswer:  # 답을 받았지만(비용이 듦) 쓸 수 없음: 몇 번 그랬는지 적어 매일 밤 다시 사지 않게
+                data["guide_failures"] = data.get("guide_failures", 0) + 1
+                save_analysis(data_dir, video["id"], data)
+                raise
+            if refs:
+                data["guide"]["sources"] = [r["source"] for r in refs]
+            for label in data["guide"].pop("page_labels", []):
+                for page in data.get("pages", []):
+                    if abs(page["start"] - label["start"]) <= 1:  # 이름표 시점은 페이지 시작을 초 단위로 버린 값
+                        page["label"] = label["label"]
+            _apply_corrections(data["segments"], data["guide"])
+            data.pop("guide_stale", None)
+            data.pop("guide_failures", None)
+            save_analysis(data_dir, video["id"], data)
+        print("  완료")
+    except Exception as e:
+        print(f"  실패: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _apply_corrections(segments, guide):
-    """Claude가 요점 정리 때 찾은 받아쓰기 오타를 대본 탭·검색·질문하기에도 반영합니다."""
+    """Claude가 요점 정리 때 찾은 받아쓰기 오타를 대본 탭·검색·질문하기에도 반영합니다.
+    바른 표기 안에 틀린 표기가 든 경우('관동별'→'관동별곡')는 이미 바르게 적힌 곳을 건드리지 않습니다('관동별곡곡'이 되지 않게)."""
     for fix in (guide or {}).get("corrections", []):
+        wrong, right = fix["wrong"], fix["right"]
         for segment in segments:
-            segment["text"] = segment["text"].replace(fix["wrong"], fix["right"])
+            text = segment["text"]
+            segment["text"] = (right.join(part.replace(wrong, right) for part in text.split(right)) if wrong in right
+                               else text.replace(wrong, right))
 
 
 def voice_channel(left, right):
@@ -301,10 +377,15 @@ def main():
                         help="영상을 n묶음으로 나눠 i번째 묶음만 분석 (GPU 여러 개를 동시에 쓸 때)")
     parser.add_argument("--no-guide", action="store_true",
                         help="Claude 없이 받아쓰기·페이지만 만듦 (나중에 이 옵션 없이 실행하면 요점 정리만 추가)")
+    parser.add_argument("--retry-failed", action="store_true",
+                        help=f"Claude 답이 {GUIDE_TRIES}번 잘려 건너뛰던 강의의 요점 정리도 다시 만듦")
     args = parser.parse_args()
     video_dir = Path(os.environ.get("VIDEO_DIR", "videos"))
+    data_dir = Path(os.environ.get("DATA_DIR", "data"))
     if not video_dir.is_dir():
         sys.exit(f"영상 폴더가 없습니다: {video_dir.resolve()} (VIDEO_DIR 설정을 확인하세요)")
+    if problem := folders_problem(video_dir, data_dir):
+        sys.exit(problem)
 
     make_guide = read_screens = find_references = None
     if not args.no_guide:
@@ -321,7 +402,7 @@ def main():
             print("화면 글자 인식(PaddleOCR)이 설치되지 않아 대본만으로 요점 정리를 만듭니다. (README의 '화면 글자 인식' 참고)")
     failures = analyze_all(
         video_dir,
-        Path(os.environ.get("DATA_DIR", "data")),
+        data_dir,
         whisper_transcriber(),
         make_guide,
         force=args.force,
@@ -331,6 +412,7 @@ def main():
         find_references=find_references,
         settle_seconds=SETTLE_SECONDS,
         probe=video_duration,
+        retry_failed=args.retry_failed,
     )
     if failures:
         print(f"{failures}개 영상 분석 실패. 다시 실행하면 실패한 영상만 이어서 분석합니다.", file=sys.stderr)

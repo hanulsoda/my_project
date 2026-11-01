@@ -14,8 +14,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from academy.library import find_videos, load_analysis
-from academy.references import usable_references
+from academy.library import find_videos, folders_problem, load_analysis
+from academy.references import ref_key, unmatched_fixes, usable_references
 from academy.settings import entry_settings, teacher_key
 
 PROBLEM, OK, NOTE = "문제", "확인", "참고"
@@ -37,9 +37,11 @@ def checks(env) -> list[tuple[str, str]]:
         say(OK, f"영상 폴더: {video_dir.resolve()} (강의 {len(videos):,}개)")
 
     data_dir = Path(env.get("DATA_DIR", "data"))
-    if not data_dir.is_dir():
-        say(NOTE, f"분석 폴더가 아직 없습니다: {data_dir.resolve()} (처음 분석할 때 생깁니다)")
+    if not data_dir.is_dir():  # 분석은 폴더를 저절로 만들지 않습니다(설정을 빠뜨려 모든 강의를 다시 사지 않게)
+        say(PROBLEM, f"분석 폴더가 없습니다: {data_dir.resolve()} (DATA_DIR 확인. 처음이면 mkdir -p로 만든 뒤 분석)")
     else:
+        if video_dir.is_dir() and (problem := folders_problem(video_dir, data_dir, write=False)):
+            say(PROBLEM, problem.replace("\n", " "))
         try:
             tempfile.NamedTemporaryFile(dir=data_dir).close()
         except OSError as e:
@@ -63,6 +65,10 @@ def checks(env) -> list[tuple[str, str]]:
                          + (" 등" if len(broken) > 5 else ""))
         if orphans:
             say(NOTE, f"지금 영상 폴더에 없는 강의의 분석 {orphans:,}개(옮기거나 이름을 바꾼 강의는 다음 분석 때 이어 씁니다)")
+        for name, what in [(".reference-fixes", "학원 정리 고침"), (".teacher-picks", "이번 주 강의")]:
+            if (data_dir / name).exists() and not isinstance(_json(data_dir / name), dict):
+                say(PROBLEM, f"{what} 파일이 깨졌습니다: {data_dir / name}. 선생님이 저장할 수 없습니다"
+                             f"({name}.broken이 있으면 그것이 깨지기 전의 파일입니다)")
         free = shutil.disk_usage(data_dir).free
         if free < 5e9:
             say(PROBLEM, f"분석 폴더 디스크가 {free / 1e9:.1f}GB밖에 남지 않았습니다")
@@ -83,6 +89,15 @@ def checks(env) -> list[tuple[str, str]]:
             say(OK, f"학원 정리: 학원 정리 {len(usable):,}개" + ("(제목만 남은 것 등은 빼고 셈)" if len(usable) < len(refs) else ""))
             if skipped:
                 say(PROBLEM, f"학원 정리 {len(skipped)}개를 건너뜀: " + " / ".join(skipped[:3]) + (" …" if len(skipped) > 3 else ""))
+            fixes = _json(data_dir / ".reference-fixes") if data_dir.is_dir() else None
+            if isinstance(fixes, dict):
+                by_key = {ref_key(r): r for r in usable}
+                stale = sum(len(unmatched_fixes(by_key[k], v)) if k in by_key  # 정리 파일에 없는 정리는 그 고침 모두
+                            else sum(len(e) for e in v.values() if isinstance(e, dict)) if isinstance(v, dict) else 0
+                            for k, v in fixes.items())
+                if stale:
+                    say(NOTE, f"적용되지 않는 학원 정리 고침 {stale}개: 정리 파일을 다시 뽑으며 항목 글이나 학년·제목이 바뀌었습니다."
+                              " 학원 정리 고치기 화면에서 다시 고쳐 주세요")
 
     key_file = env.get("TEACHER_KEY_FILE")
     if not key_file:
@@ -127,6 +142,13 @@ def checks(env) -> list[tuple[str, str]]:
     except OSError:
         say(NOTE, "로컬 AI(ollama)가 응답하지 않습니다. 밤 자동 목차를 쓴다면 켜 두세요")
     return found
+
+
+def _json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def _warnings(run):
