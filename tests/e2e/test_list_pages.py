@@ -107,6 +107,26 @@ def test_a_question_missed_at_night_comes_back_the_next_morning(page, site):
     assert item["due"] == datetime(2026, 11, 6, tzinfo=KST).timestamp() * 1000  # 맞히면 달력으로 3일 뒤 0시
 
 
+def test_review_counts_what_is_done_and_says_when_todays_review_is_over(page, site):
+    page.clock.install(time=datetime(2026, 11, 3, 9, 0, tzinfo=KST))
+    remember(page, site, {f"wrong:{site.ids[ZMG]}": [{"k": "제망매가의 갈래는?", "stage": 0, "due": 0},
+                                                     {"k": "누이의 죽음을 극복한 방법은?", "stage": 0, "due": 0}]})
+    page.goto(site.url + "/review.html")
+    progress = page.locator("#review-progress")
+    expect(progress).to_have_text("2문제 중 0문제 풀이")
+    questions = page.locator(".review-lecture .question")
+
+    questions.nth(0).locator("button.choice").first.click()  # 향가: 맞음
+    expect(progress).to_have_text("2문제 중 1문제 풀이")
+    expect(page.locator("#view-sub")).to_have_text("오늘 복습할 문제 1개 · 앞으로 1개")  # 푼 만큼 다시 셈
+    questions.nth(1).locator("button.choice").first.click()  # 망각: 틀림
+
+    expect(progress).to_have_text("오늘 복습 끝! 다음 복습: 내일 1개 · 3일 뒤 1개.")
+    expect(page.locator("#review-end")).to_have_text("오늘 복습 끝! 다음 복습: 내일 1개 · 3일 뒤 1개.")  # 마지막 문제 아래에도
+    expect(page.locator("#review-end")).to_be_visible()
+    expect(page.locator("#view-sub")).to_have_text("오늘 복습할 문제 0개 · 앞으로 2개")
+
+
 def test_an_old_record_with_an_evening_time_is_due_that_morning(page, site):
     page.clock.install(time=datetime(2026, 11, 3, 9, 0, tzinfo=KST))
     evening = datetime(2026, 11, 3, 22, 59, tzinfo=KST).timestamp() * 1000

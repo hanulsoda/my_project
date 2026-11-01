@@ -64,26 +64,47 @@
       const loading = el("p", { class: "notice" }, "불러오는 중…");  // 그린 강의 아래에서 나머지를 기다립니다
       say(loading);
       let drawn = 0, failed = false;
+      // 오늘 풀 문제 중 몇 개를 풀었는지. 다 풀어 오늘 낼 문제가 없어지면 끝났다고 하고 다음 복습 날을 알립니다.
+      const progress = el("p", { id: "review-progress", class: "score", "aria-live": "polite" });
+      const end = el("p", { id: "review-end", class: "score", hidden: "" });  // 마지막 문제를 푼 자리(맨 아래)에도 끝났다고 보입니다
+      let total = todo.reduce((n, l) => n + l.keys.length, 0), answered = 0, loaded = false;
+      const showProgress = () => {
+        const left = wrongLists(videos).flatMap((l) => l.items), over = loaded && answered >= total && !left.some(isDue);
+        progress.textContent = end.textContent = !over ? `${total}문제 중 ${answered}문제 풀이`
+          : left.length ? `오늘 복습 끝! 다음 복습: ${schedule(left)}.` : "오늘 복습 끝! 틀린 문제를 모두 익혔습니다.";
+        end.hidden = !over;
+      };
+      const answer = (id, q, right) => {
+        markWrong(id, quizKey(q), !right);
+        answered++;
+        sidebar();
+        count();
+        showProgress();
+      };
       // 강의를 6개씩 한꺼번에 받고(하나씩 기다리면 휴대폰에서 10초 넘게 걸림), 다 오기를 기다리지 않고 순서대로 그립니다.
       const lectures = inTurns(todo, 6, (w) => fetch(`/api/videos/${w.id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
       for (const [n, w] of todo.entries()) {
         const lecture = await lectures[n];
-        if (!lecture) { failed = true; continue; }  // 지워진 강의이거나 서버 오류: 기록은 두고 이번엔 건너뜁니다
+        if (!lecture) { failed = true; total -= w.keys.length; showProgress(); continue; }  // 지워진 강의이거나 서버 오류: 기록은 두고 이번엔 건너뜁니다
         const quiz = lecture.analysis?.guide?.quiz || (lecture.references || []).flatMap((r) => r.quiz);
         if (quiz.length) {  // 다시 분석해서 없어진 문제는 기록에서 정리합니다(플레이어 퀴즈와 같게)
           const keys = new Set(quiz.map(quizKey));
           store.set(`wrong:${w.id}`, wrongItems(w.id).filter((x) => keys.has(x.k)));
         }
         const shown = quiz.filter((q) => w.keys.includes(quizKey(q)));
+        total -= w.keys.length - shown.length;  // 다시 분석해서 없어진 문제는 세지 않습니다
+        showProgress();
         if (!shown.length) continue;
         const replay = (q) => q.time == null ? null
           : el("a", { class: "link", href: `watch.html?id=${w.id}&t=${Math.floor(q.time)}` }, `▶ ${fmt(q.time)} 설명 다시 보기`);
-        if (!drawn++) loading.before(rule);
+        if (!drawn++) loading.before(progress, rule);
         loading.before(el("section", { class: "review-lecture" },
           el("h2", {}, el("a", { href: `watch.html?id=${w.id}` }, lecture.title)),
-          ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => { markWrong(w.id, quizKey(q), !right); sidebar(); }, replay))));
+          ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => answer(w.id, q, right), replay))));
       }
-      loading.remove();
+      loading.replaceWith(end);
+      loaded = true;
+      showProgress();
       count();
       sidebar();
       const trouble = "일부 강의를 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요.";
