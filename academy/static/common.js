@@ -370,7 +370,12 @@ function quizCard(q, n, onResult, replay) {
     };
     judge.append(el("button", { class: "choice", onclick: () => decide(true) }, "알았어요"),
                  el("button", { class: "choice", onclick: () => decide(false) }, "몰랐어요"));
-    const reveal = el("button", { class: "choice", onclick: () => { show(true); reveal.hidden = true; judge.hidden = false; } }, "답 보기");
+    const reveal = el("button", { class: "choice", onclick: () => {
+      show(true);
+      reveal.hidden = true;
+      judge.hidden = false;
+      judge.scrollIntoView({ block: "nearest" });  // 휴대폰에서 '알았어요·몰랐어요'가 화면 아래에 숨지 않게
+    } }, "답 보기");
     return el("article", { class: "question" }, el("h3", {}, `Q${n}. 빈칸에 들어갈 말은?`),
       ...(q.context ? [el("blockquote", {}, q.context)] : []), line, reveal, judge);
   }
@@ -378,15 +383,20 @@ function quizCard(q, n, onResult, replay) {
   const choices = q.choices.map((choice, i) => el("button", {
     class: "choice",
     onclick: () => {
+      // 맞은 답·고른 답을 색만이 아니라 글로도 표시합니다(색을 구별하기 어려운 학생, 흑백 화면)
       choices.forEach((b, k) => {
         b.disabled = true;
+        if (k === q.answer) b.append(el("span", { class: "mark" }, "✓ 정답"));
+        else if (k === i) b.append(el("span", { class: "mark" }, "✗ 내가 고른 답"));
         if (k === q.answer) b.classList.add("right");
         else if (k === i) b.classList.add("wrong");
       });
-      const link = replay(q);
-      feedback.replaceChildren(el("strong", {}, i === q.answer ? "정답입니다! " : "아쉬워요. "), q.explanation, ...(link ? [" ", link] : []));
+      const link = replay(q), right = i === q.answer;
+      feedback.replaceChildren(el("strong", {}, right ? "정답입니다! " : "아쉬워요. "), q.explanation,
+        ...(right ? [] : [" ‘틀린 문제 복습’에 넣었어요."]), ...(link ? [" ", link] : []));
       feedback.hidden = false;
-      onResult(i === q.answer);
+      feedback.scrollIntoView({ block: "nearest" });  // 휴대폰에서는 해설이 화면 아래에 생겨 보이지 않았습니다
+      onResult(right);
     },
   }, `${i + 1}. ${choice}`));
   return el("article", { class: "question" }, el("h3", {}, `Q${n}. ${q.question}`), ...choices, feedback);

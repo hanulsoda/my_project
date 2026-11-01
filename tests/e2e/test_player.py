@@ -125,6 +125,21 @@ def test_a_note_keeps_the_scene_where_the_student_started_typing(page, site):
     assert stored(page, f"notes:{site.ids[ZMG]}")[-1] == {"t": 60, "text": "둘째 메모"}
 
 
+def test_a_quiz_answer_shows_its_explanation_on_a_phone_and_says_which_is_which(phone, site):
+    page = phone(360, 740)
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    page.locator("[data-tab=quiz]").tap()
+    second = page.locator("#tab-quiz .question").nth(1)
+    second.locator("button.choice").first.tap()  # 망각: 틀림(정답은 2번 종교)
+
+    feedback = second.locator(".feedback")
+    expect(feedback).to_contain_text("종교적으로 극복합니다.")
+    assert on_screen(page, feedback)  # 해설이 화면 아래에 숨지 않음
+    expect(feedback).to_contain_text("‘틀린 문제 복습’에 넣었어요")
+    expect(second.locator("button.choice.right")).to_contain_text("✓ 정답")  # 색만으로 알리지 않음
+    expect(second.locator("button.choice.wrong")).to_contain_text("✗ 내가 고른 답")
+
+
 def test_a_section_repeat_keeps_looping(page, site):
     open_player(page, site)
     go(page, 20)

@@ -646,6 +646,7 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .choice:not(:disabled):hover { border-color: var(--accent); background: var(--hover); }
 .choice.right { border-color: var(--right); background: var(--right-soft); }
 .choice.wrong { border-color: var(--wrong); background: var(--wrong-soft); }
+.choice .mark { float: right; margin-left: 8px; font-size: 13px; font-weight: 600; }  /* ✓ 정답 · ✗ 내가 고른 답 */
 .feedback { margin-top: 8px; line-height: 1.6; }
 .judge { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .judge .choice, .judge .feedback { margin: 0; }
