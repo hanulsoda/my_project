@@ -298,6 +298,21 @@ def test_a_phone_shows_loading_and_the_retry_button_while_the_server_restarts(ph
     expect(page.locator("#empty")).to_be_hidden()
 
 
+def test_typing_boxes_are_big_enough_that_an_iphone_does_not_zoom_in(phone, site):
+    page = phone(390, 844)  # 아이폰은 16px보다 작은 칸을 누르면 화면을 확대해 버립니다
+    page.route("**/api/picks", lambda route: route.fulfill(json={  # '내 학년' 고르기가 나오게
+        "note": "", "at": None, "lectures": [{"id": site.ids[ZMG], "title": ZMG, "grade": "고1"}]}))
+    small = {}
+    for path in ["/", "/notes.html", "/move.html", f"/watch.html?id={site.ids[ZMG]}"]:
+        page.goto(site.url + path)
+        page.wait_for_load_state("networkidle")
+        found = page.evaluate("""() => [...document.querySelectorAll('input:not([type=checkbox]), textarea, select')]
+            .filter((e) => parseFloat(getComputedStyle(e).fontSize) < 16).map((e) => e.id || e.className)""")
+        if found:
+            small[path] = found
+    assert small == {}
+
+
 def test_searching_offline_does_not_spin_forever(page, site):
     remember(page, site, {"list": {"scope": "spoken"}})
     page.goto(site.url + "/")

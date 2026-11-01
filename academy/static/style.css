@@ -454,6 +454,9 @@ a.time { display: inline-block; text-decoration: none; }
   .library:not([data-view="home"]) .sidebar { display: none; }
 }
 
+/* 아이폰은 16px보다 작은 글자의 칸을 누르면 화면을 확대해 버려, 휴대폰에서는 글 칸·고르기를 16px로 씁니다(위의 작은 글자보다 뒤에) */
+@media (max-width: 900px) { input, textarea, select, #sort, .picks-head select { font-size: 16px; } }
+
 /* ---- 학습 플레이어 ---- */
 .watch-page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 .watch {
