@@ -1,11 +1,14 @@
 """학습 플레이어 화면(브라우저 테스트): 이어 보기, 구간 반복, 북마크, 학원 정리 강조"""
 
+import re
+
 import pytest
 
 pytest.importorskip("playwright.sync_api", reason="playwright가 없어 화면 테스트를 건너뜀")
 from playwright.sync_api import expect  # noqa: E402
 
 from tests.e2e.conftest import remember, stored  # noqa: E402
+from tests.e2e.phones import on_screen, phone  # noqa: E402,F401
 
 ZMG = "2022개정/고1/미래엔/제망매가"
 VIDEO = "document.querySelector('video')"
@@ -340,6 +343,48 @@ def test_opening_a_lecture_while_the_server_restarts_waits_instead_of_blaming_th
     page.wait_for_function(f"{VIDEO}.readyState >= 1")
     expect(page.locator("#status")).to_contain_text("01:00부터")  # 지난번에 보던 곳
     assert round(now(page)) == 60
+
+
+def long_guide(page, site, title=ZMG):
+    """요점 정리를 길게(챕터 12개) 바꿔 보냅니다: 휴대폰에서 탭 안을 끝까지 내려 볼 수 있게"""
+    def longer(route):
+        body = route.fetch().json()
+        body["analysis"]["guide"]["chapters"] = [{"start": i * 12.0, "title": f"챕터 {i + 1}", "points": ["내용 하나", "내용 둘"]}
+                                                 for i in range(12)]
+        route.fulfill(json=body)
+    page.route(re.compile(rf"/api/videos/{site.ids[title]}\?view=1$"), longer)
+
+
+def test_scrolling_past_the_end_of_the_guide_keeps_the_tabs_in_view_on_a_phone(phone, site):
+    page = phone(360, 740)
+    long_guide(page, site)
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator(".chapter")).to_have_count(12)
+    box = page.locator("#tab-guide").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+
+    for _ in range(4):  # 요점 정리 끝까지, 그리고 한 번 더
+        page.mouse.wheel(0, 1500)
+        page.wait_for_timeout(200)
+
+    assert page.locator("#tab-guide").evaluate("e => e.scrollTop + e.clientHeight >= e.scrollHeight - 1")  # 끝까지 내려감
+    assert on_screen(page, page.locator("#tab-btn-guide"))  # 탭 줄이 위에 붙은 영상 밑으로 들어가지 않음
+    assert on_screen(page, page.locator("video"))
+    panel = page.locator(".panel").bounding_box()
+    assert panel["y"] + panel["height"] >= 740 - 24  # 탭 상자가 남은 높이를 채움
+
+
+@pytest.mark.parametrize("width, height", [(740, 360), (844, 390)])
+def test_a_phone_on_its_side_shows_the_video_and_the_study_tabs_together(phone, site, width, height):
+    page = phone(width, height)
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator(".chapter").first).to_be_visible()
+
+    video = page.locator("video").bounding_box()
+    assert video["y"] >= 0 and video["y"] + video["height"] <= height  # 영상 아래쪽 재생 막대까지 화면 안
+    assert on_screen(page, page.locator("video"))
+    assert on_screen(page, page.locator("#tab-btn-guide"))
+    assert on_screen(page, page.locator(".chapter button.time").first)  # 요점 정리도 영상 옆에 보임
 
 
 BLOCKED_STORAGE = """Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
