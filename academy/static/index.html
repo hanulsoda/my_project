@@ -61,6 +61,7 @@
                                            found: showingFound, foundAt: location.hash });
     let folders = [], total = 0, loaded = false, showingFound = false, side = null, searchSeq = 0;
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
+    const PICK_FOLDER = "왼쪽에서 폴더를 고르세요.";
 
     function current() {  // 주소에서 지금 화면 {kind: home|recent|new|folder, name}
       let hash = "";
@@ -127,11 +128,12 @@
                     shown ? "" : guideOnly.checked ? "이 폴더에는 요점 정리가 있는 강의가 없습니다." : "이 폴더에는 강의가 없습니다."]
         : view.kind === "recent" ? ["이어 보기", "다 보지 않은 강의를 최근에 본 순서로", recent ? "" : "다 보지 않은 강의가 없습니다."]
         : view.kind === "new" ? ["새로 올라온 강의", "최근 14일 안에 올라온 강의", fresh ? "" : "최근 14일 안에 올라온 강의가 없습니다."]
-        : ["강의", `강의 ${total.toLocaleString()}개`, !total ? "아직 올라온 강의가 없습니다." : recent || fresh ? "" : "왼쪽에서 폴더를 고르세요."];
+        : ["강의", `강의 ${total.toLocaleString()}개`, !total ? "아직 올라온 강의가 없습니다." : recent || fresh ? "" : PICK_FOLDER];
       $("view-title").textContent = title;
       $("view-sub").textContent = sub;
       $("empty").textContent = empty;
       $("empty").hidden = !empty;
+      $("empty").classList.toggle("wide-only", empty === PICK_FOLDER);  // 휴대폰 첫 화면은 폴더가 바로 아래에 있습니다
       document.body.dataset.view = searching || showingFound ? "search" : view.kind;
       save();
     }

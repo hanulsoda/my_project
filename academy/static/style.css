@@ -448,7 +448,9 @@ a.time { display: inline-block; text-decoration: none; }
   .sidebar a[aria-current="page"] .icon { background: var(--accent); }
   .sidebar a[aria-current="page"] .n { color: var(--muted); }
   .content-body { padding: 0 16px 24px; }
-  .library[data-view="home"] .content-body { display: none; }
+  /* 첫 화면의 본문은 숨기되 '불러오는 중…'과 서버 연결 실패·다시 불러오기(#empty)는 보입니다: 서버를 다시 켜는 동안 빈 화면이 되지 않게.
+     '왼쪽에서 폴더를 고르세요'(.wide-only)는 폴더가 위에 있는 휴대폰에는 맞지 않아 숨깁니다. */
+  .library[data-view="home"] .content-body > :not(#empty), .wide-only { display: none; }
   .library:not([data-view="home"]) .sidebar { display: none; }
 }
 

@@ -10,6 +10,7 @@ pytest.importorskip("playwright.sync_api", reason="playwright가 없어 화면 �
 from playwright.sync_api import expect  # noqa: E402
 
 from tests.e2e.conftest import remember, stored  # noqa: E402
+from tests.e2e.phones import on_screen, phone  # noqa: E402,F401
 
 KST = timezone(timedelta(hours=9))
 ZMG = "2022개정/고1/미래엔/제망매가"
@@ -276,6 +277,25 @@ def test_the_list_says_when_the_server_cannot_be_reached_and_can_retry(page, sit
     page.click("#empty button")
 
     expect(page.locator(".video-list a").first).to_be_attached()
+
+
+def test_a_phone_shows_loading_and_the_retry_button_while_the_server_restarts(phone, site):
+    page = phone(390, 844)
+    held = []
+    page.route("**/api/videos", lambda route: held.append(route))
+    page.goto(site.url + "/")
+    expect(page.locator("#empty")).to_have_text("불러오는 중…")
+    expect(page.locator("#empty")).to_be_visible()  # 휴대폰 첫 화면이 하얗게 비어 있지 않게
+
+    held[0].fulfill(**PROXY_502)
+    expect(page.locator("#empty")).to_contain_text("서버에 연결하지 못했습니다")
+    expect(page.locator("#empty")).to_be_visible()
+    expect(page.locator("#empty button")).to_be_visible()
+
+    page.unroute("**/api/videos")
+    page.locator("#empty button").tap()
+    expect(page.locator("nav.sidebar a", has_text="2022개정")).to_be_visible()
+    expect(page.locator("#empty")).to_be_hidden()
 
 
 def test_searching_offline_does_not_spin_forever(page, site):
