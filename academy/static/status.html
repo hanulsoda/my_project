@@ -16,7 +16,7 @@
     <header class="content-head"><a class="back" href="./">강의</a><div class="heading"><h1>강의 현황</h1><p id="view-sub" class="sub"></p></div></header>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
     <div class="content-body"><div class="list-page">
-    <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 페이지만 순서로 하나에만 셉니다.</p>
+    <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 영상만 순서로 하나에만 셉니다.</p>
     <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
     <ul id="alerts" class="plain" role="status" hidden></ul>
     <section id="teacher">
@@ -155,7 +155,7 @@
     const loadStatus = () => fetch("/api/status", { headers: { "X-Teacher-Key": teacherKey() } }).then(statusOrLocked).then((s) => {
       if (!s) return;
       const rows = [["전체 강의", s.total], ["분석 끝남", s.analyzed], ["Claude 요점 정리", s.guide], ["학원 정리", s.summary],
-                    ["자동 목차", s.toc], ["페이지만", s.pages], ["분석 안 됨", s.total - s.analyzed]];
+                    ["자동 목차", s.toc], ["영상만", s.pages], ["분석 안 됨", s.total - s.analyzed]];
       document.getElementById("counts").replaceChildren(...rows.flatMap(([name, n]) => [el("dt", {}, name), el("dd", {}, n.toLocaleString())]));
       const alerts = [], failed = s.guide_failed || [];
       if (s.video_dir_empty) alerts.push("영상 폴더가 비어 보입니다. NAS 연결을 확인하세요(학생 목록은 그동안 이전 것을 그대로 씁니다).");

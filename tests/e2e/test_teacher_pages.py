@@ -46,6 +46,13 @@ def test_a_wrong_key_says_so_instead_of_asking_for_one(page, site):
     expect(page.locator("#counts")).to_contain_text("열쇠를 넣어야")
 
 
+def test_the_status_page_uses_the_students_word_for_lectures_without_a_guide(page, site):
+    open_status(page, site)
+    expect(page.locator("#counts")).to_contain_text("영상만")  # 학생 목록의 배지와 같은 말
+    expect(page.locator(".list-page > .notice").first).to_contain_text("자동 목차 → 영상만 순서")
+    expect(page.locator(".content-body")).not_to_contain_text("페이지만")
+
+
 # ---- 현황: 이번 주 강의 ----
 
 def test_saving_picks_from_an_older_tab_warns_instead_of_undoing(page, site):
