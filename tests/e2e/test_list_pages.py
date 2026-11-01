@@ -47,6 +47,22 @@ def test_spoken_search_results_come_back_after_watching_a_lecture(page, site):
     expect(page.locator("#found h2").first).to_contain_text("반어법")
 
 
+def test_back_shows_the_spoken_results_that_were_open_not_a_word_typed_after(page, site):
+    remember(page, site, {"list": {"scope": "spoken"}})
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("‘반어법’")
+    page.fill("#search", "설명")  # 다음 낱말을 쓰다가 찾지는 않음
+    page.wait_for_timeout(300)  # 쓴 글을 거르고 방문 기록에 남길 시간
+    page.locator("#found li a.time").first.click()  # 아직 보이는 반어법 결과
+    page.wait_for_url("**/watch.html**")
+    page.go_back()
+
+    expect(page.locator("#found h2").first).to_contain_text("‘반어법’")  # 찾지 않은 ‘설명’을 찾던 것
+    expect(page.locator("#search")).to_have_value("반어법")
+
+
 def test_choosing_spoken_after_typing_a_word_searches_it(page, site):
     page.goto(site.url + "/")
     expect(page.locator(".video-list a").first).to_be_attached()
