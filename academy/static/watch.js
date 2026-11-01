@@ -12,12 +12,22 @@ video.addEventListener("error", () => fetch(`/api/videos/${id}`).catch(() => {})
 let lost = null, retry = null, stalled = false;  // stalled: 재생 중에 받기를 기다리며 멈춤
 video.addEventListener("waiting", () => { stalled = true; });
 video.addEventListener("playing", () => { stalled = false; });
-video.addEventListener("error", () => {
+const UNPLAYABLE = "이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.";
+video.addEventListener("error", async () => {
   const code = video.error?.code;
-  if (code !== 2 && !(code === 4 && lost)) return;
-  lost ??= { t: video.currentTime, play: stalled || !video.paused };
+  if (code === 3) return void ($("status").textContent = UNPLAYABLE);  // 받은 영상이 깨져 있음
+  if (code !== 2 && code !== 4) return;
+  // 처음부터 받지 못함(code 4): 브라우저가 열 수 없는 코덱이거나 아직 올리는 중인 파일일 수도, 서버를 다시 켜는 중일 수도 있습니다.
+  // 파일 첫 1바이트를 물어 서버가 답하면 파일 문제(회색 화면만 보이지 않게 알림), 답하지 못하면 연결 문제로 보고 다시 해 봅니다.
+  if (code === 4 && !lost) {
+    const res = await fetch(`/media/${id}`, { headers: { Range: "bytes=0-0" } }).catch(() => null);
+    if (res?.status === 404) return;  // 없는 강의: 제목이 '영상을 찾을 수 없습니다'로 알립니다
+    if (res && res.status < 500) return void ($("status").textContent = UNPLAYABLE);
+  }
+  lost ??= { t: video.currentTime, play: stalled || !video.paused,
+             why: code === 2 ? "인터넷 연결이 끊겼습니다. 다시 연결되면 이어서 봅니다…" : "서버에 연결하지 못했습니다. 다시 연결되면 이어서 봅니다…" };
   lost.reloaded = false;
-  $("status").textContent = "인터넷 연결이 끊겼습니다. 다시 연결되면 이어서 봅니다…";
+  $("status").textContent = lost.why;
   clearTimeout(retry);
   retry = setTimeout(reconnect, 5000);
 });

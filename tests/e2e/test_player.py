@@ -317,6 +317,31 @@ def test_reconnecting_keeps_trying_while_the_server_is_still_restarting(page, si
     page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 40) < 3")
 
 
+def test_a_video_the_browser_cannot_play_says_so(page, site):
+    # 브라우저가 열 수 없는 코덱이거나 아직 올리는 중인 파일: 회색 화면만 보이던 것
+    page.route("**/media/**", lambda route: route.fulfill(status=200, content_type="video/mp4", body="아직 올리는 중"))
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+
+    expect(page.locator("#status")).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")
+    expect(page.locator("#status")).to_be_visible()
+
+
+def test_opening_a_lecture_while_the_server_restarts_waits_instead_of_blaming_the_file(page, site):
+    remember(page, site, {f"pos:{site.ids[ZMG]}": {"t": 60, "d": 150, "at": 1}})
+    page.route("**/media/**", lambda route: route.fulfill(status=502, content_type="text/html", body="<html>502</html>"))
+    page.clock.install()
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+
+    expect(page.locator("#status")).to_contain_text("서버에 연결하지 못했습니다")
+    expect(page.locator("#status")).not_to_contain_text("재생할 수 없습니다")
+
+    page.unroute("**/media/**")  # 서버가 다시 켜짐
+    page.clock.run_for(5000)
+    page.wait_for_function(f"{VIDEO}.readyState >= 1")
+    expect(page.locator("#status")).to_contain_text("01:00부터")  # 지난번에 보던 곳
+    assert round(now(page)) == 60
+
+
 BLOCKED_STORAGE = """Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
     get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });"""
 
@@ -345,6 +370,8 @@ def test_a_server_restart_is_not_shown_as_a_missing_lecture(page, site):
     page.unroute("**/api/videos/*?view=1")
     page.goto(f"{site.url}/watch.html?id=000000000000")  # 정말 없는 강의는 그대로
     expect(page.locator("#title")).to_have_text("영상을 찾을 수 없습니다")
+    page.wait_for_load_state("networkidle")
+    expect(page.locator("#status")).to_have_text("")  # 영상도 없지만 '재생할 수 없습니다'를 더 말하지 않음
 
 
 def test_searching_this_lecture_offline_does_not_spin_forever(page, site):
