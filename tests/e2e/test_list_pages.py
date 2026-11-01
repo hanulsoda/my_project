@@ -299,6 +299,43 @@ def test_opening_a_folder_from_the_sidebar_clears_the_search(page, site):
     expect(page.locator(".video-list a:visible")).to_have_count(2)
 
 
+@pytest.mark.parametrize("width, height", [(1200, 900), (844, 390)], ids=["desktop", "phone-on-its-side"])
+def test_a_search_comes_back_after_peeking_at_a_folder_in_the_sidebar(phone, site, width, height):
+    page = phone(width, height)  # 찾는 동안에도 사이드바가 보이는 넓은 화면
+    page.goto(site.url + "/")
+    folder = page.locator("nav.sidebar a", has_text="시험")
+    page.fill("#search", "제망")
+    expect(page.locator("#view-title")).to_have_text("찾기 결과")
+    folder.click()
+    expect(page.locator("#view-title")).to_have_text("시험")
+    expect(page.locator("#search")).to_have_value("")
+    page.go_back()
+    expect(page.locator("#search")).to_have_value("제망")  # 빈 칸으로 돌아오던 것
+    expect(page.locator("#view-title")).to_have_text("찾기 결과")
+
+    page.click("#scope-spoken")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    folder.click()
+    expect(page.locator("#view-title")).to_have_text("시험")
+    expect(page.locator("#found")).to_be_hidden()
+    page.go_back()
+    expect(page.locator("#search")).to_have_value("반어법")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+
+
+def test_choosing_the_open_folder_again_in_the_sidebar_clears_the_search(page, site):
+    page.goto(site.url + "/#f/시험")
+    expect(page.locator("#view-title")).to_have_text("시험")
+    page.fill("#search", "제망")
+    expect(page.locator("#view-title")).to_have_text("찾기 결과")
+    page.locator("nav.sidebar a", has_text="시험").click()  # 주소가 그대로라 새 화면이 열리지 않음
+    expect(page.locator("#view-title")).to_have_text("시험")
+    expect(page.locator("#search")).to_have_value("")
+    expect(page.locator(".content-body .video-list a:visible")).to_have_count(2)
+
+
 @pytest.mark.parametrize("width, height", [(1200, 900), (390, 844)], ids=["desktop", "phone"])
 def test_a_title_search_left_in_the_box_does_not_take_over_the_players_folder_link(phone, site, width, height):
     page = phone(width, height)

@@ -204,8 +204,11 @@
       render();
     };
     // 사이드바에서 폴더·이어 보기 등을 고르면 찾던 것을 지웁니다: 제목 찾기 글이 남아 있으면 고른 폴더 대신 찾기 결과가 보였습니다.
+    // 지금 연 화면을 다시 고를 때만 여기서 지웁니다. 다른 화면은 hashchange가 찾던 것 없이 열고, 찾던 화면의 방문 기록은
+    // 그대로 두어 뒤로 가기로 돌아옵니다(여기서 지우면 링크로 넘어가기 전에 그 기록까지 빈 칸으로 바뀌었습니다).
     document.querySelector(".sidebar").addEventListener("click", (e) => {
-      if (!e.target.closest("a[href^='#']")) return;
+      const a = e.target.closest("a[href^='#']");
+      if (!a || a.hash !== location.hash) return;
       search.value = "";
       closeFound();
       render();
