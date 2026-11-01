@@ -265,3 +265,34 @@ def test_the_fixes_page_asks_for_the_key_when_opened_from_the_internet(page, sit
     page.press("#teacher-key", "Enter")
 
     expect(page.locator("#ref-list")).to_contain_text("연습 작품")
+
+
+# ---- 막혔을 때: 서버는 틀린 기기만이 아니라 한 인터넷 망을 한 시간까지 막기도 해서, 서버가 알려 준 까닭을 그대로 보입니다 ----
+
+NETWORK_BLOCKED = {"status": 429, "json": {"detail": "틀린 시도가 많아 잠시 막았습니다. 잠시 뒤 다시 해 주세요"}}
+
+
+def test_the_status_page_says_why_it_is_blocked_instead_of_ten_minutes(page, site):
+    page.route("**/api/status", lambda route: route.fulfill(**NETWORK_BLOCKED))
+    page.route("**/api/picks", lambda route: route.fulfill(status=429, content_type="text/plain", body="Too Many Requests")
+               if route.request.method == "PUT" else route.continue_())  # 까닭이 오지 않은 429
+    remember(page, site, {"teacher-key": TEACHER_KEY})
+    page.goto(site.url + "/status.html")
+    expect(page.locator("#counts")).to_have_text("틀린 시도가 많아 잠시 막았습니다. 잠시 뒤 다시 해 주세요")
+
+    page.click("#pick-save")
+    expect(page.locator("#pick-status")).to_have_text("여러 번 틀려 잠시 막혔습니다. 잠시 뒤 다시 해 주세요.")  # 시간을 정해 말하지 않음
+
+
+def test_the_fixes_page_says_why_it_is_blocked_instead_of_ten_minutes(page, site):
+    blocked = [True]
+    page.route("**/api/references", lambda route: route.fulfill(**NETWORK_BLOCKED) if blocked else route.continue_())
+    remember(page, site, {"teacher-key": TEACHER_KEY})
+    page.goto(site.url + "/fixes.html")
+    expect(page.locator("#fix-status")).to_have_text("틀린 시도가 많아 잠시 막았습니다. 잠시 뒤 다시 해 주세요")
+
+    blocked.clear()
+    cards = open_fixes(page, site)
+    page.route("**/api/references/*/fix", lambda route: route.fulfill(**NETWORK_BLOCKED))
+    cards.nth(1).get_by_role("button", name="저장").click()
+    expect(cards.nth(1).locator(".fix-msg")).to_have_text("틀린 시도가 많아 잠시 막았습니다. 잠시 뒤 다시 해 주세요")

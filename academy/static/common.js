@@ -34,6 +34,13 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
 // 서버를 다시 켜는 중(시놀로지가 502)이거나 인터넷이 끊겼을 때 보여 줄 말
 const OFFLINE = "서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 잠시 뒤 다시 해 주세요.";
 
+// 막혔거나(429) 서버가 바빠 받지 못했을 때(503) 서버가 알려 준 까닭(detail). 서버는 틀린 기기만이 아니라 한 인터넷 망을
+// 한 시간까지 막기도 해서 '10분 동안'이라고 정해 말하면 틀렸습니다. 까닭이 없으면 시간 없이 알리고, 까닭 없는 503은
+// 서버를 다시 켜는 중(시놀로지)입니다.
+const BLOCKED = "여러 번 틀려 잠시 막혔습니다. 잠시 뒤 다시 해 주세요.";
+const refusal = (res) => res.json().catch(() => null)
+  .then((body) => (typeof body?.detail === "string" && body.detail) || (res.status === 429 ? BLOCKED : OFFLINE));
+
 // 자음·모음만 친 찾기('ㅂㅇㅂ'): 서버는 완성된 한글 글자만 보고 찾아 '두 글자 이상'이라고 답해, 무엇이 틀렸는지 알 수 없었습니다.
 const JAMO_ONLY = "자음·모음만으로는 찾을 수 없습니다. 낱말을 끝까지 써 주세요(예: 반어법).";
 const jamoOnly = (text) => /\S/.test(text) && /^[\u3131-\u318e\s]+$/.test(text);

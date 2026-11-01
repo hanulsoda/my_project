@@ -786,6 +786,25 @@ def test_moving_records_offline_or_during_a_restart_says_what_happened(page, sit
     expect(page.locator("#receive-status")).to_contain_text("서버에 연결하지 못했습니다")  # '코드가 없거나'가 아님
 
 
+def test_moving_records_says_why_the_server_refused(page, site):
+    answer = {}
+    page.route("**/api/transfer", lambda route: route.fulfill(**answer))
+    page.route("**/api/transfer/*", lambda route: route.fulfill(  # 틀린 기기만이 아니라 한 망을 한 시간까지 막기도 함
+        status=429, json={"detail": "틀린 시도가 많아 잠시 막았습니다. 잠시 뒤 다시 해 주세요"}))
+    page.goto(site.url + "/move.html")
+
+    answer.update(status=429, json={"detail": "코드를 너무 많이 만들었습니다. 10분 뒤 다시 해 주세요"})
+    page.click("#send")
+    expect(page.locator("#send-status")).to_have_text("코드를 너무 많이 만들었습니다. 10분 뒤 다시 해 주세요")
+    answer.update(status=503, json={"detail": "잠시 뒤 다시 해 주세요"})  # 맡아 둘 자리가 없음: 서버는 켜져 있음
+    page.click("#send")
+    expect(page.locator("#send-status")).to_have_text("잠시 뒤 다시 해 주세요")  # '인터넷 연결을 확인'이 아님
+
+    page.fill("#code-input", "123456")
+    page.press("#code-input", "Enter")
+    expect(page.locator("#receive-status")).to_have_text("틀린 시도가 많아 잠시 막았습니다. 잠시 뒤 다시 해 주세요")
+
+
 def test_notes_keep_their_lecture_links_when_the_list_cannot_be_loaded(page, site):
     vid = site.ids[ZMG]
     remember(page, site, {f"notes:{vid}": [{"t": 10, "text": "메모"}]})

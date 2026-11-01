@@ -116,7 +116,7 @@
       const res = await fetch("/api/picks", { method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() },
                                               body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value, at: pickedAt,
                                                                      grades: Object.fromEntries(chosen.map((l) => [l.id, l.grade || ""])) }) });
-      if (res.status === 429) return void ($("pick-status").textContent = "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
+      if (res.status === 429) return void ($("pick-status").textContent = await refusal(res));
       if (res.status === 403) {
         localStorage.removeItem("teacher-key");
         showTeacher();
@@ -142,13 +142,13 @@
     });
     showTeacher();
     // 인터넷에서는 선생님 열쇠가 있어야 현황(이용 통계·운영 기록)이 옵니다. 학원 안에서는 열쇠 없이 옵니다.
-    const statusOrLocked = (r) => {
+    const statusOrLocked = async (r) => {
       if (r.ok) return r.json();
       const hadKey = !!teacherKey();
       if (r.status === 403) { localStorage.removeItem("teacher-key"); showTeacher(); }
       const why = r.status === 403 && hadKey ? "선생님 열쇠가 맞지 않습니다. 위에 다시 넣어 주세요."
         : r.status === 403 ? "인터넷에서는 위 '이번 주 강의 지정'에 선생님 열쇠를 넣어야 현황이 보입니다."
-        : r.status === 429 ? "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요." : "현황을 불러오지 못했습니다.";
+        : r.status === 429 ? await refusal(r) : "현황을 불러오지 못했습니다.";
       $("counts").replaceChildren(el("dt", {}, why), el("dd", {}, ""));
       return null;
     };
