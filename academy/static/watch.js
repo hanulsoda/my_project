@@ -8,12 +8,15 @@ video.addEventListener("error", () => fetch(`/api/videos/${id}`).catch(() => {})
 
 // 인터넷이 30초쯤 끊기면 브라우저가 영상 받기를 그만두고(MEDIA_ERR_NETWORK), 다시 연결돼도 새로고침할 때까지 멈춰 있습니다.
 // 끊긴 자리를 기억해 두었다가 연결되면(또는 5초마다) 영상을 다시 받아 그 자리부터 이어서 봅니다.
+// 다시 받다가 서버가 아직 답하지 않으면(다시 켜는 중) 처음부터 받지 못한 것(code 4)이 되는데, 그때도 5초 뒤 또 해 봅니다.
 let lost = null, retry = null, stalled = false;  // stalled: 재생 중에 받기를 기다리며 멈춤
 video.addEventListener("waiting", () => { stalled = true; });
 video.addEventListener("playing", () => { stalled = false; });
 video.addEventListener("error", () => {
-  if (video.error?.code !== 2) return;
+  const code = video.error?.code;
+  if (code !== 2 && !(code === 4 && lost)) return;
   lost ??= { t: video.currentTime, play: stalled || !video.paused };
+  lost.reloaded = false;
   $("status").textContent = "인터넷 연결이 끊겼습니다. 다시 연결되면 이어서 봅니다…";
   clearTimeout(retry);
   retry = setTimeout(reconnect, 5000);
@@ -22,21 +25,31 @@ function reconnect() {
   if (lost) video.load();
 }
 addEventListener("online", reconnect);
-video.addEventListener("loadedmetadata", () => {
+video.addEventListener("loadedmetadata", () => {  // 다시 받은 영상: 끊긴 자리로
   if (!lost) return;
-  const { t, play } = lost;
+  lost.reloaded = true;
+  video.currentTime = lost.t;
+  if (lost.play) video.play().catch(() => {});
+});
+// 앞부분(길이 등)이 왔다고 다시 연결된 것은 아닙니다: 브라우저에 남아 있던 것이 서버가 꺼진 채로 올 수 있습니다.
+// 끊긴 자리의 영상이 실제로 와서 재생되거나(playing) 재생할 수 있게 되면(canplay) 다시 연결됐다고 알립니다.
+const reconnected = () => {
+  if (!lost?.reloaded || video.seeking || video.readyState < 3) return;  // 자리를 옮기기 전에 쌓인 canplay는 건너뜁니다
   lost = null;
   clearTimeout(retry);
-  video.currentTime = t;
-  if (play) video.play().catch(() => {});
-  $("status").textContent = `다시 연결되어 ${fmt(t)}부터 이어서 봅니다.`;
-});
+  $("status").textContent = `다시 연결되어 ${fmt(video.currentTime)}부터 이어서 봅니다.`;
+};
+video.addEventListener("playing", reconnected);
+video.addEventListener("canplay", reconnected);
+// 끊긴 동안 학생이 챕터·페이지·시각을 눌렀으면 다시 연결될 때 그 자리로 갑니다(끊긴 자리로 되돌아가지 않게).
+video.addEventListener("seeking", () => { if (lost) lost.t = video.currentTime; });
 
 let chapters = [];  // { start, title, card, bar }
 let pages = [];     // { start, item }
 let refItems = [];  // { start, item } 시간이 붙은 학원 정리 항목, 시간 순
 
 function seek(t) {
+  if (lost) Object.assign(lost, { t, play: true });  // 영상을 다시 받는 중(아직 길이도 모름)에는 seeking이 오지 않습니다
   video.currentTime = t;
   video.play().catch(() => {});
 }

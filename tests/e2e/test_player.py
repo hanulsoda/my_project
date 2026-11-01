@@ -249,6 +249,74 @@ def test_the_video_picks_up_where_it_stopped_after_the_internet_comes_back(page,
     page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 40) < 3")
 
 
+def cut_off(page):
+    """재생 중에 인터넷이 끊긴 것처럼: 브라우저가 영상 받기를 그만둠(MEDIA_ERR_NETWORK)"""
+    page.evaluate(f"{VIDEO}.play()")
+    page.wait_for_function(f"!{VIDEO}.paused")
+    page.evaluate("""() => { const v = document.querySelector('video');
+        Object.defineProperty(v, 'error', { get: () => ({ code: 2 }), configurable: true });
+        v.dispatchEvent(new Event('waiting')); v.pause(); v.dispatchEvent(new Event('error')); }""")
+    expect(page.locator("#status")).to_contain_text("인터넷 연결이 끊겼습니다")
+
+
+def test_a_scene_picked_while_the_connection_is_lost_is_where_it_comes_back(page, site):
+    open_player(page, site)
+    go(page, 40)
+    cut_off(page)
+
+    page.locator(".chapter button.time").nth(2).click()  # 끊긴 동안 01:40 정리를 누름
+    page.evaluate("() => { delete document.querySelector('video').error; window.dispatchEvent(new Event('online')); }")
+
+    expect(page.locator("#status")).to_contain_text("다시 연결되어 01:40부터")  # 끊긴 자리(00:40)로 돌아가지 않음
+    page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 100) < 3")
+
+
+def test_coming_back_is_not_announced_until_the_video_itself_arrives(page, site):
+    open_player(page, site)
+    go(page, 40)
+    cut_off(page)
+    page.route("**/media/**", lambda route: route.abort("internetdisconnected"))  # 서버는 아직 꺼져 있음
+    page.evaluate("""() => { const v = document.querySelector('video'); window.said = [];
+        const status = document.getElementById('status');
+        new MutationObserver(() => said.push(status.textContent)).observe(status, { childList: true, characterData: true, subtree: true });
+        delete v.error; window.dispatchEvent(new Event('online'));
+        // 브라우저에 남아 있던 앞부분(길이 등)만 오고 그 자리의 영상은 오지 않음
+        v.dispatchEvent(new Event('loadedmetadata')); v.dispatchEvent(new Event('canplay')); }""")
+    page.wait_for_timeout(500)
+
+    assert not [s for s in page.evaluate("said") if "다시 연결되어" in s]
+    expect(page.locator("#status")).to_contain_text("끊겼습니다")
+
+    page.unroute("**/media/**")  # 서버가 다시 켜짐
+    page.evaluate("window.dispatchEvent(new Event('online'))")
+    expect(page.locator("#status")).to_contain_text("다시 연결되어 00:40부터")
+    page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 40) < 3")
+
+
+def test_reconnecting_keeps_trying_while_the_server_is_still_restarting(page, site):
+    open_player(page, site)
+    go(page, 40)
+    cut_off(page)
+    tries = []
+
+    def restarting(route):  # 다시 받으려 해도 처음 두 번은 서버가 답하지 않음(시놀로지가 502)
+        tries.append(route.request.url)
+        if len(tries) <= 2:
+            route.fulfill(status=502, content_type="text/html", body="<html>502 Bad Gateway</html>")
+        else:
+            route.continue_()
+
+    page.route("**/media/**", restarting)
+    page.clock.install()
+    page.evaluate("() => { delete document.querySelector('video').error; window.dispatchEvent(new Event('online')); }")
+    for _ in range(4):  # 5초마다 다시
+        page.wait_for_timeout(300)
+        page.clock.run_for(5000)
+
+    expect(page.locator("#status")).to_contain_text("다시 연결되어 00:40부터")
+    page.wait_for_function(f"!{VIDEO}.paused && Math.abs({VIDEO}.currentTime - 40) < 3")
+
+
 BLOCKED_STORAGE = """Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
     get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });"""
 
