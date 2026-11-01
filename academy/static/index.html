@@ -206,6 +206,20 @@
       closeFound();
       render();
     });
+    // 긴 폴더에서 강의를 보고 뒤로 가기로 돌아오면 연 강의가 보이게 합니다. 목록은 서버에서 받은 뒤에 만들어 브라우저가 스크롤 자리를
+    // 되살리지 못하고(사파리는 화면을 다시 불러옴), 화면 밖 줄은 어림한 높이로 잡혀 있어 스크롤 위치(px)로는 다른 줄에 섭니다.
+    history.scrollRestoration = "manual";
+    document.querySelector(".content-body").addEventListener("click", (e) => {
+      const a = e.target.closest(".video-list a");
+      if (a) try { sessionStorage.setItem("opened", JSON.stringify({ hash: location.hash, href: a.getAttribute("href") })); } catch {}
+    });
+    const showOpened = () => {  // 뒤로 가기·새로 고침으로 왔을 때만(폴더 링크로 새로 열면 맨 위부터)
+      let opened = null;
+      try { opened = JSON.parse(sessionStorage.getItem("opened")); } catch {}
+      if (performance.getEntriesByType("navigation")[0]?.type === "navigate" || !opened || opened.hash !== location.hash) return;
+      [...document.querySelectorAll(`.content-body .video-list a[href="${CSS.escape(opened.href)}"]`)]
+        .find((a) => a.offsetParent)?.scrollIntoView({ block: "center" });
+    };
     const reveal = () => { if (current().kind === "folder") side.reveal(current().name); };  // 고른 하위 폴더가 사이드바에 보이게
     window.onhashchange = () => {  // 폴더를 고르면 찾던 것 없이 그 폴더. 뒤로 가기로 찾던 화면에 오면 그때 찾던 것을 다시 보여 줍니다.
       showingFound = false;
@@ -381,6 +395,7 @@
       loaded = true;
       reveal();
       render();
+      showOpened();
       findAgain();
     }, () => $("empty").replaceChildren(`${OFFLINE} `,
       el("button", { type: "button", class: "retry", onclick: () => location.reload() }, "다시 불러오기")));

@@ -236,6 +236,29 @@ def test_the_player_back_button_returns_to_the_list_view_it_came_from(page, site
     expect(page.locator("#found h2").first).to_contain_text("반어법")  # 찾은 결과 그대로
 
 
+@pytest.mark.parametrize("width", [1200, 390], ids=["desktop", "phone"])
+def test_the_player_back_button_returns_to_the_same_place_in_a_long_folder(phone, site, width):
+    page = phone(width, 844)
+    real = site.ids[ZMG]  # 150번째 줄만 실제로 열리는 강의
+    lectures = [{"id": real if i == 150 else f"{i:012x}", "title": f"큰폴더/고1/작품 {i}강", "analyzed": False,
+                 "guide": False, "toc": False, "added": 0} for i in range(300)]
+    page.route("**/api/videos", lambda route: route.fulfill(json=lectures))
+    page.goto(site.url + "/#f/큰폴더")
+    row = page.locator(f'.content-body a[href="watch.html?id={real}"]')
+    row.scroll_into_view_if_needed()
+    row.click()
+    expect(page.locator("#back")).to_have_text("강의")
+    page.locator("#back").click()
+
+    expect(page.locator("#view-title")).to_have_text("큰폴더")
+    page.wait_for_timeout(300)
+    assert on_screen(page, row)  # 맨 위(scrollY 0)가 아니라 보던 강의 자리
+    page.reload()  # 사파리는 뒤로 가기로 되살린 화면을 다시 불러옵니다(common.js)
+    expect(page.locator("#view-title")).to_have_text("큰폴더")
+    page.wait_for_timeout(300)
+    assert on_screen(page, row)
+
+
 def test_spoken_results_come_back_after_passing_through_a_folder(page, site):
     remember(page, site, {"list": {"scope": "spoken"}})
     page.goto(site.url + "/")
