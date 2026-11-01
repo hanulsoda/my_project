@@ -164,7 +164,7 @@
         el("span", { class: "video-text" }, el("span", { class: "video-title" }, name),
           el("span", { class: "video-sub" }, sub ?? parts.join(" · "))),
         el("span", { class: "meta" },
-          el("span", { class: v.guide ? "badge ready" : "badge" }, v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "페이지" : "분석 전"),
+          el("span", { class: v.guide ? "badge ready" : "badge" }, v.guide ? "요점 정리" : v.toc ? "목차" : v.analyzed ? "영상만" : "준비 중"),
           ...(score ? [`퀴즈 ${score.right}/${score.total}`] : []), ...watchedMark(v.id)));
     }
 
@@ -268,7 +268,7 @@
         status.textContent = why;
         return;
       }
-      status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개, 학원 정리·목차 ${found.notes.length}개 찾음`;
+      status.textContent = `강의 ${found.exact.length}개, 비슷한 말 ${found.similar.length}개, 요점 정리·목차 ${found.notes.length}개 찾음`;
       // 묶음마다 30개씩 보여 주고 '더 보기'로 이어서 보여 줍니다.
       const paged = (list, item) => {
         const ul = el("ul", { class: "found-list" }), more = el("button", { type: "button", class: "more" });
@@ -298,15 +298,15 @@
         ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []));
       box.replaceChildren(
         el("h2", {}, `‘${q}’: 선생님이 말한 강의 ${found.exact.length}개 (많이 말한 순)`),
-        el("p", { class: "notice" }, "선생님 말을 받아 적은 글에서 찾습니다. 시각을 누르면 그 장면부터 봅니다."),
+        el("p", { class: "notice" }, "선생님 말을 받아 적은 글에서 찾습니다. 시간을 누르면 그 장면부터 봅니다."),
         ...paged(found.exact, spoken),
         ...(found.similar.length ? [
           el("h2", {}, `비슷한 말로 받아 적힌 강의 ${found.similar.length}개`),
           el("p", { class: "notice" }, "받아쓰기가 소리 하나를 다르게 적은 곳입니다. 다른 낱말일 수도 있으니 적힌 말을 확인하세요."),
           ...paged(found.similar, spoken)] : []),
         ...(found.notes.length ? [
-          el("h2", {}, `학원 정리·목차에 나오는 강의 ${found.notes.length}개`),
-          el("p", { class: "notice" }, "선생님 말에서는 찾지 못했지만 학원 요점 정리나 목차에 적혀 있는 강의입니다."),
+          el("h2", {}, `요점 정리·목차에 나오는 강의 ${found.notes.length}개`),
+          el("p", { class: "notice" }, "선생님 말에서는 찾지 못했지만 요점 정리나 목차에 적혀 있는 강의입니다."),
           ...paged(found.notes, noted)] : []));
     };
 

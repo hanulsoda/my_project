@@ -327,6 +327,23 @@ def test_this_weeks_lectures_show_progress_and_where_they_are(phone, site, width
     expect(rows.nth(1).locator(".progress")).to_be_visible()
 
 
+def test_lists_use_the_two_student_words_for_what_to_read(page, site):
+    page.goto(site.url + "/#v/new")  # 테스트 강의는 모두 방금 올라옴
+    badge = lambda title: page.locator(f'#new-list a[href$="{site.ids[title]}"] .badge')  # noqa: E731
+    expect(badge(ZMG)).to_have_text("요점 정리")
+    expect(badge(ZMG + " 학습활동")).to_have_text("요점 정리")  # 학원 정리도 읽을 것이면 요점 정리
+    expect(badge("시험/길이 없는 분석")).to_have_text("목차")
+    expect(badge("2022개정/고1/천재/성에꽃")).to_have_text("영상만")  # '페이지'가 아님
+    expect(badge("100%완성/작품")).to_have_text("준비 중")  # '분석 전'이 아님
+
+    page.click("#scope-spoken")
+    page.fill("#search", "도입")  # 말하지는 않고 챕터 제목에만 있는 낱말
+    page.press("#search", "Enter")
+    expect(page.locator("#found")).to_contain_text("요점 정리·목차에 나오는 강의")
+    expect(page.locator("#found")).to_contain_text("시간을 누르면 그 장면부터 봅니다")
+    expect(page.locator("#found")).not_to_contain_text("학원")
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()

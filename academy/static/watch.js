@@ -65,7 +65,7 @@ function seek(t) {
 }
 
 function timeButton(t) {
-  return el("button", { class: "time", "aria-label": `${fmt(t)}로 이동`, onclick: () => seek(t) }, fmt(t));
+  return el("button", { class: "time", "aria-label": `${fmt(t)}부터 보기`, onclick: () => seek(t) }, fmt(t));
 }
 
 function notice(text) {
@@ -125,7 +125,7 @@ function render({ title, analysis, references = [], prev = null, next = null, as
   }
   video.setAttribute("aria-label", title);
   if (!analysis) {
-    const msg = "아직 분석되지 않은 영상입니다. 선생님이 분석을 실행하면 요점 정리·페이지·퀴즈가 생깁니다.";
+    const msg = "이 강의는 아직 준비 중입니다. 준비가 끝나면 요점 정리·페이지·퀴즈가 생깁니다.";
     for (const tab of ["guide", "pages", "quiz", "ask"]) $(`tab-${tab}`).replaceChildren(notice(msg));
     return;
   }
@@ -133,7 +133,7 @@ function render({ title, analysis, references = [], prev = null, next = null, as
   setupAsk();
   // 로컬 AI가 대본으로 만든 목차: 챕터 제목·시간만 있고 핵심 내용·퀴즈는 없습니다.
   const toc = (analysis.toc?.chapters || []).map((c) => ({ ...c, points: [] }));
-  const tocNotice = () => notice("강의 대본으로 자동으로 만든 목차입니다. 틀릴 수 있습니다. 시간을 누르면 그 장면으로 이동합니다.");
+  const tocNotice = () => notice("강의 대본으로 자동으로 만든 목차입니다. 틀릴 수 있습니다. 시간을 누르면 그 장면부터 봅니다.");
   $("print-btn").hidden = !(analysis.guide || references.length || toc.length);
   if (analysis.guide) {
     renderGuide(analysis.guide, analysis.duration);
@@ -215,11 +215,11 @@ function jumpChapter(step) {
 $("prev-chapter").onclick = () => jumpChapter(-1);
 $("next-chapter").onclick = () => jumpChapter(1);
 
-// 학원 요점 정리를 바탕으로 만든 강의의 작품 개요(갈래·주제 등)와 핵심 어휘
+// 학원 정리를 바탕으로 만든 요점 정리의 작품 개요(갈래·주제 등)와 핵심 어휘
 function overviewCard({ overview = [], glossary = [], sources = [] }) {
   const pairs = (items, key, value) => items.flatMap((item) => [el("dt", {}, item[key]), el("dd", {}, item[value])]);
   const card = el("article", { class: "overview" });
-  if (sources.length) card.append(el("p", { class: "sources" }, `학원 요점 정리 바탕: ${sources.join(", ")}`));
+  if (sources.length) card.append(el("p", { class: "sources" }, `학원 정리 바탕: ${sources.join(", ")}`));
   if (overview.length) card.append(el("dl", {}, ...pairs(overview, "name", "value")));
   if (glossary.length) card.append(el("h3", {}, "핵심 어휘"), el("dl", {}, ...pairs(glossary, "term", "meaning")));
   return card;
@@ -231,7 +231,8 @@ function renderReferences(all) {
   const references = all.filter((r) => r.sections.length);  // 빈칸 문제만 있는 정리는 퀴즈 탭에만 나옵니다
   if (!references.length) return $("tab-guide").replaceChildren(notice("이 강의는 아직 요점 정리가 없습니다. 퀴즈 탭의 문제는 풀 수 있습니다."));
   $("tab-guide").replaceChildren(
-    notice("학원 요점 정리입니다. 시간을 누르면 그 설명으로 이동합니다. 시간은 대본에서 자동으로 찾은 것이라 가끔 틀릴 수 있고, 시간이 없는 내용은 페이지 탭에서 찾을 수 있습니다."),
+    el("p", { class: "sources" }, "학원 정리 바탕"),  // 읽을 것은 모두 '요점 정리'라 부르고, 어디서 왔는지만 작게 적습니다
+    notice("시간을 누르면 그 장면부터 봅니다. 시간은 대본에서 자동으로 찾은 것이라 가끔 틀릴 수 있고, 시간이 없는 내용은 페이지 탭에서 찾을 수 있습니다."),
     ...references.map(({ source, sections }) => el("article", { class: "overview reference" },
       el("h3", {}, source),
       ...sections.flatMap(({ name, items, times = [] }) => [el("h4", {}, name), el("ul", {}, ...items.map((item, i) => {
@@ -253,7 +254,7 @@ function renderPages(list) {
   pages = list.map((p, n) => {
     const item = el("li", {}, el("button", {
       class: "page",
-      "aria-label": `${p.label || `${n + 1}번째 화면`}, ${fmt(p.start)}로 이동`,
+      "aria-label": `${p.label || `${n + 1}번째 화면`}, ${fmt(p.start)}부터 보기`,
       onclick: () => seek(p.start),
     }, el("img", { src: `/api/videos/${id}/pages/${n}.jpg`, alt: "", loading: "lazy" }),  // 페이지 탭을 열 때 받음
        ...(p.label ? [el("span", { class: "page-label" }, p.label)] : []),
@@ -261,7 +262,7 @@ function renderPages(list) {
     grid.append(item);
     return { start: p.start, item };
   });
-  box.replaceChildren(notice("지금 보고 있는 교재 화면을 찾아 누르면 그 설명으로 이동합니다."), grid);
+  box.replaceChildren(notice("지금 보고 있는 교재 화면을 찾아 누르면 그 장면부터 봅니다."), grid);
 }
 
 // ---- 복습 퀴즈 ----
@@ -574,7 +575,7 @@ video.addEventListener("loadedmetadata", () => {
   const from = params.has("t") ? Number(params.get("t")) : NaN;  // 내용 검색 결과·메모에서 고른 시각(0초도)
   if (from >= 0) {
     video.currentTime = from;
-    $("status").textContent = `찾은 낱말을 말한 ${fmt(from)}부터 봅니다.`;
+    $("status").textContent = `${fmt(from)}부터 봅니다.`;
   } else if (saved && saved.t > 5 && saved.t < video.duration - 5) {
     video.currentTime = saved.t;
     $("status").textContent = `지난번에 보던 ${fmt(saved.t)}부터 이어서 봅니다.`;

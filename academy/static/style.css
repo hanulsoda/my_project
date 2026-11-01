@@ -584,7 +584,7 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 /* 요점 정리 */
 .summary { margin: 0 0 8px; padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); line-height: 1.7; }
 .overview { margin: 8px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; }
-.overview .sources { margin: 0 0 6px; color: var(--muted); font-size: 13px; }
+.overview .sources, .tab-body > .sources { margin: 0 0 6px; color: var(--muted); font-size: 13px; }  /* 학원 정리 바탕 */
 .overview dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; line-height: 1.6; }
 .overview dt { color: var(--muted); font-weight: 600; }
 .overview dd { margin: 0; }

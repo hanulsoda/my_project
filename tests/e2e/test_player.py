@@ -140,6 +140,21 @@ def test_a_quiz_answer_shows_its_explanation_on_a_phone_and_says_which_is_which(
     expect(second.locator("button.choice.wrong")).to_contain_text("✗ 내가 고른 답")
 
 
+def test_the_player_uses_the_same_words_for_what_to_read_and_for_times(page, site):
+    guide = page.locator("#tab-guide")
+    open_player(page, site, ZMG + " 학습활동")  # 학원 정리를 보여 주는 강의
+    expect(guide).to_contain_text("학원 정리 바탕")
+    expect(guide).to_contain_text("시간을 누르면 그 장면부터 봅니다")
+    expect(guide).not_to_contain_text("학원 요점 정리")
+    open_player(page, site, "시험/길이 없는 분석")  # 목차만
+    expect(guide).to_contain_text("시간을 누르면 그 장면부터 봅니다")
+    open_player(page, site, query="&t=50")  # 내 메모·복습의 시간에서 와도 맞는 말('찾은 낱말을 말한'이 아님)
+    expect(page.locator("#status")).to_have_text("00:50부터 봅니다.")
+    expect(page.locator("#find-status")).to_contain_text("시간을 누르면 그 장면부터 봅니다")
+    open_player(page, site, "100%완성/작품")
+    expect(guide).to_contain_text("준비 중")  # 목록의 '준비 중'과 같은 말
+
+
 def test_a_section_repeat_keeps_looping(page, site):
     open_player(page, site)
     go(page, 20)
