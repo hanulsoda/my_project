@@ -544,7 +544,7 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 6px; border: 1px sol
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
 .chapter-nav { display: inline-flex; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); box-shadow: var(--raised); overflow: hidden; }
 .chapter-nav button { display: flex; align-items: center; justify-content: center; width: 40px; height: 32px; padding: 0; border: 0; background: none; cursor: pointer; }
-.chapter-nav button + button { border-left: 1px solid var(--border); }
+.chapter-label { display: flex; align-items: center; padding: 0 8px; border: solid var(--border); border-width: 0 1px; color: var(--muted); font-size: 13px; }  /* ‹ 챕터 › */
 .chapter-nav button:hover { background: var(--hover); }
 .chapter-nav .icon { background: var(--text); }
 .speed { display: inline-flex; }
@@ -694,6 +694,10 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
   .player video { border-radius: 10px; }
   .panel { flex: 1; min-height: 200px; margin: 8px 16px 16px; }  /* 아주 작은 화면에서는 탭 상자를 지키고 화면이 움직입니다 */
   .tab-body { overscroll-behavior: contain; }
+  .pages { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }  /* 휴대폰에서도 교재 화면 두 줄 */
+  .note-form button { padding-left: 10px; padding-right: 10px; }
+  .speed button { padding: 2px 6px; }  /* 360px 휴대폰에서 영상 아래 단추가 두 줄에 들어가게 */
+  .controls { column-gap: 8px; }  /* '1:02:30에 추가'가 붙어도 메모 칸의 안내 글이 잘리지 않게 */
 }
 /* 옆으로 눕힌 휴대폰(높이가 낮은 화면): 위아래로 쌓으면 영상만으로 화면이 차서 탭 상자가 보이지 않습니다.
    영상은 왼쪽(화면 높이에 맞춤), 탭 상자는 오른쪽에 두고, 머리글은 얇게 합니다. 영상 아래 단추가 넘치면 왼쪽만 움직입니다. */
@@ -704,6 +708,17 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
   .player { min-height: 0; overflow-y: auto; padding: 8px 0 12px; scrollbar-width: none; }
   .player video { max-height: calc(100dvh - 70px); }
   .panel { min-height: 0; margin: 8px 0 12px; }
+}
+
+/* 손가락으로 누르는 화면(휴대폰·태블릿): 누르는 것은 40px 이상으로 해서 옆 단추를 잘못 누르지 않게 합니다 */
+@media (pointer: coarse) {
+  .back, .tool, .tabs button, .speed button, .loop, .chapter-nav button, button.time, a.time, .delete,
+  .scope button, .layout button, #sort, .picks-head select { box-sizing: border-box; min-height: 40px; }
+  .tool, .layout button, .chapter-nav button, .speed button { min-width: 40px; }
+  button.time, a.time { display: inline-flex; align-items: center; vertical-align: middle; }
+  .layout button { justify-content: center; }
+  .disclosure { width: 40px; }  /* 폴더 펼치기 삼각형 */
+  .sidebar li + li > .row, .sidebar .sub > li:first-child > .row { background-size: calc(100% - 62px) 1px; }  /* 넓어진 삼각형만큼 줄 */
 }
 
 /* 인쇄: 제목·요점 정리 탭·퀴즈 문제, 마지막 장에 정답. 어두운 모드여도 흰 종이에 검은 글자로 찍습니다. */

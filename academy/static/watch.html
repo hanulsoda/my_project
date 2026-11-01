@@ -34,6 +34,8 @@
       <div class="controls">
         <div id="chapter-nav" class="chapter-nav" role="group" aria-label="챕터 이동" hidden>
           <button type="button" id="prev-chapter" aria-label="이전 챕터" title="이전 챕터 ( [ )"><span class="icon i-chev-left" aria-hidden="true"></span></button>
+          <!-- 머리글의 이전·다음 강의(⏮ ⏭)와 헷갈리지 않게 '챕터'를 글로 보입니다(휴대폰은 title을 보여 주지 않음) -->
+          <span class="chapter-label" aria-hidden="true">챕터</span>
           <button type="button" id="next-chapter" aria-label="다음 챕터" title="다음 챕터 ( ] )"><span class="icon i-chev-right" aria-hidden="true"></span></button>
         </div>
         <p id="now" class="now"></p>
@@ -77,7 +79,7 @@
 
       <div class="tab-body" id="tab-notes" role="tabpanel" aria-labelledby="tab-btn-notes" hidden>
         <form id="note-form" class="note-form">
-          <input id="note-text" aria-label="메모" placeholder="지금 장면에 메모 (비워 두면 북마크)">
+          <input id="note-text" aria-label="메모" placeholder="메모·비우면 북마크">
           <button type="submit">추가</button>
         </form>
         <ul id="notes" class="notes"></ul>

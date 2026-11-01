@@ -181,6 +181,55 @@ def test_speed_buttons_are_read_as_speeds(page, site):
     assert page.evaluate(f"{VIDEO}.playbackRate") == 1.5
 
 
+def heights(page, selector):
+    return page.evaluate(f"[...document.querySelectorAll('{selector}')].filter((e) => e.offsetParent)"
+                         ".map((e) => Math.round(e.getBoundingClientRect().height))")
+
+
+def test_player_controls_are_big_enough_to_tap_on_a_phone(phone, site):
+    page = phone(390, 844)
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator(".chapter button.time").first).to_be_visible()
+    for selector in ["#speed button", ".chapter button.time", "#chapter-nav button", "#loop-btn", ".tabs button", ".top .tool", "#back"]:
+        found = heights(page, selector)
+        assert found and min(found) >= 40, (selector, found)
+
+
+def test_the_chapter_buttons_say_chapter_so_they_are_not_taken_for_next_lecture(phone, site):
+    page = phone(390, 844)  # 휴대폰은 title(마우스를 올리면 뜨는 글)을 보여 주지 않습니다
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator("#chapter-nav")).to_be_visible()
+    expect(page.locator("#chapter-nav")).to_contain_text("챕터")
+    assert on_screen(page, page.locator("#chapter-nav .chapter-label"))
+
+
+def test_the_memo_hint_fits_in_its_box_on_small_phones(phone, site):
+    page = phone(360, 740)
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    page.locator("[data-tab=notes]").tap()
+    page.locator("#note-text").focus()  # 추가 단추에 시각이 붙어 칸이 좁아진 때
+    fits = page.locator("#note-text").evaluate("""(i) => { const s = getComputedStyle(i), c = document.createElement('canvas').getContext('2d');
+        c.font = `${s.fontSize} ${s.fontFamily}`;
+        return c.measureText(i.placeholder).width <= i.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight); }""")
+    assert fits
+
+
+def test_the_pages_tab_shows_two_columns_on_a_phone(phone, site):
+    page = phone(360, 740)
+
+    def with_pages(route):
+        body = route.fetch().json()
+        body["analysis"]["pages"] = [{"start": float(t), "label": f"교과서 {t // 30 + 12}쪽"} for t in range(0, 150, 30)]
+        route.fulfill(json=body)
+
+    page.route(re.compile(rf"/api/videos/{site.ids[ZMG]}\?view=1$"), with_pages)
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    page.locator("[data-tab=pages]").tap()
+    expect(page.locator(".pages li")).to_have_count(5)
+    lefts = page.evaluate("new Set([...document.querySelectorAll('.pages li')].map((li) => Math.round(li.getBoundingClientRect().left))).size")
+    assert lefts == 2
+
+
 def test_a_section_repeat_keeps_looping(page, site):
     open_player(page, site)
     go(page, 20)

@@ -360,6 +360,24 @@ def test_a_keyboard_can_skip_straight_to_the_lecture_list(page, site):
     assert unquote(page.url).endswith("#f/2022개정/고1/미래엔")  # 고른 폴더는 그대로
 
 
+def test_list_controls_are_big_enough_to_tap_on_a_phone(phone, site):
+    page = phone(390, 844)
+    picks(page, site, ZMG)  # '내 학년' 고르기가 나오게
+    sizes = lambda selector: page.evaluate(  # noqa: E731
+        f"[...document.querySelectorAll('{selector}')].filter((e) => e.offsetParent)"
+        ".map((e) => [Math.round(e.getBoundingClientRect().width), Math.round(e.getBoundingClientRect().height)])")
+    page.goto(site.url + "/")
+    expect(page.locator(".my-grade")).to_be_visible()
+    for selector in [".my-grade", "nav.sidebar button.disclosure", ".scope button"]:
+        found = sizes(selector)
+        assert found and min(min(w, h) for w, h in found) >= 40, (selector, found)
+    page.locator("nav.sidebar a", has_text="2022개정").tap()
+    expect(page.locator("#view-grid")).to_be_visible()
+    for selector in [".layout button", "#sort"]:
+        found = sizes(selector)
+        assert found and min(h for _, h in found) >= 40 and min(w for w, _ in found) >= 40, (selector, found)
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()
