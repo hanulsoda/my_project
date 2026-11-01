@@ -10,19 +10,27 @@ video.addEventListener("error", () => fetch(`/api/videos/${id}`).catch(() => {})
 // 끊긴 자리를 기억해 두었다가 연결되면(또는 5초마다) 영상을 다시 받아 그 자리부터 이어서 봅니다.
 // 다시 받다가 서버가 아직 답하지 않으면(다시 켜는 중) 처음부터 받지 못한 것(code 4)이 되는데, 그때도 5초 뒤 또 해 봅니다.
 let lost = null, retry = null, stalled = false;  // stalled: 재생 중에 받기를 기다리며 멈춤
+let missing = false;  // 강의 정보도 '없는 강의'(404): 제목이 '영상을 찾을 수 없습니다'로 알립니다
 video.addEventListener("waiting", () => { stalled = true; });
 video.addEventListener("playing", () => { stalled = false; });
 const UNPLAYABLE = "이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.";
+const MISSING = "이 영상을 찾을 수 없습니다. 선생님께 알려 주세요.";  // 목록에는 있는데 파일이 없어진 강의
+// 서버가 답하지 못한 것(인터넷 끊김, 서버를 다시 켜는 중 시놀로지의 502·503·504)만 연결 문제입니다.
+// 서버가 다른 답(파일 없음 404, 파일을 읽지 못한 500 등)을 하면 다시 받아도 소용없어 그만두고 알립니다.
+const serverDown = (res) => !res || [502, 503, 504].includes(res.status);
+const giveUp = (text) => { lost = null; clearTimeout(retry); $("status").textContent = text; };
 video.addEventListener("error", async () => {
   const code = video.error?.code;
   if (code === 3) return void ($("status").textContent = UNPLAYABLE);  // 받은 영상이 깨져 있음
   if (code !== 2 && code !== 4) return;
-  // 처음부터 받지 못함(code 4): 브라우저가 열 수 없는 코덱이거나 아직 올리는 중인 파일일 수도, 서버를 다시 켜는 중일 수도 있습니다.
-  // 파일 첫 1바이트를 물어 서버가 답하면 파일 문제(회색 화면만 보이지 않게 알림), 답하지 못하면 연결 문제로 보고 다시 해 봅니다.
-  if (code === 4 && !lost) {
+  // 받지 못함(code 4): 브라우저가 열 수 없는 코덱이거나 아직 올리는 중인 파일일 수도, 서버를 다시 켜는 중일 수도 있습니다.
+  // 처음과 다시 받으려다 못 받을 때마다 파일 첫 1바이트를 물어, 서버가 답하면 파일 문제로 알리고(회색 화면만 보이지 않게) 그만둡니다.
+  if (code === 4) {
     const res = await fetch(`/media/${id}`, { headers: { Range: "bytes=0-0" } }).catch(() => null);
-    if (res?.status === 404) return;  // 없는 강의: 제목이 '영상을 찾을 수 없습니다'로 알립니다
-    if (res && res.status < 500) return void ($("status").textContent = UNPLAYABLE);
+    if (!serverDown(res)) {
+      if (lost && res.ok && !lost.answered) lost.answered = true;  // 다시 받는 사이에 서버가 막 켜졌을 수 있어 한 번 더 받아 봅니다
+      else return void giveUp(res.status !== 404 ? UNPLAYABLE : missing ? "" : MISSING);
+    }
   }
   lost ??= { t: video.currentTime, play: stalled || !video.paused,
              why: code === 2 ? "인터넷 연결이 끊겼습니다. 다시 연결되면 이어서 봅니다…" : "서버에 연결하지 못했습니다. 다시 연결되면 이어서 봅니다…" };
@@ -100,8 +108,11 @@ fetch(`/api/videos/${id}?view=1`)  // view=1: 강의를 연 것으로 셉니다(
   // 화면을 그리다 난 오류는 '영상 없음'으로 덮지 않습니다(브라우저 콘솔에 그대로 나옴).
   // 서버를 다시 켜는 중(502)이거나 인터넷이 끊긴 것을 '없는 강의'로 보이지 않게 404만 그렇게 알립니다.
   .then(render, (status) => {
-    if (status === 404) $("title").textContent = "영상을 찾을 수 없습니다";
-    else $("tab-guide").replaceChildren(notice(`요점 정리를 불러오지 못했습니다. ${OFFLINE}`));
+    if (status === 404) {
+      missing = true;
+      $("title").textContent = "영상을 찾을 수 없습니다";
+      if ($("status").textContent === MISSING) $("status").textContent = "";  // 제목과 같은 말을 두 번 하지 않게
+    } else $("tab-guide").replaceChildren(notice(`요점 정리를 불러오지 못했습니다. ${OFFLINE}`));
   });
 
 function render({ title, analysis, references = [], prev = null, next = null, ask = false }) {

@@ -500,6 +500,53 @@ def test_opening_a_lecture_while_the_server_restarts_waits_instead_of_blaming_th
     assert round(now(page)) == 60
 
 
+def test_a_file_the_running_server_cannot_send_says_so_instead_of_waiting_forever(page, site):
+    sent = []
+
+    def broken(route):  # 강의 목록에는 있지만 파일을 지웠거나 읽을 수 없음: 서버는 켜져 있고 500으로 답함
+        sent.append(route.request.url)
+        route.fulfill(status=500, content_type="text/plain", body="Internal Server Error")
+
+    page.route("**/media/**", broken)
+    page.clock.install()
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+
+    expect(page.locator("#status")).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")  # '서버에 연결하지 못했습니다'가 아님
+    tries = len(sent)
+    for _ in range(4):
+        page.wait_for_timeout(200)
+        page.clock.run_for(5000)
+    assert len(sent) == tries  # 5초마다 다시 받지 않음
+
+
+@pytest.mark.parametrize("answer, message", [(404, "이 영상을 찾을 수 없습니다. 선생님께 알려 주세요."),
+                                             (500, "이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")], ids=["gone", "broken"])
+def test_reconnecting_stops_when_the_server_is_back_but_the_file_is_not(page, site, answer, message):
+    server = {"status": 502}  # 처음에는 서버를 다시 켜는 중(시놀로지가 502)
+    sent = []
+
+    def media(route):
+        sent.append(route.request.url)
+        route.fulfill(status=server["status"], content_type="text/html", body="<html>오류</html>")
+
+    page.route("**/media/**", media)
+    page.clock.install()
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator("#status")).to_contain_text("서버에 연결하지 못했습니다")
+
+    server["status"] = answer  # 서버는 다시 켜졌지만 파일이 없어졌거나(404) 읽을 수 없음(500)
+    for _ in range(3):
+        page.wait_for_timeout(200)
+        page.clock.run_for(5000)
+
+    expect(page.locator("#status")).to_have_text(message)
+    tries = len(sent)
+    for _ in range(3):
+        page.wait_for_timeout(200)
+        page.clock.run_for(5000)
+    assert len(sent) == tries
+
+
 def long_guide(page, site, title=ZMG):
     """요점 정리를 길게(챕터 12개) 바꿔 보냅니다: 휴대폰에서 탭 안을 끝까지 내려 볼 수 있게"""
     def longer(route):
