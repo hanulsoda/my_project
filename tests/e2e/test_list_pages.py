@@ -196,6 +196,51 @@ def test_the_player_back_link_opens_the_lecture_folder(page, site):
     expect(page.locator("#view-title")).to_have_text("미래엔")
 
 
+def test_the_player_back_button_returns_to_the_list_view_it_came_from(page, site):
+    remember(page, site, {f"pos:{site.ids[ZMG]}": {"t": 60, "d": 150, "at": 1}})
+    page.goto(site.url + "/#v/recent")
+    page.locator("#recent-list a").first.click()
+    expect(page.locator("#title")).to_have_text("제망매가")
+    expect(page.locator("#back")).to_have_text("강의")
+    page.click("#back")
+    expect(page.locator("#view-title")).to_have_text("이어 보기")  # 강의가 든 폴더(미래엔)가 아님
+    assert page.url.endswith("#v/recent")
+
+    remember(page, site, {"list": {"scope": "spoken"}})
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    page.locator("#found li > a").first.click()
+    expect(page.locator("#title")).to_have_text("제망매가")
+    page.click("#back")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")  # 찾은 결과 그대로
+
+
+def test_spoken_results_come_back_after_passing_through_a_folder(page, site):
+    remember(page, site, {"list": {"scope": "spoken"}})
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    page.goto(site.url + "/#f/2022개정/고1/미래엔")  # 플레이어의 '‹ 미래엔'
+    expect(page.locator("#view-title")).to_have_text("미래엔")
+
+    page.go_back()
+    page.go_back()  # 결과를 보던 첫 화면으로
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+
+
+def test_opening_a_folder_from_the_sidebar_clears_the_search(page, site):
+    page.goto(site.url + "/")
+    page.fill("#search", "청산")
+    expect(page.locator(".video-list a:visible")).to_have_count(1)
+    page.locator("nav.sidebar a", has_text="시험").click()
+    expect(page.locator("#view-title")).to_have_text("시험")  # '찾기 결과'가 아님
+    expect(page.locator("#search")).to_have_value("")
+    expect(page.locator(".video-list a:visible")).to_have_count(2)
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()

@@ -58,11 +58,16 @@
     let scope = saved.scope === "spoken" ? "spoken" : "title";
     let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
     $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
-    // found: 선생님 말에서 찾은 결과를 보던 중, foundAt: 그때의 화면 주소. 강의를 보고 같은 주소로 돌아오면 다시 찾아 보여 주고,
-    // 폴더 링크(플레이어의 '‹ 폴더' 등)로 오면 그 폴더를 엽니다.
+    // foundAt: 선생님 말에서 찾은 결과를 보던 화면 주소(없으면 null). 강의를 보고 그 주소로 돌아오면 다시 찾아 보여 주고,
+    // 폴더 링크(플레이어의 '‹ 폴더' 등)로 오면 그 폴더를 엽니다. 폴더를 거쳐도 지우지 않고, 학생이 찾기를 닫을 때만 지웁니다.
+    let foundAt = saved.found ? saved.foundAt ?? "" : null;
     const save = () => store.set("list", { q: search.value, guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value,
-                                           found: showingFound, foundAt: location.hash });
+                                           found: foundAt !== null, foundAt });
     let folders = [], total = 0, loaded = false, showingFound = false, side = null, searchSeq = 0;
+    const closeFound = () => { showingFound = false; foundAt = null; };
+    const findAgain = () => {  // 결과를 보던 화면으로 돌아왔으면 다시 찾아 보여 줍니다
+      if (foundAt === location.hash && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
+    };
     const PLACEHOLDER = { title: "강의 찾기 (예: 제망매가)", spoken: "선생님이 말한 낱말 (예: 반어법)" };
     const PICK_FOLDER = "왼쪽에서 폴더를 고르세요.";
 
@@ -78,7 +83,7 @@
       for (const [id, s] of [["scope-title", "title"], ["scope-spoken", "spoken"]]) $(id).setAttribute("aria-pressed", String(s === scope));
       search.placeholder = PLACEHOLDER[scope];
       $("find-btn").hidden = scope !== "spoken";  // 선생님 말은 다 쓴 뒤 찾습니다(제목은 쓰는 대로 걸러짐). 휴대폰에서 Enter를 몰라도 되게
-      if (scope === "title") showingFound = false;
+      if (scope === "title") closeFound();
       save();
     }
 
@@ -168,7 +173,7 @@
     const filterNow = () => {
       clearTimeout(typing);
       typing = null;
-      if (scope === "spoken" && !search.value.trim()) showingFound = false;
+      if (scope === "spoken" && !search.value.trim()) closeFound();
       render();
     };
     search.oninput = () => {
@@ -184,11 +189,24 @@
     };
     document.querySelector(".content-head .back").onclick = () => {  // 휴대폰: 찾던 것도 지우고 첫 화면으로
       search.value = "";
-      showingFound = false;
+      closeFound();
       render();
     };
+    // 사이드바에서 폴더·이어 보기 등을 고르면 찾던 것을 지웁니다: 제목 찾기 글이 남아 있으면 고른 폴더 대신 찾기 결과가 보였습니다.
+    document.querySelector(".sidebar").addEventListener("click", (e) => {
+      if (!e.target.closest("a[href^='#']")) return;
+      search.value = "";
+      closeFound();
+      render();
+    });
     const reveal = () => { if (current().kind === "folder") side.reveal(current().name); };  // 고른 하위 폴더가 사이드바에 보이게
-    window.onhashchange = () => { showingFound = false; reveal(); render(); scrollTo(0, 0); };  // 폴더를 고르면 찾은 결과 대신 그 폴더
+    window.onhashchange = () => {  // 폴더를 고르면 찾은 결과 대신 그 폴더. 뒤로 가기로 결과를 보던 화면에 오면 다시 찾아 보여 줍니다.
+      showingFound = false;
+      reveal();
+      render();
+      scrollTo(0, 0);
+      findAgain();
+    };
     setScope(scope);
 
     function setLayout(next) {
@@ -236,6 +254,7 @@
       if (scope === "title") return;  // 제목은 입력하는 대로 걸러 보여 줍니다
       const q = search.value.trim(), box = $("found"), seq = ++searchSeq;
       showingFound = true;
+      foundAt = location.hash;
       render();
       box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
       const status = $("found-status");  // 결과 전체 대신 수만 화면 읽기 프로그램에 알립니다
@@ -340,7 +359,7 @@
       loaded = true;
       reveal();
       render();
-      if (saved.found && saved.foundAt === location.hash && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
+      findAgain();
     }, () => $("empty").replaceChildren(`${OFFLINE} `,
       el("button", { type: "button", class: "retry", onclick: () => location.reload() }, "다시 불러오기")));
   </script>

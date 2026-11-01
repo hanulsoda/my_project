@@ -103,7 +103,11 @@ function render({ title, analysis, references = [], prev = null, next = null, as
   // 사이드바는 세 단계까지만 펼치므로, 더 깊은 강의는 셋째 단계 폴더로 돌아갑니다.
   const folder = parts.length ? parts.slice(0, 3).join("/") : "기타";
   $("back").setAttribute("href", `./${folderHash(folder)}`);
-  $("back").textContent = folder.split("/").pop();
+  // 강의 목록(찾기 결과·이어 보기·이번 주 강의 등)이나 내 메모·복습에서 눌러 왔으면 뒤로 가기로 그 화면 그대로 돌아갑니다.
+  // 주소를 바로 열었거나 앞뒤 강의에서 왔으면 강의가 든 폴더로 갑니다.
+  const from = cameFrom();
+  $("back").textContent = from ?? folder.split("/").pop();
+  if (from) $("back").onclick = (e) => { e.preventDefault(); history.back(); };
   // 같은 폴더의 앞뒤 강의: 머리글 버튼, 그리고 영상이 끝나면 '다음 강의' 카드
   for (const [key, lecture, label] of [["prev", prev, "이전 강의"], ["next", next, "다음 강의"]]) {
     const link = $(`${key}-lecture`);
@@ -147,6 +151,15 @@ function render({ title, analysis, references = [], prev = null, next = null, as
     $("tab-guide").replaceChildren(notice(msg));
     $("tab-quiz").replaceChildren(notice(msg));
   }
+}
+
+// 이 사이트의 목록 화면에서 왔으면 그 화면 이름, 아니면 null. 새 탭으로 열었으면(돌아갈 곳이 없음) null.
+function cameFrom() {
+  try {
+    const ref = new URL(document.referrer), list = new URL("./", location.href);
+    if (ref.origin !== location.origin || !ref.pathname.startsWith(list.pathname) || history.length < 2) return null;
+    return { "": "강의", "index.html": "강의", "notes.html": "내 메모", "review.html": "틀린 문제 복습" }[ref.pathname.slice(list.pathname.length)] ?? null;
+  } catch { return null; }  // 주소를 바로 열어 referrer가 없음
 }
 
 // ---- 요점 정리 + 챕터 점프 ----
