@@ -94,7 +94,9 @@ function openTab(tab) {
 for (const tab of tabs) tab.onclick = () => openTab(tab);
 openTab(tabs.find((t) => t.classList.contains("active")));
 // 키보드: 탭 줄에서 ←→로 옆 탭(끝에서는 반대쪽 끝), Home·End로 처음·마지막 탭을 엽니다. 숨긴 탭은 건너뜁니다.
+// Alt+←(뒤로 가기)처럼 다른 키와 함께 누른 것은 브라우저 단축키라 그대로 둡니다.
 document.querySelector(".tabs").addEventListener("keydown", (e) => {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
   const shown = tabs.filter((t) => !t.hidden), i = shown.indexOf(e.target), n = shown.length;
   const next = i < 0 ? null : { ArrowLeft: shown[(i - 1 + n) % n], ArrowRight: shown[(i + 1) % n], Home: shown[0], End: shown[n - 1] }[e.key];
   if (!next) return;

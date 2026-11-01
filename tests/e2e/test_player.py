@@ -208,6 +208,18 @@ def test_the_study_tabs_move_with_the_arrow_keys(page, site):
     assert page.evaluate("[...document.querySelectorAll('[role=tab]')].filter((t) => t.tabIndex === 0).map((t) => t.id)") == ["tab-btn-guide"]
 
 
+def test_browser_shortcuts_on_a_study_tab_are_left_to_the_browser(page, site):
+    open_player(page, site)
+    page.click("#tab-btn-pages")
+    page.focus("#tab-btn-pages")
+    page.evaluate("""window.blocked = []; document.addEventListener('keydown', (e) => {
+        if (e.key.startsWith('Arrow') || ['Home', 'End'].includes(e.key)) blocked.push(e.defaultPrevented); })""")
+    for keys in ["Alt+ArrowLeft", "Control+End"]:  # 뒤로 가기, 페이지 맨 아래로(브라우저 단축키)
+        page.keyboard.press(keys)
+    expect(page.locator("#tab-btn-pages")).to_have_attribute("aria-selected", "true")  # 탭이 바뀌지 않음
+    assert page.evaluate("blocked") == [False, False]
+
+
 def test_speed_buttons_are_read_as_speeds(page, site):
     open_player(page, site)  # 화면 읽기 프로그램이 '1.25×'를 '1.25 곱하기'로 읽던 것
     names = page.evaluate("[...document.querySelectorAll('#speed button')].map((b) => b.getAttribute('aria-label'))")
