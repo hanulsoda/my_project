@@ -504,6 +504,20 @@ def test_a_video_the_browser_cannot_play_says_so(page, site):
     expect(page.locator("#status")).to_be_visible()
 
 
+def test_adding_a_note_keeps_the_message_that_the_video_cannot_play(page, site):
+    page.route("**/media/**", lambda route: route.fulfill(status=200, content_type="video/mp4", body="아직 올리는 중"))
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    status = page.locator("#status")
+    expect(status).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")
+
+    page.click("[data-tab=notes]")
+    page.fill("#note-text", "영상이 안 나와요")
+    page.press("#note-text", "Enter")
+
+    expect(page.locator("#notes")).to_contain_text("영상이 안 나와요")
+    expect(status).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")  # 지난 안내처럼 지우지 않음
+
+
 def test_opening_a_lecture_while_the_server_restarts_waits_instead_of_blaming_the_file(page, site):
     remember(page, site, {f"pos:{site.ids[ZMG]}": {"t": 60, "d": 150, "at": 1}})
     page.route("**/media/**", lambda route: route.fulfill(status=502, content_type="text/html", body="<html>502</html>"))

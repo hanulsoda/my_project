@@ -479,7 +479,8 @@ $("note-form").onsubmit = (e) => {
   }
   $("note-text").value = "";
   setNoteAt(null);  // 다음 메모는 다시 쓰기 시작할 때의 장면(칸에 남아 있으면 첫 글자에서)
-  if (!lost) $("status").textContent = "";  // 지난 북마크·저장 실패 안내가 남아 있지 않게(연결이 끊긴 안내는 둠)
+  // 지난 북마크·저장 실패 안내가 남아 있지 않게(연결이 끊긴 안내와 영상을 볼 수 없다는 안내는 둠)
+  if (!lost && ![UNPLAYABLE, MISSING].includes($("status").textContent)) $("status").textContent = "";
 };
 $("bookmark-btn").onclick = () => {
   $("status").textContent = addNote("") ? `${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`
