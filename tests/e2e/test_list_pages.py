@@ -615,8 +615,9 @@ def test_a_phone_shows_loading_and_the_retry_button_while_the_server_restarts(ph
     expect(page.locator("#empty")).to_be_hidden()
 
 
-def test_typing_boxes_are_big_enough_that_an_iphone_does_not_zoom_in(phone, site):
-    page = phone(390, 844)  # 아이폰은 16px보다 작은 칸을 누르면 화면을 확대해 버립니다
+@pytest.mark.parametrize("width, height", [(390, 844), (932, 430)], ids=["upright", "pro-max-on-its-side"])
+def test_typing_boxes_are_big_enough_that_an_iphone_does_not_zoom_in(phone, site, width, height):
+    page = phone(width, height)  # 아이폰은 16px보다 작은 칸을 누르면 화면을 확대해 버립니다(옆으로 눕힌 큰 아이폰은 900px보다 넓음)
     page.route("**/api/picks", lambda route: route.fulfill(json={  # '내 학년' 고르기가 나오게
         "note": "", "at": None, "lectures": [{"id": site.ids[ZMG], "title": ZMG, "grade": "고1"}]}))
     small = {}
