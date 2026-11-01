@@ -514,6 +514,7 @@ addEventListener("pagehide", saveStudy);
 $("find-form").onsubmit = async (e) => {
   e.preventDefault();
   const q = $("find-text").value.trim(), status = $("find-status"), list = $("find-results");
+  if (jamoOnly(q)) return void (status.textContent = JAMO_ONLY, list.replaceChildren());
   status.textContent = "찾는 중…";
   const res = await fetch(`/api/videos/${id}/search?q=${encodeURIComponent(q)}`).catch(() => null);
   const found = res ? await res.json().catch(() => ({})) : {};
@@ -523,7 +524,7 @@ $("find-form").onsubmit = async (e) => {
     return;
   }
   const heard = found.heard_as.length ? ` · 받아 적힌 말: ${found.heard_as.map((w) => `‘${w}’`).join(", ")}` : "";
-  status.textContent = found.times.length ? `‘${q}’: 선생님이 말한 곳 ${found.times.length}군데${heard}` : `‘${q}’: 선생님 말에서는 찾지 못했습니다.`;
+  status.textContent = found.times.length ? `‘${q}’: 선생님이 말한 곳 ${found.times.length}군데${heard}` : `‘${q}’: 선생님 말에서는 찾지 못했습니다. 비슷한 다른 낱말로 찾아보세요.`;
   list.replaceChildren(
     ...found.times.map((t, i) => el("li", {}, timeButton(t), el("span", { class: "note-text" }, found.chapters[i] || ""))),
     ...(found.notes.length ? [el("li", { class: "notice" }, "요점 정리·목차에 나오는 곳")] : []),

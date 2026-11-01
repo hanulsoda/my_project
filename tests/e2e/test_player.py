@@ -230,6 +230,18 @@ def test_the_pages_tab_shows_two_columns_on_a_phone(phone, site):
     assert lefts == 2
 
 
+def test_finding_in_a_lecture_says_what_went_wrong_and_what_to_do_next(page, site):
+    open_player(page, site)
+    page.click("[data-tab=find]")
+    page.fill("#find-text", "ㅂㅇㅂ")
+    page.press("#find-text", "Enter")
+    expect(page.locator("#find-status")).to_contain_text("자음·모음만으로는 찾을 수 없습니다")
+    page.fill("#find-text", "아무도안한말")
+    page.press("#find-text", "Enter")
+    expect(page.locator("#find-status")).to_contain_text("선생님 말에서는 찾지 못했습니다")
+    expect(page.locator("#find-status")).to_contain_text("다른 낱말로 찾아보세요")
+
+
 def test_a_section_repeat_keeps_looping(page, site):
     open_player(page, site)
     go(page, 20)

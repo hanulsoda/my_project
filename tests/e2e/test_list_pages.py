@@ -378,6 +378,35 @@ def test_list_controls_are_big_enough_to_tap_on_a_phone(phone, site):
         assert found and min(h for _, h in found) >= 40 and min(w for w, _ in found) >= 40, (selector, found)
 
 
+def test_the_streak_line_does_not_contradict_the_hours_studied(page, site):
+    page.clock.install(time=datetime(2026, 11, 4, 10, 0, tzinfo=KST))  # 수요일
+    remember(page, site, {"study": {"2026-11-02": 3600}})  # 월요일에 1시간, 어제·오늘은 아직
+    page.goto(site.url + "/")
+    expect(page.locator(".week-head strong")).to_have_text("1시간 0분")
+    expect(page.locator(".week .streak")).to_have_text("오늘 강의를 보면 1일째가 됩니다")  # '기록이 시작됩니다'가 아님
+
+
+def test_search_messages_say_what_went_wrong_and_what_to_do_next(page, site):
+    page.goto(site.url + "/")
+    expect(page.locator(".video-list a").first).to_be_attached()
+    page.fill("#search", "ㅂㅇㅂ")  # 자음만
+    expect(page.locator("#empty")).to_contain_text("자음·모음만으로는 찾을 수 없습니다")
+    expect(page.locator("#empty button")).to_have_count(0)
+    page.click("#scope-spoken")
+    expect(page.locator("#found")).to_contain_text("자음·모음만으로는 찾을 수 없습니다")  # '두 글자 이상'이 아님
+
+    page.fill("#search", "아무도안한말")
+    page.press("#search", "Enter")
+    expect(page.locator("#found")).to_contain_text("선생님이 이 낱말을 말한 강의가 없습니다")
+    page.locator("#found button", has_text="제목에서 찾기").click()
+    expect(page.locator("#scope-title")).to_have_attribute("aria-pressed", "true")
+
+    page.click("#scope-spoken")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found .found-list .meta").first).to_have_text("5번 말함")  # '5번'만으로는 무엇인지 몰랐음
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()

@@ -34,6 +34,10 @@ addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
 // 서버를 다시 켜는 중(시놀로지가 502)이거나 인터넷이 끊겼을 때 보여 줄 말
 const OFFLINE = "서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 잠시 뒤 다시 해 주세요.";
 
+// 자음·모음만 친 찾기('ㅂㅇㅂ'): 서버는 완성된 한글 글자만 보고 찾아 '두 글자 이상'이라고 답해, 무엇이 틀렸는지 알 수 없었습니다.
+const JAMO_ONLY = "자음·모음만으로는 찾을 수 없습니다. 낱말을 끝까지 써 주세요(예: 반어법).";
+const jamoOnly = (text) => /\S/.test(text) && /^[\u3131-\u318e\s]+$/.test(text);
+
 // 시청 위치와 메모는 학생 각자의 브라우저에 저장됩니다.
 const store = {
   get(key) {
@@ -99,7 +103,7 @@ function weekCard() {
       el("span", { class: "bar", "aria-hidden": "true" }, el("span", { style: `height: ${Math.round((mins[i] / top) * 100)}%` })),
       el("span", { class: "label", "aria-hidden": "true" }, "월화수목금토일"[i]),
       el("span", { class: "sr-only" }, `${"월화수목금토일"[i]}요일 ${span(mins[i])}`)))),
-    el("p", { class: "streak" }, streak ? `${streak}일째 이어서 공부하는 중` : "오늘 강의를 보면 기록이 시작됩니다"));
+    el("p", { class: "streak" }, streak ? `${streak}일째 이어서 공부하는 중` : "오늘 강의를 보면 1일째가 됩니다"));
 }
 
 // 강의 줄에 붙이는 본 데까지(강의 목록·이번 주 강의): 다 봤으면 '다 봄', 아니면 막대와 '20:34까지'. 길이를 모르는 기록은 표시하지 않습니다.
