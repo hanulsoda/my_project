@@ -48,8 +48,9 @@ def run_lock(data_dir, part):
 
 def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(1, 1),
                 detect_pages=None, read_screens=None, find_references=None, settle_seconds=0, probe=None,
-                retry_failed=False, only=None) -> int:
-    """make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
+                retry_failed=False, only=None) -> int | None:
+    """실패한 강의 수를, 분석하지 않았으면(영상 없음, 같은 묶음이 아직 도는 중) None을 돌려줍니다.
+    make_guide가 None이면 Claude 없이 받아쓰기와 페이지만 만듭니다. 요점 정리는 나중에 붙일 수 있습니다.
 
     read_screens가 있으면 요점 정리를 만들 때 페이지마다 화면 글자를 읽어 근거로 함께 보냅니다.
     find_references(제목, 화면 글자 줄)는 짝지어지는 학원 요점 정리를 {"source", "text"} 목록으로 돌려줍니다.
@@ -60,13 +61,14 @@ def analyze_all(video_dir, data_dir, transcribe, make_guide, force=False, part=(
     only: 제목(폴더 이름 포함)에 이 글이 든 강의만 분석합니다.
     """
     videos = find_videos(video_dir)
-    if not videos:
-        print(f"영상이 없습니다: {Path(video_dir).resolve()} ({' '.join(sorted(VIDEO_EXTS))} 파일만 찾습니다)")
-        return 0
+    if not videos:  # 날짜로 시작하는 줄: 현황의 '새 강의 분석'에 나옵니다
+        print(f"{datetime.now():%Y-%m-%d %H:%M} 영상 분석을 멈춥니다: 영상이 없습니다: {Path(video_dir).resolve()} "
+              f"(NAS 연결 확인, {' '.join(sorted(VIDEO_EXTS))} 파일만 찾습니다)")
+        return None
     lock = run_lock(data_dir, part)  # 밤 작업이 겹쳐 같은 강의를 두 번 받아쓰고 Claude 비용을 두 번 내지 않게
     if lock is None:
-        print("이 묶음의 분석이 이미 돌고 있어 이번에는 하지 않습니다.")
-        return 0
+        print(f"{datetime.now():%Y-%m-%d %H:%M} 이 묶음의 분석이 아직 돌고 있어 이번에는 하지 않았습니다.")
+        return None
     try:
         mine = _chosen(videos, part, only)
         if only and not mine:
@@ -454,6 +456,8 @@ def main():
         retry_failed=args.retry_failed,
         only=args.only,
     )
+    if failures is None:  # 하지 않은 까닭은 analyze_all이 날짜 줄로 남김
+        return
     # 현황 화면의 '새 강의 분석'에 나오는 날짜 줄
     print(f"{datetime.now():%Y-%m-%d %H:%M} 영상 분석 끝"
           + (f", 실패 {failures}개(다시 실행하면 실패한 영상만 이어서 분석합니다)" if failures else ""), flush=True)

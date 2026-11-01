@@ -155,7 +155,7 @@ def test_stops_for_the_night_when_ollama_does_not_answer_three_lectures_in_a_row
 def test_an_empty_video_folder_stops_with_a_dated_line(tmp_path, capsys):
     (tmp_path / "videos").mkdir()
 
-    assert add_tocs(tmp_path / "videos", tmp_path / "data", answer(), has_summary=lambda title: False) == (0, False)
+    assert add_tocs(tmp_path / "videos", tmp_path / "data", answer(), has_summary=lambda title: False) == (0, None)
     last = capsys.readouterr().out.strip().splitlines()[-1]
     assert re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d ", last) and "멈춥니다" in last and "NAS" in last
 

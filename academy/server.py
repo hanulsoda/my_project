@@ -1111,12 +1111,20 @@ def _recent_start(f, size, since):
 
 
 def _last_line(path, dated=False):
+    """마지막 줄(dated면 날짜로 시작하는 마지막 줄). 몇 년 치 쌓인 로그도 현황을 열 때마다 통째로 읽지 않게 끝에서부터 읽습니다."""
     try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
+        with open(path, "rb") as f:
+            end, size = f.seek(0, os.SEEK_END), 65536
+            while True:
+                start = max(0, end - size)
+                f.seek(start)
+                lines = f.read(end - start).decode("utf-8", "replace").splitlines()[1 if start else 0:]  # 잘린 첫 줄은 뺌
+                lines = [line for line in lines if line.strip() and (not dated or re.match(r"\d{4}-\d\d-\d\d ", line))]
+                if lines or not start:
+                    return lines[-1] if lines else None
+                size *= 4
     except OSError:
         return None
-    lines = [line for line in lines if line.strip() and (not dated or re.match(r"\d{4}-\d\d-\d\d ", line))]
-    return lines[-1] if lines else None
 
 
 def _norm(text):
@@ -1202,7 +1210,8 @@ load_env_file()  # 분석·밤 작업·설정 점검과 같은 설정 파일(~/.
 app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  Path(os.environ.get("DATA_DIR", "data")),
                  # 질문하기는 Claude API 크레딧을 써서 ASK_ENABLED=1일 때만 켭니다(그때만 플레이어에 탭이 나옴).
-                 _claude_answer() if os.environ.get("ASK_ENABLED", "").strip() not in ("", "0") else None,
+                 _claude_answer() if os.environ.get("ASK_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+                 else None,
                  read_references(os.environ.get("REFERENCES_FILE")),  # 쓸 수 있는 정리 고르기는 create_app이 한 번만
                  Path(os.environ["LOG_DIR"]).expanduser() if os.environ.get("LOG_DIR") else None,
                  _ignored_hosts(os.environ.get("USAGE_IGNORE", "")),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)

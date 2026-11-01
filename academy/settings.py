@@ -16,7 +16,7 @@ def load_env_file(env=os.environ):
     """설정 파일(ACADEMY_ENV, 없으면 ~/.config/academy/academy.env)의 '이름=값' 줄을 env에 채우고 그 파일을 돌려줍니다.
 
     서버·밤 작업(cron)·설정 점검이 같은 파일을 읽어, 예약 줄마다 설정을 옮겨 적다 빠뜨리지 않게 합니다.
-    명령 앞에 적은 값이 이깁니다. # 줄은 설명, 'export '와 값을 감싼 따옴표는 빼고, ~로 시작하는 값은 집 폴더로 풉니다.
+    명령 앞에 적은 값이 이깁니다. # 줄과 값 뒤에 띄어 쓴 # 설명, 'export ', 값을 감싼 따옴표는 빼고, ~로 시작하는 값은 집 폴더로 풉니다.
     기본 파일이 없으면 None."""
     named = env.get("ACADEMY_ENV", "").strip()
     path = Path(named or ENV_FILE).expanduser()
@@ -28,6 +28,7 @@ def load_env_file(env=os.environ):
         return None
     except (OSError, UnicodeDecodeError) as e:
         raise SystemExit(f"설정 파일을 읽지 못했습니다: {path} ({e}). UTF-8로 저장했는지, 읽기 권한이 있는지 확인하세요")
+    found = {}  # 같은 이름이 또 나오면 셸에서 읽을 때처럼 나중 줄(README의 '>>' 명령을 다시 돌려 고친 키)
     for n, line in enumerate(lines, 1):
         line = line.strip()
         if not line or line.startswith("#"):
@@ -36,9 +37,13 @@ def load_env_file(env=os.environ):
         name, value = name.strip(), value.strip()
         if not equals or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             raise SystemExit(f"설정 파일 {path}의 {n}번째 줄을 읽지 못했습니다. '이름=값'으로 적어 주세요: {line[:40]}")
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        env.setdefault(name, os.path.expanduser(value) if value.startswith("~") else value)  # 셸처럼 ~는 집 폴더
+        if value[:1] in ("'", '"') and (close := value.find(value[0], 1)) > 0:
+            value = value[1:close]  # 따옴표 뒤의 설명(# …)은 뺍니다
+        else:
+            value = re.split(r"\s+#", value, maxsplit=1)[0]  # 'LOG_DIR=/logs  # 로그 폴더': 띄어 쓴 # 뒤는 설명
+        found[name] = os.path.expanduser(value) if value.startswith("~") else value  # 셸처럼 ~는 집 폴더
+    for name, value in found.items():
+        env.setdefault(name, value)
     return path
 
 

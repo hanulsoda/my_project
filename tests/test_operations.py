@@ -219,6 +219,7 @@ def test_the_server_reads_the_settings_file_and_asks_claude_only_when_turned_on(
         return run.stdout.strip()
 
     assert ask_shown() == "False"  # 질문하기는 Claude 비용이 들어 꺼 둠(플레이어에 탭이 나오지 않음)
+    assert ask_shown("ASK_ENABLED=false") == "False"  # '끔'으로 적은 값이 비용이 드는 쪽으로 켜지지 않게
     assert ask_shown("ASK_ENABLED=1", "LOG_DIR=~/logs") == "True"
     assert (tmp_path / "logs").is_dir()  # 설정 파일의 ~는 집 폴더(셸이 풀어 주지 않아도)
 
@@ -299,3 +300,76 @@ def test_the_saved_index_is_refreshed_while_the_server_runs_for_weeks(tmp_path, 
 
     # 정전으로 꺼졌다 켜져도 켠 뒤 분석된 강의를 처음부터 다시 읽지 않게
     assert ids["1강"] in json.loads(index.read_text(encoding="utf-8"))["entries"]
+
+
+def test_the_last_line_for_a_name_wins_and_comments_after_values_are_dropped(tmp_path):
+    from academy.settings import load_env_file
+    settings = tmp_path / "academy.env"
+    settings.write_text("ANTHROPIC_API_KEY=old-key\nLOG_DIR=/logs   # 로그 폴더\n"
+                        "SITE_URL=\"https://x.example/#a\"  # 학원 사이트\nENTRY_SECRET=abc#def\n"
+                        "ANTHROPIC_API_KEY=new-key\n", encoding="utf-8")  # 키를 고치려고 README 명령을 다시 돌림
+    env = {"ACADEMY_ENV": str(settings)}
+
+    load_env_file(env)
+
+    assert env["ANTHROPIC_API_KEY"] == "new-key"  # 셸에서 읽을 때처럼 나중 줄
+    assert env["LOG_DIR"] == "/logs" and env["SITE_URL"] == "https://x.example/#a" and env["ENTRY_SECRET"] == "abc#def"
+
+
+def test_an_analysis_that_did_not_run_does_not_leave_a_finished_line(tmp_path, capsys):
+    import re
+
+    from academy.analyze import analyze_all, run_lock
+    from tests.test_analyze import Recorder, make_videos
+    make_videos(tmp_path / "videos", "1강.mp4")
+    (tmp_path / "data").mkdir()
+    rec = Recorder()
+    held = run_lock(tmp_path / "data", (1, 1))  # 어젯밤 분석이 아직 돌고 있음
+    try:
+        assert analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide) is None
+    finally:
+        held.close()
+    last = capsys.readouterr().out.strip().splitlines()[-1]
+    assert re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d ", last) and "하지 않았습니다" in last  # 현황의 '새 강의 분석'
+
+    (tmp_path / "empty").mkdir()  # NAS가 붙지 않음
+    assert analyze_all(tmp_path / "empty", tmp_path / "data", rec.transcribe, rec.make_guide) is None
+    last = capsys.readouterr().out.strip().splitlines()[-1]
+    assert re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d ", last) and "멈춥니다" in last and "영상이 없습니다" in last
+
+
+def test_the_status_page_reads_only_the_end_of_a_long_log(tmp_path, monkeypatch):
+    import pathlib
+    video_dir, data_dir, ids = site(tmp_path, "1강")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "toc.log").write_text("2026-10-30 07:00 자동 목차 3개 만듦\n" + "목차: 2022개정/고1/긴 강의 제목\n" * 20000,
+                                  encoding="utf-8")  # 밤 작업이 도는 중: 날짜 줄이 한참 앞에 있음
+    (logs / "new-videos.log").write_text("[1/1] 1강\n  이미 분석됨, 건너뜀\n" * 20000 + "2026-10-31 23:50 영상 분석 끝\n",
+                                         encoding="utf-8")
+    real = pathlib.Path.read_text
+    monkeypatch.setattr(pathlib.Path, "read_text", lambda self, *a, **k: (_ for _ in ()).throw(AssertionError(
+        f"로그를 통째로 읽음: {self}")) if self.suffix == ".log" else real(self, *a, **k))  # 1년 치면 현황마다 몇 초
+
+    ops = TestClient(create_app(video_dir, data_dir, None, log_dir=logs)).get("/api/status").json()["ops"]
+
+    assert ops["night"] == "2026-10-30 07:00 자동 목차 3개 만듦" and ops["new_videos"] == "2026-10-31 23:50 영상 분석 끝"
+
+
+def test_the_toc_job_exits_with_an_error_when_the_video_folder_is_empty(tmp_path, monkeypatch):
+    import sys
+
+    import pytest
+
+    from academy import toc
+    (tmp_path / "videos").mkdir()
+    (tmp_path / "data").mkdir()
+    monkeypatch.setenv("VIDEO_DIR", str(tmp_path / "videos"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("REFERENCES_FILE", raising=False)
+    monkeypatch.setattr(sys, "argv", ["academy.toc"])
+
+    with pytest.raises(SystemExit) as stop:
+        toc.main()
+
+    assert stop.value.code == 1  # 75는 '아침이 되어 멈춤(다음 밤에 이어서)'

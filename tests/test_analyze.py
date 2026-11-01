@@ -113,7 +113,7 @@ def test_empty_video_folder_says_so(tmp_path, capsys):
 
     failures = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
 
-    assert failures == 0
+    assert failures is None  # 분석하지 않음
     assert "영상이 없습니다" in capsys.readouterr().out
 
 

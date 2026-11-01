@@ -59,8 +59,8 @@ def test_a_second_run_at_the_same_time_does_nothing(tmp_path, capsys):
     first = run_lock(tmp_path / "data", (1, 1))  # 앞서 시작한 분석이 아직 도는 중
     rec = Recorder()
 
-    assert analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide) == 0
-    assert rec.transcribed == [] and "이미" in capsys.readouterr().out
+    assert analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide) is None  # 하지 않음
+    assert rec.transcribed == [] and "아직 돌고 있어" in capsys.readouterr().out
     other_part = run_lock(tmp_path / "data", (2, 2))  # GPU마다 다른 묶음을 맡는 것은 함께 돌 수 있음
     assert other_part is not None
 

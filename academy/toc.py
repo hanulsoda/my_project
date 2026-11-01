@@ -100,7 +100,7 @@ def ollama_ask(prompt, schema):
 
 
 def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now) -> tuple[int, bool]:
-    """Claude 요점 정리가 없는 강의에 목차를 붙입니다. (실패 수, 끝까지 했는지)를 돌려줍니다.
+    """Claude 요점 정리가 없는 강의에 목차를 붙입니다. (실패 수, 끝까지 했는지: 영상이 없어 시작하지 못했으면 None)를 돌려줍니다.
 
     학원 정리에는 챕터가 없어 학원 정리가 있는 강의도 만들되, 아무것도 없는 강의를 먼저 합니다.
 
@@ -120,7 +120,7 @@ def add_tocs(video_dir, data_dir, ask, has_summary, until=None, now=datetime.now
     videos = sorted(find_videos(video_dir), key=lambda v: has_summary(v["title"]))  # False(정리 없음) 먼저
     if not videos:
         summary("자동 목차를 멈춥니다: 영상 폴더에 강의가 없음(NAS 연결 확인)")
-        return failures, False
+        return failures, None  # None: 시작하지 못함
     made_text = lambda: f"자동 목차 {made}개 만듦" + (f", 실패 {failures}개" if failures else "")
     for n, video in enumerate(videos):
         data = _load(data_dir, video)
@@ -184,7 +184,7 @@ def main():
                                   ollama_ask, lambda title: bool(find_references(title, [], references)), args.until)
     if failures:
         print(f"{failures}개 강의 실패. 다시 실행하면 이어서 합니다.", file=sys.stderr)
-    sys.exit(1 if failures else 0 if finished else 75)  # 75: 시각이 되어 멈춤(다음 밤에 이어서)
+    sys.exit(1 if failures or finished is None else 0 if finished else 75)  # 75: 시각이 되어 멈춤(다음 밤에 이어서)
 
 
 if __name__ == "__main__":
