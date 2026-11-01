@@ -215,3 +215,19 @@ def test_fixes_that_no_longer_apply_are_listed_and_a_refused_save_says_why(page,
     expect(page.locator("#ref-detail")).to_contain_text("향가 → 10구체 향가")
     page.locator(".fix-item").first.get_by_role("button", name="숨기기").click()
     expect(page.locator(".fix-item .fix-msg").first).to_contain_text("깨져 있어")  # '잠시 뒤 다시'가 아니라 까닭
+
+
+def test_the_fixes_page_asks_for_the_key_when_opened_from_the_internet(page, site):
+    def answer(route):  # 인터넷에서는 열쇠가 있어야 정리 내용이 옴
+        if route.request.headers.get("x-teacher-key") != TEACHER_KEY:
+            return route.fulfill(status=403, json={"detail": "선생님 열쇠를 넣어 주세요"})
+        route.fulfill(json=[{"key": "k1", "title": "연습 작품", "grade": "고1", "suspects": 1, "unmatched": 0}])
+
+    page.route("**/api/references", answer)
+    page.goto(site.url + "/fixes.html")
+    expect(page.locator("#fix-status")).to_contain_text("선생님 열쇠")
+
+    page.fill("#teacher-key", TEACHER_KEY)
+    page.press("#teacher-key", "Enter")
+
+    expect(page.locator("#ref-list")).to_contain_text("연습 작품")

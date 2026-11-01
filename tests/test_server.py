@@ -67,6 +67,10 @@ def test_finds_new_video_on_cache_miss_but_not_rescanning_every_miss(setup, monk
     new_id = next(v["id"] for v in find_videos(tmp_path / "videos") if v["title"] == "3강")
 
     clock[0] += server.MISS_SECONDS + 1
+    client.get(f"/api/videos/{new_id}")  # 처음 보는 번호: 뒤에서 다시 훑고, 이 요청은 기다리지 않음
+    deadline = time.monotonic() + 5
+    while client.get(f"/api/videos/{new_id}").status_code != 200 and time.monotonic() < deadline:
+        time.sleep(0.02)
     assert client.get(f"/api/videos/{new_id}").status_code == 200
     assert client.get("/api/videos/nope").status_code == 404
     assert client.get("/media/nope").status_code == 404
@@ -598,7 +602,7 @@ def test_moving_records_to_another_device_with_a_six_digit_code(tmp_path, monkey
     monkeypatch.setattr(server, "wall_clock", lambda: clock[0])
     app = create_app(tmp_path / "videos", tmp_path / "data", None)
     old, new, guesser = (TestClient(app, client=(host, 1)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.9"))
-    data = {"notes:abc": [{"t": 5, "text": "메모"}], "study": {"2026-10-29": 300}}
+    data = {"notes:0123456789ab": [{"t": 5, "text": "메모"}], "study": {"2026-10-29": 300}}
 
     sent = old.post("/api/transfer", json={"data": data}).json()
 
@@ -608,7 +612,7 @@ def test_moving_records_to_another_device_with_a_six_digit_code(tmp_path, monkey
     late = old.post("/api/transfer", json={"data": data}).json()["code"]
     clock[0] += 601
     assert new.post(f"/api/transfer/{late}").status_code == 404  # 10분이 지나면 사라집니다
-    assert old.post("/api/transfer", json={"data": {"x": "가" * 1_000_000}}).status_code == 413
+    assert old.post("/api/transfer", json={"data": {"notes:0123456789ab": "가" * 1_000_000}}).status_code == 413
     assert old.post("/api/transfer", json={"data": "글"}).status_code == 422
     # 코드를 마구 넣어 보는 기기는 20번 틀리면 10분 동안 막습니다
     assert {guesser.post(f"/api/transfer/{n:06d}").status_code for n in range(20)} == {404}
@@ -624,6 +628,10 @@ def test_teachers_see_the_questions_students_miss_most(tmp_path):
     for name in ["1강", "2강"]:
         (video_dir / f"{name}.mp4").write_bytes(b"x")
     ids = {v["title"]: v["id"] for v in find_videos(video_dir)}
+    from tests.fakes import quiz_guide
+    for name, questions in [("1강", ("Q1", "Q2")), ("2강", ("Q3",))]:
+        save_analysis(tmp_path / "data", ids[name], {"title": name, "duration": 2.0, "segments": SEGMENTS,
+                                                     "guide": quiz_guide(*questions)})
     app = create_app(video_dir, tmp_path / "data", None, log_dir=log_dir, usage_ignore=("10.0.0.9",))
     a, b, c, me = (TestClient(app, client=(host, 1)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.9"))
     answer = lambda client, name, question, right: client.post(

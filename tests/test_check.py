@@ -100,3 +100,11 @@ def test_the_check_reports_damaged_teacher_files_and_fixes_that_no_longer_apply(
 
     assert any(level == "문제" and "이번 주 강의" in text and "깨졌" in text for level, text in found)
     assert any(level == "참고" and "적용되지 않는 학원 정리 고침 2개" in text for level, text in found)
+
+
+def test_a_short_teacher_key_is_pointed_out(tmp_path):
+    env, _ = setup(tmp_path, key="abc12345")
+
+    notes = [text for level, text in checks(env) if level == "참고"]
+
+    assert any("선생님 열쇠" in text and "짧" in text for text in notes)  # 학원 PC에서도 맞혀 보기 어렵게

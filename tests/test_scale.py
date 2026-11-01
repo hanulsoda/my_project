@@ -76,7 +76,9 @@ def test_the_quick_near_check_finds_exactly_what_the_pattern_finds():
 
 
 def test_status_counts_quiz_answers_added_after_the_last_look(tmp_path):
+    from tests.fakes import quiz_guide
     video_dir, data_dir, ids = site(tmp_path)
+    save_analysis(data_dir, ids[0], {"title": "1강", "duration": 2.0, "segments": SEGMENTS, "guide": quiz_guide("Q1", "Q2")})
     client = TestClient(create_app(video_dir, data_dir, None, log_dir=tmp_path / "logs"), client=LAN)
     (tmp_path / "logs").mkdir(exist_ok=True)
     answer = lambda key: client.post("/api/quiz-result", json={"id": ids[0], "key": key, "right": False})

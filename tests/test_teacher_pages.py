@@ -28,7 +28,10 @@ def lectures(tmp_path):
 
 
 def test_a_quiz_answer_with_line_separators_cannot_break_the_status_page(lectures, tmp_path):
+    from tests.fakes import quiz_guide
     video_dir, data_dir, ids = lectures
+    save_analysis(data_dir, ids[0], {"title": "강의", "duration": 2.0, "segments": SEGMENTS,
+                                     "guide": quiz_guide(*["a {} b", "\x85null\x85", "c []"])})
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
     # 예전에 그대로 적힌 줄(U+2028이 글 안에 날것으로), 줄 하나가 통째로 JSON 값이 아닌 것들

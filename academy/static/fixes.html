@@ -61,6 +61,7 @@
       store.set("teacher-key", key);
       $("teacher-key").value = "";
       $("key-form").hidden = true;
+      if (!card) return void loadRefs();  // 인터넷에서 목록을 보려고 넣은 열쇠
       answer("열쇠를 넣었습니다. 다시 저장해 주세요.");
     };
 
@@ -80,9 +81,23 @@
     $("ref-search").oninput = renderList;
     $("suspect-only").onchange = renderList;
 
+    // 인터넷에서는 현황처럼 선생님 열쇠가 있어야 정리 내용이 옵니다(학원 안에서는 열쇠 없이도 봄).
+    const withKey = () => ({ headers: { "X-Teacher-Key": teacherKey() } });
+    function locked(res) {
+      if (res.status !== 403 && res.status !== 429) return false;
+      const hadKey = !!teacherKey();
+      if (res.status === 403) localStorage.removeItem("teacher-key");
+      keyHome();
+      $("key-form").hidden = false;
+      say(res.status === 429 ? "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요."
+        : hadKey ? "선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요." : "인터넷에서는 선생님 열쇠를 넣어야 학원 정리가 보입니다.");
+      return true;
+    }
+
     async function openRef(key) {
-      const res = await fetch(`/api/references/${key}`);
-      if (!res.ok) return say("정리를 불러오지 못했습니다.");
+      const res = await fetch(`/api/references/${key}`, withKey()).catch(() => null);
+      if (res && locked(res)) return;
+      if (!res?.ok) return say(`정리를 불러오지 못했습니다. ${OFFLINE}`);
       renderDetail(await res.json());
     }
 
@@ -149,7 +164,15 @@
           el("ul", {}, ...ref.unmatched.map((u) => el("li", {}, `${u.section}: ${u.original} → ${u.hidden ? "숨김" : u.text}`)))] : []));
     }
 
-    fetch("/api/references").then((r) => r.json()).then((list) => { refs = list; renderList(); });
+    async function loadRefs() {
+      const res = await fetch("/api/references", withKey()).catch(() => null);
+      if (res && locked(res)) return;
+      if (!res?.ok) return say(`학원 정리 목록을 불러오지 못했습니다. ${OFFLINE}`);
+      refs = await res.json();
+      say("");
+      renderList();
+    }
+    loadRefs();
   </script>
 </body>
 </html>

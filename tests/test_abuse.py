@@ -42,7 +42,10 @@ def test_very_long_search_words_are_refused_quickly(lecture):
 
 def test_one_device_cannot_fill_the_disk_with_quiz_results_or_opens(lecture, monkeypatch):
     tmp_path, video_id = lecture
+    from tests.fakes import quiz_guide
     monkeypatch.setattr(server, "LOG_WRITES_PER_HOUR", 5)
+    save_analysis(tmp_path / "data", video_id, {"title": "1강", "duration": 2.0, "segments": SEGMENTS,
+                                                "guide": quiz_guide("문제", *(f"문제 {n}" for n in range(8)))})
     app = create_app(tmp_path / "videos", tmp_path / "data", None, log_dir=tmp_path / "logs")  # 로그 폴더는 서버가 만듦
     me, other = TestClient(app, client=ACADEMY), TestClient(app, client=OTHER_PC)
 

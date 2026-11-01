@@ -68,14 +68,13 @@ def test_save_and_load_analysis(tmp_path):
 
 
 def test_a_save_cut_off_midway_keeps_the_previous_analysis(tmp_path, monkeypatch):
+    import academy.library as library
     save_analysis(tmp_path, "abc", {"title": "예전 분석"})
-    real = Path.write_text
 
-    def cut_off(self, text, **kwargs):  # 쓰는 도중 작업이 끊기거나 디스크가 찬 경우
-        real(self, text[:5], **kwargs)
+    def cut_off(fd):  # 쓰는 도중 작업이 끊기거나 디스크가 찬 경우
         raise OSError("디스크가 가득 참")
 
-    monkeypatch.setattr(Path, "write_text", cut_off)
+    monkeypatch.setattr(library.os, "fsync", cut_off)
     with pytest.raises(OSError):
         save_analysis(tmp_path, "abc", {"title": "새 분석"})
     monkeypatch.undo()

@@ -1,5 +1,7 @@
 """저쪽(z840-player) 서버 기능의 버그 찾기에서 나온 경우들."""
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -32,7 +34,10 @@ def test_a_nas_blip_does_not_empty_the_lecture_list(two_lectures, monkeypatch, c
 
     monkeypatch.setattr(server, "find_videos", lambda d: [])  # NAS 연결이 잠깐 끊겨 영상 폴더가 비어 보임
     clock[0] += server.MISS_SECONDS + 1
-    client.get("/api/videos/모르는강의")  # 처음 보는 강의라 그 자리에서 다시 훑음
+    client.get("/api/videos/0123456789ab")  # 처음 보는 강의라 뒤에서 다시 훑음
+    deadline = time.monotonic() + 5
+    while "비어" not in caplog.text and time.monotonic() < deadline:
+        time.sleep(0.02)
 
     assert len(client.get("/api/videos").json()) == 2  # 이전 목록을 그대로 씀
     assert client.get(f"/api/videos/{ids[0]}").status_code == 200

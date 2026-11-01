@@ -108,6 +108,8 @@ def checks(env) -> list[tuple[str, str]]:
         try:
             key = teacher_key(key_file)
             say(OK, f"선생님 열쇠: {len(key)}자") if key else say(PROBLEM, f"선생님 열쇠 파일이 비어 있습니다: {key_file}")
+            if key and len(key) < 16:  # 학원 안에서는 현황·학원 정리 고치기를 누구나 열 수 있어 열쇠로 맞혀 보기 쉬움
+                say(NOTE, f"선생님 열쇠가 {len(key)}자로 짧습니다. 16자 이상으로 바꾸면 맞혀 보기 어렵습니다")
         except SystemExit as e:
             say(PROBLEM, f"{e} — 서버가 켜지지 않습니다")
 

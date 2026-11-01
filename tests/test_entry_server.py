@@ -194,9 +194,10 @@ def test_records_moved_from_home_can_be_claimed_at_the_academy(make_client):
     home.get(f"/enter?{entry_query(int(time.time()) + 300)}")
     academy = TestClient(home.app, client=ACADEMY)
 
-    code = home.post("/api/transfer", json={"data": {"notes": "집에서 쓴 메모"}}).json()["code"]
+    notes = {"notes:0123456789ab": [{"t": 1, "text": "집에서 쓴 메모"}]}
+    code = home.post("/api/transfer", json={"data": notes}).json()["code"]
 
-    assert academy.post(f"/api/transfer/{code}").json()["data"] == {"notes": "집에서 쓴 메모"}
+    assert academy.post(f"/api/transfer/{code}").json()["data"] == notes
 
 
 def test_entry_settings_reads_and_trims():

@@ -42,7 +42,20 @@ def load_analysis(data_dir: Path, video_id: str) -> dict | None:
     path = Path(data_dir) / f"{video_id}.json"
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():  # 저장하다 전원이 나가 빈 파일: 분석 전으로 보고 다시 분석합니다(형식 오류로 영영 건너뛰지 않게)
+        return None
+    return json.loads(text)
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """새 파일에 다 쓰고 디스크에 내린 뒤 바꿔치기합니다: 저장 도중 끊기거나 전원이 나가도 반쯤 쓰인 파일이 남지 않게."""
+    tmp = Path(path).with_name(Path(path).name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
 
 
 _LECTURE_ID = re.compile(r"[0-9a-f]{12}")  # 강의 번호(경로로 만든 12자리)
@@ -107,18 +120,13 @@ def _update(data_dir: Path, name: str, change) -> None:
             current = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             current = {}
-        tmp = path.with_name(name + ".tmp")
-        tmp.write_text(json.dumps(change(current if isinstance(current, dict) else {})), encoding="utf-8")
-        tmp.replace(path)
+        write_atomic(path, json.dumps(change(current if isinstance(current, dict) else {})))
 
 
 def save_analysis(data_dir: Path, video_id: str, data: dict) -> None:
     Path(data_dir).mkdir(parents=True, exist_ok=True)
-    path = Path(data_dir) / f"{video_id}.json"
-    # 새 파일에 다 쓴 뒤 바꿔치기해서, 서버가 반쯤 쓰인 파일을 읽거나 저장 도중 끊겨 분석이 망가지지 않게 합니다.
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    # 서버가 반쯤 쓰인 파일을 읽거나 저장 도중 끊겨 분석이 망가지지 않게 바꿔치기합니다.
+    write_atomic(Path(data_dir) / f"{video_id}.json", json.dumps(data, ensure_ascii=False))
 
 
 ROOT_FILE = ".video-root"  # 분석 폴더에 적어 두는 맨 위 영상 폴더: 다른 영상 폴더로 돌려 강의 번호가 바뀌지 않게

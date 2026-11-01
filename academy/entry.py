@@ -30,8 +30,21 @@ def _valid(secret: str, prefix: str, expiry: str | None, sig: str | None, now: f
 
 
 def entry_link_ok(secret: str, exp: str | None, sig: str | None, now: float) -> bool:
+    return entry_link_problem(secret, exp, sig, now) is None
+
+
+def entry_link_problem(secret: str, exp: str | None, sig: str | None, now: float) -> str | None:
+    """입장 링크를 받지 않는 까닭(서버 기록용). 받으면 None."""
+    if not exp or not sig or not exp.isdigit():
+        return "링크에 입장 정보가 없음"
+    if not hmac.compare_digest(sign(secret, f"enter:{exp}").encode(), sig.encode()):
+        return "서명이 맞지 않음(학원 사이트와 서버의 비밀 키 ENTRY_SECRET이 같은지 확인)"
+    if int(exp) < now:
+        return f"만료된 링크(학원 사이트 서버 시계와 {int(now) - int(exp) + ENTER_TTL}초 차이일 수 있음)"
     # 만료가 너무 먼 링크는 거절합니다. 비밀 키가 새어 나가도 몇 년씩 쓰는 링크를 만들어 돌릴 수 없게.
-    return _valid(secret, "enter", exp, sig, now) and int(exp) - now <= ENTER_TTL + CLOCK_SKEW
+    if int(exp) - now > ENTER_TTL + CLOCK_SKEW:
+        return f"만료가 너무 먼 링크(학원 사이트 서버 시계가 {int(int(exp) - now - ENTER_TTL)}초 빠를 수 있음)"
+    return None
 
 
 def make_pass(secret: str, now: float) -> str:
