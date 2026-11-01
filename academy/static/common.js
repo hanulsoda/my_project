@@ -106,6 +106,15 @@ function weekCard() {
     el("p", { class: "streak" }, streak ? `${streak}일째 이어서 공부하는 중` : "오늘 강의를 보면 1일째가 됩니다"));
 }
 
+// 강의 제목(폴더/…/작품)을 강의 목록 줄처럼 작품 이름과 그 아래 작은 위치(2022개정 · 고1 · 미래엔)로 보입니다.
+// 선생님 말 결과·복습·내 메모의 강의 이름. href를 주면 이름이 그 강의로 가는 링크가 됩니다.
+function lectureName(title, href) {
+  const parts = title.split("/"), name = parts.pop();
+  return [href ? el("a", { href }, name) : name, ...(parts.length ? [el("span", { class: "lecture-where" }, parts.join(" · "))] : [])];
+}
+// 한 줄 글 안에서 쓸 때: '청산별곡 (2022개정 · 고1 · 미래엔)'
+const lectureLabel = (title) => { const parts = title.split("/"), name = parts.pop(); return parts.length ? `${name} (${parts.join(" · ")})` : name; };
+
 // 강의 줄에 붙이는 본 데까지(강의 목록·이번 주 강의): 다 봤으면 '다 봄', 아니면 막대와 '20:34까지'. 길이를 모르는 기록은 표시하지 않습니다.
 function watchedMark(videoId) {
   const pos = store.get(`pos:${videoId}`);

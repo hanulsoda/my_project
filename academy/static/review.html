@@ -99,7 +99,7 @@
           : el("a", { class: "link", href: `watch.html?id=${w.id}&t=${Math.floor(q.time)}` }, `▶ ${fmt(q.time)} 설명 다시 보기`);
         if (!drawn++) loading.before(progress, rule);
         loading.before(el("section", { class: "review-lecture" },
-          el("h2", {}, el("a", { href: `watch.html?id=${w.id}` }, lecture.title)),
+          el("h2", {}, ...lectureName(lecture.title, `watch.html?id=${w.id}`)),
           ...shown.map((q) => quizCard(q, quiz.indexOf(q) + 1, (right) => answer(w.id, q, right), replay))));
       }
       loading.replaceWith(end);

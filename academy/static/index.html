@@ -292,18 +292,18 @@
         return [ul, more];
       };
       const spoken = (r) => el("li", {},
-        el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+        ...lectureName(r.title, `watch.html?id=${r.id}`), " ",
         ...r.times.flatMap((t, i) => [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(t)}` },
           fmt(t), ...(r.chapters[i] ? [` · ${r.chapters[i]}`] : [])), " "]),
         el("span", { class: "meta" }, `${r.count}번 말함`),
         ...(r.heard_as ? [el("p", { class: "also" }, `받아 적힌 말: ${r.heard_as.map((w) => `‘${w}’`).join(", ")}`)] : []),
-        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []));
+        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.map(lectureLabel).join(", ")}`)] : []));
       const noted = (r) => el("li", {},
-        el("a", { href: `watch.html?id=${r.id}` }, r.title), " ",
+        ...lectureName(r.title, `watch.html?id=${r.id}`), " ",
         ...r.matches.flatMap((m) => m.time == null
           ? [el("p", { class: "also" }, m.text)]
           : [el("a", { class: "time", href: `watch.html?id=${r.id}&t=${Math.floor(m.time)}` }, `${fmt(m.time)} · ${m.text}`), " "]),
-        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.join(", ")}`)] : []));
+        ...(r.also.length ? [el("p", { class: "also" }, `같은 녹화: ${r.also.map(lectureLabel).join(", ")}`)] : []));
       // 아무 데서도 찾지 못했으면 다음에 해 볼 것을 알려 줍니다(제목에서 찾기).
       const none = !found.exact.length && !found.similar.length && !found.notes.length;
       if (none) {

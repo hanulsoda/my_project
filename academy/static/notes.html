@@ -50,7 +50,8 @@
       box.replaceChildren(...(listFailed ? [el("p", { class: "notice" }, `강의 이름을 불러오지 못했습니다. ${OFFLINE}`)] : []),
         ...(shown.length ? [] : [el("p", { class: "notice" }, `‘${filter.value.trim()}’에 맞는 메모가 없습니다.`)]),
         ...shown.map(({ id, items }) => el("section", { class: "review-lecture", "data-id": id },
-        el("h2", {}, titles.has(id) || listFailed ? el("a", { href: `watch.html?id=${id}` }, name(id)) : name(id)),
+        el("h2", {}, ...(titles.has(id) ? lectureName(titles.get(id), `watch.html?id=${id}`)
+          : [listFailed ? el("a", { href: `watch.html?id=${id}` }, name(id)) : name(id)])),
         el("ul", { class: "notes" }, ...items.map((n, i) => el("li", {},
           el("a", { class: "time", href: `watch.html?id=${id}&t=${Math.floor(n.t)}` }, fmt(n.t)),
           el("span", { class: "note-text" }, n.text || "🔖 북마크"),

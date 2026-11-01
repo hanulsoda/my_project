@@ -426,6 +426,7 @@ button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .found-list li + li { border-top: 1px solid var(--border); }
 .found-list li > a:first-child { color: inherit; font-weight: 600; text-decoration: none; }
 .found-list .also { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.lecture-where { display: block; margin-top: 1px; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.5; }  /* 강의 이름 아래 위치 */
 a.time { display: inline-block; text-decoration: none; }
 .found-list + .more { margin: -8px 0 16px; }  /* 찾은 결과 바로 아래 '더 보기' */
 

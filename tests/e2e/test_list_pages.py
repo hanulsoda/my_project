@@ -407,6 +407,25 @@ def test_search_messages_say_what_went_wrong_and_what_to_do_next(page, site):
     expect(page.locator("#found .found-list .meta").first).to_have_text("5번 말함")  # '5번'만으로는 무엇인지 몰랐음
 
 
+def test_lectures_are_named_with_their_place_instead_of_a_slash_path(page, site):
+    vid = site.ids[ZMG]
+    remember(page, site, {f"notes:{vid}": [{"t": 10, "text": "메모"}],
+                          f"wrong:{vid}": [{"k": "제망매가의 갈래는?", "stage": 0, "due": 0}], "list": {"scope": "spoken"}})
+    for path, heading in [("/notes.html", "#notes-page h2"), ("/review.html", ".review-lecture h2")]:
+        page.goto(site.url + path)
+        expect(page.locator(heading).first.locator("a")).to_have_text("제망매가")  # 강의 목록 줄처럼 이름
+        expect(page.locator(heading).first).to_contain_text("2022개정 · 고1 · 미래엔")  # 그 아래 위치
+        expect(page.locator(heading).first).not_to_contain_text("/")
+
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    row = page.locator("#found .found-list li").first
+    expect(row.locator("a").first).to_have_text("제망매가")
+    expect(row).to_contain_text("2022개정 · 고1 · 미래엔")
+    expect(row).not_to_contain_text("/")  # '같은 녹화'도 이름으로
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()
