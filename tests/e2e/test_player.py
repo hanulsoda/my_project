@@ -589,6 +589,29 @@ def test_a_phone_on_its_side_shows_the_video_and_the_study_tabs_together(phone, 
     assert on_screen(page, page.locator(".chapter button.time").first)  # 요점 정리도 영상 옆에 보임
 
 
+def messages_stay_in_view(page, site):
+    """영상 아래 안내(재생할 수 없음·북마크 등)가 높이가 낮은 화면에서도 내리지 않고 보이는지"""
+    page.route("**/media/**", lambda route: route.fulfill(status=200, content_type="video/mp4", body="아직 올리는 중"))
+    page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
+    expect(page.locator(".chapter").first).to_be_visible()
+    status = page.locator("#status")
+    expect(status).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")
+    assert on_screen(page, status)
+    page.locator("#bookmark-btn").click()
+    expect(status).to_contain_text("북마크했습니다")
+    assert on_screen(page, status)
+
+
+@pytest.mark.parametrize("width, height", [(844, 390), (740, 360)])
+def test_messages_under_the_video_stay_in_view_on_a_phone_on_its_side(phone, site, width, height):
+    messages_stay_in_view(phone(width, height), site)
+
+
+def test_messages_under_the_video_stay_in_view_in_a_short_window(page, site):
+    page.set_viewport_size({"width": 853, "height": 380})  # 옆으로 눕힌 휴대폰과 같은 모양
+    messages_stay_in_view(page, site)
+
+
 BLOCKED_STORAGE = """Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
     get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });"""
 

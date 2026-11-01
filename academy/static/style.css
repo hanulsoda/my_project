@@ -706,7 +706,10 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
   .watch-page .top { padding-top: 4px; padding-bottom: 4px; }
   .top .heading { min-height: 0; }
   .watch { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); gap: 12px; padding: 0 16px; }
-  .player { min-height: 0; overflow-y: auto; padding: 8px 0 12px; scrollbar-width: none; }
+  .player { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 8px 0 12px; scrollbar-width: none; }
+  .player > * { flex: none; }
+  /* 안내(재생할 수 없음·끊김·북마크 등)는 영상 바로 아래, 단추 위에: 단추 아래에 두면 내려야만 보이는 화면 밖에 있었습니다 */
+  .player .controls { order: 1; }
   .player video { max-height: calc(100dvh - 70px); }
   .panel { min-height: 0; margin: 8px 0 12px; }
 }
