@@ -1045,7 +1045,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     @app.get("/api/status")
     def status(request: Request):
-        """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 페이지만)과 자동 목차 진행률"""
+        """선생님용 현황: 강의마다 학생이 받는 것(Claude 요점 정리 > 학원 정리 > 자동 목차 > 영상만)과 자동 목차 진행률"""
         if entry_secret and outside(request):
             require_teacher(request)  # 인터넷에서는 입장한 학생도 이용 통계·운영 기록을 보지 못하게
         counts = {"guide": 0, "summary": 0, "toc": 0, "pages": 0}
