@@ -73,9 +73,10 @@
       try { history.replaceState({ ...history.state, list: { q: search.value, found: foundHere } }, ""); } catch {}  // 너무 자주 바꾸면 사파리가 막음
     };
     let folders = [], total = 0, loaded = false, showingFound = false, side = null, searchSeq = 0;
+    let again = false;  // 돌아와서 다시 찾는 중: 결과가 오면 그 결과에서 연 강의가 보이게 합니다(showOpened)
     const closeFound = () => { showingFound = false; foundHere = false; };
     const findAgain = () => {  // 결과를 보던 화면으로 돌아왔으면 다시 찾아 보여 줍니다
-      if (foundHere && scope === "spoken" && search.value.trim()) $("tools").requestSubmit();
+      if (foundHere && scope === "spoken" && search.value.trim()) { again = true; $("tools").requestSubmit(); }
     };
     // 찾을 곳마다 찾지 못한 낱말: 다른 곳에서도 이미 못 찾은 낱말이면 그쪽에서 찾아보라고 권하지 않습니다(제목 ↔ 선생님 말을 오가지 않게).
     const notFound = { title: "", spoken: "" };
@@ -215,16 +216,17 @@
     });
     // 긴 폴더에서 강의를 보고 뒤로 가기로 돌아오면 연 강의가 보이게 합니다. 목록은 서버에서 받은 뒤에 만들어 브라우저가 스크롤 자리를
     // 되살리지 못하고(사파리는 화면을 다시 불러옴), 화면 밖 줄은 어림한 높이로 잡혀 있어 스크롤 위치(px)로는 다른 줄에 섭니다.
+    // 선생님 말 결과(#found)도 같습니다: 돌아와서 다시 찾은 결과가 온 뒤에 그 자리로 갑니다.
     history.scrollRestoration = "manual";
     document.querySelector(".content-body").addEventListener("click", (e) => {
-      const a = e.target.closest(".video-list a");
+      const a = e.target.closest(".video-list a, #found a");
       if (a) try { sessionStorage.setItem("opened", JSON.stringify({ hash: location.hash, href: a.getAttribute("href") })); } catch {}
     });
     const showOpened = () => {  // 뒤로 가기·새로 고침으로 왔을 때만(폴더 링크로 새로 열면 맨 위부터)
       let opened = null;
       try { opened = JSON.parse(sessionStorage.getItem("opened")); } catch {}
       if (performance.getEntriesByType("navigation")[0]?.type === "navigate" || !opened || opened.hash !== location.hash) return;
-      [...document.querySelectorAll(`.content-body .video-list a[href="${CSS.escape(opened.href)}"]`)]
+      [...document.querySelectorAll(`.content-body :is(.video-list, #found) a[href="${CSS.escape(opened.href)}"]`)]
         .find((a) => a.offsetParent)?.scrollIntoView({ block: "center" });
     };
     const reveal = () => { if (current().kind === "folder") side.reveal(current().name); };  // 고른 하위 폴더가 사이드바에 보이게
@@ -287,7 +289,8 @@
     $("tools").onsubmit = async (e) => {
       e.preventDefault();
       if (scope === "title") return;  // 제목은 입력하는 대로 걸러 보여 줍니다
-      const q = search.value.trim(), box = $("found"), seq = ++searchSeq;
+      const q = search.value.trim(), box = $("found"), seq = ++searchSeq, back = again;
+      again = false;
       showingFound = foundHere = true;
       render();
       box.replaceChildren(el("p", { class: "notice" }, "찾는 중…"));
@@ -353,6 +356,7 @@
           el("h2", {}, `요점 정리·목차에 나오는 강의 ${found.notes.length}개`),
           el("p", { class: "notice" }, "선생님 말에서는 찾지 못했지만 요점 정리나 목차에 적혀 있는 강의입니다."),
           ...paged(found.notes, noted)] : []));
+      if (back) showOpened();
     };
 
     fetch("/api/videos").then((r) => (r.ok ? r.json() : Promise.reject())).then((videos) => {

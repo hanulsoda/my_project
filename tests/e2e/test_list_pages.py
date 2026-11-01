@@ -274,6 +274,32 @@ def test_the_player_back_button_returns_to_the_same_place_in_a_long_folder(phone
     assert on_screen(page, row)
 
 
+@pytest.mark.parametrize("width", [1200, 390], ids=["desktop", "phone"])
+def test_back_from_a_spoken_search_result_returns_to_that_result(phone, site, width):
+    page = phone(width, 844)
+    real = site.ids[ZMG]
+    page.route("**/api/search?**", lambda route: route.fulfill(json={  # 선생님 말 결과 30개
+        "exact": [{"id": real, "title": f"2022개정/고1/미래엔/결과 {i:02d}", "times": [10.0 + i], "chapters": [""],
+                   "count": 1, "also": []} for i in range(30)], "similar": [], "notes": []}))
+    remember(page, site, {"list": {"scope": "spoken"}})
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    row = page.locator("#found li", has_text="결과 25").locator("a.time")
+    row.scroll_into_view_if_needed()
+    row.click()
+    expect(page.locator("#back")).to_have_text("강의")
+    page.locator("#back").click()
+
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    page.wait_for_timeout(300)
+    assert on_screen(page, row)  # 결과 맨 위가 아니라 연 결과 자리
+    page.reload()  # 사파리는 뒤로 가기로 되살린 화면을 다시 불러옵니다(common.js)
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    page.wait_for_timeout(300)
+    assert on_screen(page, row)
+
+
 def test_spoken_results_come_back_after_passing_through_a_folder(page, site):
     remember(page, site, {"list": {"scope": "spoken"}})
     page.goto(site.url + "/")
