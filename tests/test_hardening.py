@@ -214,3 +214,130 @@ def test_an_empty_analysis_file_left_by_a_power_cut_is_analyzed_again(tmp_path):
 
     assert analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide) == 0
     assert rec.transcribed == ["1강.mp4"] and load_analysis(tmp_path / "data", ids["1강"])["guide"]
+
+
+# ---- 재검토: 한 사람이 모두를 막거나 서버를 붙잡지 못하게 ----
+
+def test_searches_waiting_in_line_do_not_hold_the_workers_videos_need(site, monkeypatch):
+    video_dir, data_dir, _, vid = site
+    monkeypatch.setattr(server, "SEARCH_WAITERS", 2)
+    client = TestClient(create_app(video_dir, data_dir, None))
+    client.get("/api/videos")
+    real_near = server._near
+    monkeypatch.setattr(server, "_near", lambda *a, **k: time.sleep(1.0) or real_near(*a, **k))  # 낱말마다 1초 걸림
+    answers = []
+    threads = [threading.Thread(target=lambda w=f"낱말{n}가": answers.append(
+        client.get("/api/search", params={"q": w}).status_code)) for n in range(6)]
+    started = time.monotonic()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert answers.count(503) >= 3  # 줄이 차면 기다리지 않고 바로 "잠시 뒤"(줄 선 요청이 작업자를 붙잡지 않게)
+    assert time.monotonic() - started < 4  # 6개가 1초씩 줄 서지 않음
+
+
+def test_one_network_guessing_from_the_internet_does_not_lock_out_everyone(site, monkeypatch):
+    video_dir, data_dir, _, _ = site
+    monkeypatch.setattr(server, "GUESSES_PER_HOUR", 5)
+    secret = "s" * 40
+    app = create_app(video_dir, data_dir, None, teacher_key="teacher-key-1234", entry_secret=secret)
+
+    def from_(address):
+        c = TestClient(app, client=(address, 1))
+        c.cookies.set(server.PASS_COOKIE, server.make_pass(secret, time.time()))
+        return c
+    for n in range(12):  # 한 곳에서 주소를 바꿔 가며
+        from_(f"203.0.113.{n}").post("/api/transfer/123456")
+    assert from_("203.0.113.200").post("/api/transfer/654321").status_code == 429  # 그 망은 막힘
+
+    code = from_("198.51.100.7").post("/api/transfer", json={"data": {"speed": 1.5}}).json()["code"]
+    assert from_("198.51.100.8").post(f"/api/transfer/{code}").status_code == 200  # 다른 학생은 그대로
+
+
+def test_internet_codes_cannot_fill_the_transfer_space_for_the_academy(site, monkeypatch):
+    video_dir, data_dir, _, vid = site
+    monkeypatch.setattr(server, "TRANSFER_BYTES", 40_000)
+    secret = "s" * 40
+    app = create_app(video_dir, data_dir, None, entry_secret=secret)
+    outsider = TestClient(app, client=("203.0.113.5", 1))
+    outsider.cookies.set(server.PASS_COOKIE, server.make_pass(secret, time.time()))
+    big = {"data": {f"notes:{vid}": [{"t": 1, "text": "가" * 3000}]}}
+
+    answers = [outsider.post("/api/transfer", json=big).status_code for _ in range(10)]
+
+    assert 503 in answers  # 인터넷 몫이 차면 그 기기는 잠시 뒤
+    assert TestClient(app, client=("192.168.0.9", 1)).post("/api/transfer", json=big).status_code == 200  # 학원 안은 그대로
+    small = outsider.post("/api/transfer", json={"data": {"speed": 1.0}}).status_code
+    assert small != 429  # 거절된 시도까지 세어 '너무 많이 만들었습니다'가 되지 않음
+
+
+def test_an_unreadable_analysis_file_only_takes_that_lecture_out(site, monkeypatch):
+    video_dir, data_dir, _, vid = site
+    (video_dir / "2강.mp4").write_bytes(b"xy")
+    other = next(v["id"] for v in find_videos(video_dir) if v["title"] == "2강")
+    save_analysis(data_dir, other, {"title": "2강", "duration": 2.0, "segments": SEGMENTS, "guide": None})
+    real = server.load_analysis
+
+    def locked(d, video_id):
+        if video_id == other:
+            raise PermissionError(13, "Permission denied")  # 다른 계정이 만든 파일
+        return real(d, video_id)
+    monkeypatch.setattr(server, "load_analysis", locked)
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    assert {v["id"]: v["analyzed"] for v in client.get("/api/videos").json()} == {vid: True, other: False}
+    assert client.get("/api/search", params={"q": "안녕하세요"}).status_code == 200
+    assert client.get("/api/status").status_code == 200
+    monkeypatch.setattr(server, "load_analysis", real)  # 권한을 고치면 다시 읽음(목록은 1분 안에)
+    assert client.get("/api/status").json()["analyzed"] == 2
+
+
+def test_only_device_transfer_takes_big_requests(site):
+    video_dir, data_dir, _, vid = site
+    client = TestClient(create_app(video_dir, data_dir, None))
+    big = "가" * 120_000  # 약 360KB
+
+    assert client.post("/api/quiz-result", content=json.dumps({"id": vid, "key": big, "right": True}),
+                       headers={"content-type": "application/json"}).status_code == 413
+    assert client.post("/api/transfer", json={"data": {"speed": 1.0, "other": big}}).status_code == 200
+
+
+def test_a_made_up_lecture_number_does_not_throw_away_everyones_search_answers(site, monkeypatch):
+    video_dir, data_dir, _, _ = site
+    client = TestClient(create_app(video_dir, data_dir, None))
+    client.get("/api/search", params={"q": "안녕하세요"})
+    real_find, real_near, scans, searched = server.find_videos, server._near, [], []
+    monkeypatch.setattr(server, "find_videos", lambda d: scans.append(1) or real_find(d))
+    monkeypatch.setattr(server, "_near", lambda *a, **k: searched.append(1) or real_near(*a, **k))
+    monkeypatch.setattr(server, "MISS_SECONDS", 0)
+
+    client.get("/api/videos/0123456789ab")  # 없는 번호: 뒤에서 다시 훑음
+    deadline = time.monotonic() + 5
+    while not scans and time.monotonic() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.1)
+    answer = client.get("/api/search", params={"q": "안녕하세요"}).json()
+
+    assert answer["exact"] and not searched  # 강의 목록이 그대로면 찾아 둔 답을 씀(다시 찾지 않음)
+
+
+def test_an_infinite_length_written_by_hand_does_not_break_search_for_everyone(site):
+    video_dir, data_dir, _, vid = site
+    (video_dir / "2강.mp4").write_bytes(b"xy")
+    other = next(v["id"] for v in find_videos(video_dir) if v["title"] == "2강")
+    (data_dir / f"{other}.json").write_text('{"title": "2강", "duration": Infinity, "segments": '
+                                            '[{"start": 0.0, "end": 2.0, "text": "안녕하세요"}], "guide": null}',
+                                            encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None))
+
+    assert client.get("/api/search", params={"q": "안녕하세요"}).status_code == 200
+
+
+def test_the_proxy_address_is_recognized_when_the_server_listens_on_ipv6(site):
+    video_dir, data_dir, _, _ = site
+    app = create_app(video_dir, data_dir, None, entry_secret="s" * 40, proxy_addrs=("192.168.0.2",))
+
+    # uvicorn --host :: 이면 IPv4 주소가 ::ffff:192.168.0.2 모양으로 옵니다
+    assert TestClient(app, client=("::ffff:192.168.0.2", 1)).get("/api/videos").status_code == 401

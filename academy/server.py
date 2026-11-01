@@ -3,8 +3,10 @@
 실행: uvicorn academy.server:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import gzip
 import hashlib
+import math
 import html
 import ipaddress
 import json
@@ -54,10 +56,14 @@ NEAR_MAX = 10          # 받아쓰기가 한 소리 다르게 적은 말 찾기�
 LOG_WRITES_PER_HOUR = 600  # 한 기기가 1시간에 남기는 퀴즈 결과·강의 열기 기록 상한(평소 학생은 닿지 않음, 넘으면 기록만 안 함)
 TRANSFERS_PER_DEVICE = 10  # 한 기기가 10분에 만들 수 있는 기기 옮기기 코드 수
 TRANSFER_BYTES = 50_000_000  # 기기 옮기기로 맡아 두는 기록 전체 상한(넘으면 잠시 뒤 다시)
-GUESSES_PER_HOUR = 100  # 인터넷에서 선생님 열쇠·옮기기 코드를 틀린 횟수, 서버 전체 상한(주소를 바꿔 가며 맞혀 보지 못하게)
+GUESSES_PER_HOUR = 100  # 인터넷의 한 망(IPv4 /24, IPv6 /64)이 1시간에 선생님 열쇠·옮기기 코드를 틀릴 수 있는 횟수
+#                        (주소를 바꿔 가며 맞혀 보지 못하게. 서버 전체는 그 20배: 한 사람이 모두를 막지 못하게)
 SEARCH_WAIT = 20  # 다른 낱말을 찾는 동안 이만큼만 기다립니다(넘으면 잠시 뒤 다시)
+SEARCH_WAITERS = 4  # 다른 낱말을 찾는 동안 줄 설 수 있는 검색 수. 줄 선 요청이 영상·목록을 처리할 작업자를 붙잡지 않게
 RECORD_KEY = re.compile(r"(pos|notes|wrong|score):[0-9a-f]{12}|study|speed")  # 기기 옮기기로 맡는 기록(common.js와 같게)
-MAX_BODY = 4 * 1024 * 1024  # 요청 본문 최대 크기. 기기 옮기기(기록 2MB까지)는 받고, 그보다 큰 요청으로 메모리를 채우지 못하게
+MAX_BODY = 4 * 1024 * 1024  # 기기 옮기기(기록 2MB까지) 요청 본문 최대 크기
+SMALL_BODY = 256 * 1024  # 다른 요청 본문 최대 크기(질문하기 대화 기록 2만 자도 들어감): 큰 요청을 읽느라 메모리를 채우지 못하게
+TRANSFERS_READ_AT_ONCE = 2  # 한꺼번에 읽는 기기 옮기기 요청 수(4MB 요청을 읽고 푸는 동안 메모리가 크게 늘어서)
 PASS_COOKIE = "study_pass"
 LOGIN_NOTICE = "학원 사이트에 로그인한 뒤 들어와 주세요"
 LAN_ONLY_NOTICE = "학습 플레이어는 인터넷으로는 열려 있지 않습니다. 학원 안에서 접속해 주세요."
@@ -97,7 +103,7 @@ def _where(request, proxies=()) -> str:
     """
     # 머리글이 여러 줄로 오면 이어 붙여 봅니다(uvicorn과 같은 방식).
     forwarded = ",".join(request.headers.getlist("x-forwarded-for"))
-    if not forwarded and request.client and request.client.host in proxies:
+    if not forwarded and request.client and _plain(request.client.host) in {_plain(p) for p in proxies}:
         return "internet"
     if forwarded:
         host = forwarded.split(",")[-1].strip()
@@ -111,6 +117,38 @@ def _where(request, proxies=()) -> str:
         # 프록시가 보낸 주소를 읽을 수 없으면(머리글 값 잘못 적음, 포트가 붙음 등) 인터넷으로 봅니다.
         return "internet" if forwarded else "unknown"
     return "lan" if _inside(address) else "internet"
+
+
+def _plain(host):
+    """주소를 한 모양으로(uvicorn --host :: 이면 IPv4가 ::ffff:192.168.0.2로 옵니다)."""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    return str(address.ipv4_mapped or address) if address.version == 6 else str(address)
+
+
+def _real_host(request):
+    """실제 접속 주소(프록시가 X-Forwarded-For 맨 오른쪽에 붙인 것, 없으면 연결한 주소)."""
+    forwarded = ",".join(request.headers.getlist("x-forwarded-for"))
+    return forwarded.split(",")[-1].strip() if forwarded else (request.client.host if request.client else "")
+
+
+def _network(host):
+    """같은 곳으로 보는 망: IPv4는 /24, IPv6는 /64(주소 하나만 바꿔 가며 다른 사람인 척하지 못하게)."""
+    try:
+        address = ipaddress.ip_address(_plain(host))
+    except ValueError:
+        return host
+    return str(ipaddress.ip_network(f"{address}/{24 if address.version == 4 else 64}", strict=False))
+
+
+def _finite(value):
+    """손으로 고친 분석 파일의 Infinity·NaN 시각·길이는 형식 오류로 봅니다(검색 등이 모두에게 오류 나지 않게)."""
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"시각이 숫자가 아님: {value}")
+    return number
 
 
 def _from_outside(request, proxies=()) -> bool:
@@ -242,14 +280,22 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                                 status_code=403)
 
     # 입장 확인보다 먼저 요청 크기를 봅니다. 본문을 읽기 전에 거절해야 서버 메모리를 지킵니다.
+    transfer_reads = asyncio.Semaphore(TRANSFERS_READ_AT_ONCE)
+
     @app.middleware("http")
     async def limit_body(request: Request, call_next):
         if request.method in ("POST", "PUT", "PATCH"):
             length = request.headers.get("content-length", "")
             if not length.isdigit():
                 return JSONResponse({"detail": "요청 크기를 알 수 없습니다"}, status_code=411)
-            if int(length) > MAX_BODY:
+            transfer = request.method == "POST" and request.url.path == "/api/transfer"  # 큰 본문은 기기 옮기기만
+            if int(length) > (MAX_BODY if transfer else SMALL_BODY):
                 return JSONResponse({"detail": "요청이 너무 큽니다"}, status_code=413)
+            if transfer and int(length) > SMALL_BODY:
+                if transfer_reads.locked():
+                    return JSONResponse({"detail": "잠시 뒤 다시 해 주세요"}, status_code=503)
+                async with transfer_reads:
+                    return await call_next(request)
         return await call_next(request)
 
     @app.middleware("http")
@@ -278,7 +324,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                        httponly=True, samesite="lax", secure=https)
         return res
 
-    library = {"at": None, "videos": [], "by_id": {}, "empty": False}  # empty: 마지막으로 훑을 때 영상 폴더가 비어 보임
+    # empty: 마지막으로 훑을 때 영상 폴더가 비어 보임. version: 강의 목록이 달라질 때만 바뀜(찾아 둔 목록·검색 답의 열쇠:
+    # 없는 번호로 다시 훑게 해도 같은 목록이면 모두의 답을 버리지 않게)
+    library = {"at": None, "videos": [], "by_id": {}, "empty": False, "version": 0}
     scan_lock = Lock()
 
     def scan(max_age):
@@ -296,6 +344,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                         v["added"] = int(v["path"].stat().st_mtime)
                     except OSError:
                         v["added"] = 0
+                if [(v["id"], v["title"], v["added"]) for v in videos] != [
+                        (v["id"], v["title"], v["added"]) for v in library["videos"]]:
+                    library["version"] += 1
                 library.update(at=monotonic(), videos=videos, by_id={v["id"]: v for v in videos})
 
     def current_library():
@@ -350,6 +401,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             data = load_analysis(data_dir, video_id)
         except ValueError:  # JSON 형식 오류(JSONDecodeError)·글자 깨짐
             data = []
+        except OSError as e:  # 권한 없음·NAS 입출력 오류 등: 이 강의만 '분석 전'(고치면 다시 읽음)
+            logging.warning("분석 파일을 읽지 못해 건너뜀: %s.json (%s)", video_id, e.strerror or e)
+            return None
         if data is None or isinstance(data, dict):
             return data
         logging.warning("분석 파일 형식 오류로 건너뜀: %s.json", video_id)  # 깨졌거나, 내용이 통째로 목록·숫자 등으로 바뀜
@@ -364,16 +418,18 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         stamp = (stat.st_mtime_ns, stat.st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
             data, entry = read_analysis(video_id), None
+            if data is None:  # 읽지 못함(권한 등): 기억하지 않고 다음에 다시 읽어 봅니다
+                return None
             try:  # 파일이 다시 바뀔(고쳐질) 때까지 '분석 전': 깨졌거나 모양이 다른 파일(손으로 고침) 하나가 모두의 목록을 멈추지 않게
                 if data is not None:
-                    spoken = [(_norm(s["text"]), float(s["start"])) for s in data.get("segments") or []]
+                    spoken = [(_norm(s["text"]), _finite(s["start"])) for s in data.get("segments") or []]
                     chapters = ((data.get("guide") or {}).get("chapters") or (data.get("toc") or {}).get("chapters") or [])
                     entry = {
                         "guide": bool(data.get("guide")), "toc": bool((data.get("toc") or {}).get("chapters")),
-                        "toc_tried": "toc" in data, "duration": float(data.get("duration") or 0), "modified": stamp[0] / 1e9,
+                        "toc_tried": "toc" in data, "duration": _finite(data.get("duration") or 0), "modified": stamp[0] / 1e9,
                         "toc_at": float((data.get("toc") or {}).get("at") or 0),  # 목차를 만든 때(예전 목차는 0: 파일 날짜로)
                         "guide_failed": int(data.get("guide_failures") or 0) >= GUIDE_TRIES and not data.get("guide"),
-                        "chapters": sorted((float(c["start"]), str(c["title"])) for c in chapters),
+                        "chapters": sorted((_finite(c["start"]), str(c["title"])) for c in chapters),
                         "text": "".join(t for t, _ in spoken),
                         "offsets": list(accumulate((len(t) for t, _ in spoken), initial=0))[:-1],
                         "times": [start for _, start in spoken]}
@@ -420,7 +476,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     def listing():
         current_library()
-        key = (library["at"], stamp(data_dir), stamp(fixes_path), int(monotonic() // 60))
+        key = (library["version"], stamp(data_dir), stamp(fixes_path), int(monotonic() // 60))
         with list_lock:  # 한 명이 만드는 동안 나머지는 기다렸다가 그 답을 씁니다
             if list_cache["key"] != key:
                 body = json.dumps(built_list(), ensure_ascii=False, separators=(",", ":")).encode()
@@ -447,7 +503,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """
         word = _search_word(q)
         current_library()
-        key = (word, library["at"], stamp(data_dir), stamp(fixes_path), analyses_version())
+        key = (word, library["version"], stamp(data_dir), stamp(fixes_path), analyses_version())
         found = searches.get(key)  # 찾아 둔 답은 다른 낱말을 찾는 동안 줄 서지 않고 바로 씁니다
         if found is not None:
             return found
@@ -456,7 +512,14 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             raise HTTPException(429, "검색을 너무 자주 했습니다. 잠시 뒤 다시 해 주세요")
         # 한 번에 하나씩 찾습니다(어차피 CPU를 나눠 써서 함께 돌려도 빠르지 않음). 수업 중 여러 학생이 같은 낱말을 찾으면
         # 처음 찾은 결과를 함께 씁니다. 새 강의·분석 저장·정리 고치기가 있으면 다시 찾습니다.
-        if not search_lock.acquire(timeout=SEARCH_WAIT):
+        # 줄이 차 있으면 기다리지 않고 바로 돌려보냅니다: 줄 선 요청도 작업자를 하나씩 붙잡아, 많이 쌓이면 영상·목록이 멈춥니다.
+        if not search_line.acquire(blocking=False):
+            raise HTTPException(503, "찾는 학생이 많습니다. 잠시 뒤 다시 해 주세요")
+        try:
+            got = search_lock.acquire(timeout=SEARCH_WAIT)
+        finally:
+            search_line.release()
+        if not got:
             raise HTTPException(503, "찾는 학생이 많습니다. 잠시 뒤 다시 해 주세요")
         try:
             if key not in searches:
@@ -467,7 +530,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         finally:
             search_lock.release()
 
-    searches, search_lock = {}, Lock()
+    searches, search_lock, search_line = {}, Lock(), BoundedSemaphore(SEARCH_WAITERS)
     analyses_seen = {"minute": None, "version": None}
 
     def analyses_version():
@@ -697,28 +760,41 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     # 마구 넣어 보기 막기: 기기마다 틀린 횟수를 세어 limit번 틀리면 10분 동안 429
     misses = {"key": {}, "code": {}}  # 종류 → 기기 주소 → (틀린 횟수, 마지막으로 틀린 시각)
-    outside_misses = {"key": deque(), "code": deque()}  # 종류 → 최근 1시간 동안 인터넷에서 틀린 시각들(서버 전체)
+    # 종류 → 인터넷 망(또는 "*": 서버 전체) → 최근 1시간 동안 틀린 시각들. 한 망이 넘치면 그 망만 막아, 한 사람이 주소를
+    # 바꿔 가며 틀려도 다른 학생·선생님은 막히지 않습니다. 서버 전체는 그 20배(여러 곳에서 한꺼번에 맞혀 보는 것).
+    outside_misses = {"key": {}, "code": {}}
+    guess_lock = Lock()
 
     def guard(kind, request, limit, message):
         host = request.client.host if request.client else ""
-        count, last = misses[kind].get(host, (0, 0))
-        if count >= limit and wall_clock() - last < 600:
-            raise HTTPException(429, message)
-        recent = outside_misses[kind]
-        while recent and wall_clock() - recent[0] >= 3600:
-            recent.popleft()
-        if len(recent) >= GUESSES_PER_HOUR and outside(request):  # 학원 안의 선생님은 막지 않습니다
-            raise HTTPException(429, message)
+        with guess_lock:
+            count, last = misses[kind].get(host, (0, 0))
+            if count >= limit and wall_clock() - last < 600:
+                raise HTTPException(429, message)
+            if outside(request):  # 학원 안의 선생님은 막지 않습니다
+                recent = outside_misses[kind]
+                for name, cap in [(_network(_real_host(request)), GUESSES_PER_HOUR), ("*", GUESSES_PER_HOUR * 20)]:
+                    times = recent.get(name, ())
+                    if sum(wall_clock() - t < 3600 for t in times) >= cap:
+                        raise HTTPException(429, "틀린 시도가 많아 잠시 막았습니다. 잠시 뒤 다시 해 주세요")
         return host
 
     def missed(kind, request, host):
         now = wall_clock()
-        if len(misses[kind]) > 10000:  # 오래된 기기 기록 정리(메모리에 계속 쌓이지 않게)
-            misses[kind] = {h: (c, t) for h, (c, t) in misses[kind].items() if now - t < 600}
-        count, last = misses[kind].get(host, (0, 0))
-        misses[kind][host] = (count + 1 if now - last < 600 else 1, now)
-        if outside(request):
-            outside_misses[kind].append(now)
+        with guess_lock:
+            if len(misses[kind]) > 10000:  # 오래된 기기 기록 정리(메모리에 계속 쌓이지 않게)
+                misses[kind] = {h: (c, t) for h, (c, t) in misses[kind].items() if now - t < 600}
+            count, last = misses[kind].get(host, (0, 0))
+            misses[kind][host] = (count + 1 if now - last < 600 else 1, now)
+            if outside(request):
+                recent = outside_misses[kind]
+                if len(recent) > 10000:
+                    outside_misses[kind] = recent = {n: d for n, d in recent.items() if d and now - d[-1] < 3600}
+                for name in (_network(_real_host(request)), "*"):
+                    times = recent.setdefault(name, deque())
+                    while times and now - times[0] >= 3600:
+                        times.popleft()
+                    times.append(now)
 
     def require_teacher(request):
         host = guard("key", request, 10, "선생님 열쇠를 여러 번 틀려 10분 동안 막았습니다")
@@ -732,7 +808,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     # ---- 기기 옮기기: 학생 기록(메모·진도·틀린 문제 등)을 6자리 코드로 잠깐 맡겼다가 다른 기기가 한 번 찾아 갑니다 ----
     # 서버 메모리에만 두고(파일에 남기지 않음) 10분이 지나거나 한 번 찾아 가면 지웁니다.
-    transfers = {}  # 코드 → (기록 JSON 글, 사라지는 시각)
+    transfers = {}  # 코드 → (기록 JSON 글, 사라지는 시각, 맡긴 곳: "lan" 또는 인터넷 망)
     made = {}  # 기기 주소 → 최근 10분 동안 코드를 만든 시각들(한 기기가 코드 자리를 다 차지하지 못하게)
     transfer_lock = Lock()
 
@@ -745,28 +821,35 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if len(body) > 2_000_000:  # 2MB: 강의 3,900개의 진도를 다 담아도 0.3MB쯤
             raise HTTPException(413, "기록이 너무 큽니다")
         now, host = wall_clock(), request.client.host if request.client else ""
+        # 학원 안과 인터넷이 자리를 반씩 나눠 쓰고, 인터넷의 한 망은 그중 5분의 1까지: 인터넷 몇 곳이 자리를 다 차지해
+        # 학원 안 학생까지 못 쓰게 하지 못하게.
+        place = _network(_real_host(request)) if outside(request) else "lan"
+        held = lambda match: [b for b, _, p in transfers.values() if match(p)]
         with transfer_lock:
-            for code in [c for c, (_, until) in transfers.items() if until < now]:
+            for code in [c for c, (_, until, _) in transfers.items() if until < now]:
                 del transfers[code]
             for who in [w for w, times in made.items() if now - times[-1] >= 600]:
                 del made[who]
             mine = [t for t in made.get(host, []) if now - t < 600]
             if len(mine) >= TRANSFERS_PER_DEVICE:
                 raise HTTPException(429, "코드를 너무 많이 만들었습니다. 10분 뒤 다시 해 주세요")
-            made[host] = mine + [now]
-            if len(transfers) >= 200 or sum(len(b) for b, _ in transfers.values()) + len(body) > TRANSFER_BYTES:
+            side = held(lambda p: (p == "lan") == (place == "lan"))
+            here = held(lambda p: p == place)
+            if (len(side) >= 100 or sum(map(len, side)) + len(body) > TRANSFER_BYTES // 2
+                    or (place != "lan" and sum(map(len, here)) + len(body) > TRANSFER_BYTES // 10)):
                 raise HTTPException(503, "잠시 뒤 다시 해 주세요")
+            made[host] = mine + [now]  # 만든 것만 셉니다(자리가 없어 거절된 것까지 세어 막히지 않게)
             code = f"{secrets.randbelow(10**6):06d}"
             while code in transfers:
                 code = f"{secrets.randbelow(10**6):06d}"
-            transfers[code] = (body, now + 600)
+            transfers[code] = (body, now + 600, place)
         return {"code": code, "expires": int(now + 600)}
 
     @app.post("/api/transfer/{code}")
     def claim_transfer(code: str, request: Request):
         host = guard("code", request, 20, "코드를 여러 번 틀려 10분 동안 막았습니다")
         with transfer_lock:
-            body, until = transfers.pop(code, (None, 0))
+            body, until, _ = transfers.pop(code, (None, 0, None))
         if body is None or until < wall_clock():
             missed("code", request, host)
             raise HTTPException(404, "코드가 없거나 시간이 지났습니다")
@@ -999,7 +1082,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     log_counts = {}  # 기록 파일 → (파일 시점·10분 단위·강의 목록, 센 결과): 몇 달 치 기록을 현황을 열 때마다 다 읽지 않게
 
     def counted(name, count):  # 기록이 늘었거나 10분이 지나면(최근 30일 창이 움직임) 다시 셉니다
-        key = (stamp(Path(log_dir) / name), int(wall_clock() // 600), library["at"])
+        key = (stamp(Path(log_dir) / name), int(wall_clock() // 600), library["version"])
         if log_counts.get(name, (None,))[0] != key:
             log_counts[name] = (key, count())
         return log_counts[name][1]
