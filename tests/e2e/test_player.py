@@ -125,6 +125,25 @@ def test_a_note_keeps_the_scene_where_the_student_started_typing(page, site):
     assert stored(page, f"notes:{site.ids[ZMG]}")[-1] == {"t": 60, "text": "둘째 메모"}
 
 
+def test_a_note_is_pinned_to_when_typing_starts_not_when_the_box_was_tapped(page, site):
+    open_player(page, site)
+    button = page.locator("#note-form button")
+    go(page, 20)
+    page.click("[data-tab=notes]")
+    page.click("#note-text")  # 00:20에 칸을 눌러 두고 계속 봄
+    go(page, 60)
+    page.locator("#note-text").press_sequentially("여기 중요")
+    expect(button).to_have_text("01:00에 추가")  # '00:20에 추가'가 아님
+
+    page.fill("#note-text", "")  # 다 지우고 더 보다가 다시 씀
+    expect(button).to_have_text("추가")
+    go(page, 110)
+    page.locator("#note-text").press_sequentially("새 메모")
+    expect(button).to_have_text("01:50에 추가")
+    page.press("#note-text", "Enter")
+    assert stored(page, f"notes:{site.ids[ZMG]}") == [{"t": 110, "text": "새 메모"}]
+
+
 def test_a_double_tap_on_delete_in_the_memo_tab_removes_one_note(phone, site):
     page = phone(390, 844)
     vid = site.ids[ZMG]
@@ -223,7 +242,8 @@ def test_the_memo_hint_fits_in_its_box_on_small_phones(phone, site):
     page = phone(360, 740)
     page.goto(f"{site.url}/watch.html?id={site.ids[ZMG]}")
     page.locator("[data-tab=notes]").tap()
-    page.locator("#note-text").focus()  # 추가 단추에 시각이 붙어 칸이 좁아진 때
+    page.locator("#note-text").focus()
+    expect(page.locator("#note-form button")).to_have_text("추가")  # 안내 글이 보이는 빈 칸에는 시각이 붙지 않아 칸이 좁아지지 않음
     fits = page.locator("#note-text").evaluate("""(i) => { const s = getComputedStyle(i), c = document.createElement('canvas').getContext('2d');
         c.font = `${s.fontSize} ${s.fontFamily}`;
         return c.measureText(i.placeholder).width <= i.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight); }""")

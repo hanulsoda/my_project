@@ -464,10 +464,11 @@ const setNoteAt = (t) => {
   noteAt = t;
   noteButton.textContent = t === null ? "추가" : `${fmt(t)}에 추가`;
 };
-const startNote = () => { if (noteAt === null) setNoteAt(video.currentTime); };
-$("note-text").addEventListener("focus", startNote);
-$("note-text").addEventListener("input", startNote);
-$("note-text").addEventListener("blur", () => { if (!$("note-text").value.trim()) setNoteAt(null); });  // 쓰지 않고 떠나면 다음에 새로
+// 첫 글자를 쓸 때의 장면입니다(칸을 눌러 두고 더 본 뒤 쓰기도 함). 다 지우면 다음에 다시 쓰기 시작할 때의 장면으로 합니다.
+$("note-text").addEventListener("input", () => {
+  if (!$("note-text").value.trim()) setNoteAt(null);
+  else if (noteAt === null) setNoteAt(video.currentTime);
+});
 
 const notSaved = "저장하지 못했습니다. 화면 맨 위의 안내를 봐 주세요.";
 $("note-form").onsubmit = (e) => {
