@@ -287,6 +287,10 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: left 0.15s; }
 .switch:checked { background: var(--accent); }
 .switch:checked::after { left: 16px; }
+/* 그 화면에서 아무 일도 하지 않는 단추는 숨깁니다: 요점 정리만·정렬은 폴더와 제목 찾기의 강의 줄만 바꾸고,
+   목록·그림 보기는 선생님 말 결과에는 쓰이지 않습니다(휴대폰 첫 화면은 아래에서). */
+.library:is([data-view="home"], [data-view="recent"], [data-view="new"], [data-view="found"]) :is(.switch-label, #sort),
+.library[data-view="found"] .layout { display: none; }
 
 .sidebar {
   grid-area: side;
@@ -353,6 +357,7 @@ button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .usage-bars { max-width: 420px; margin: 0 4px 8px; }
 .usage-bars .day .bar { height: 80px; }
 
+.resume { display: none; }  /* 휴대폰 첫 화면의 '이어 보기'(아래 휴대폰 부분) */
 .content-body { grid-area: body; min-width: 0; padding: 8px 28px 40px; }
 .content-body > section > h2 { margin: 18px 12px 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
 .folder-name { margin: 22px 12px 2px; font-size: 15px; }
@@ -420,7 +425,14 @@ a.time { display: inline-block; text-decoration: none; }
 @media (max-width: 760px) {
   .library { background: var(--bg); }
   .library:not([data-view="home"]) { background: var(--surface); }
-  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr; grid-template-areas: "head" "side" "body"; }
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto 1fr; grid-template-areas: "head" "resume" "side" "body"; }
+  /* 첫 화면 맨 위에 보다 만 강의 셋(늘 목록 모양), 그 아래 사이드바. 첫 화면에서 하는 일이 없는 보기 단추는 숨깁니다. */
+  .library[data-view="home"] .resume { grid-area: resume; display: block; padding: 0 16px 16px; }
+  .library[data-view="home"] .layout { display: none; }
+  .resume h2 { margin: 4px 16px 6px; color: var(--muted); font-size: 13px; font-weight: 400; }
+  .resume ul { border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .resume .video-list > li:nth-child(n) > a { border-radius: 0; background: none; }
+  .resume .video-list > li + li { border-top: 1px solid var(--border); }
   .content-head { position: static; padding: 16px 16px 8px; border: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
   .library:not([data-view="home"]) .content-head .back { display: inline-flex; }
   .content-head .heading { flex-basis: 100%; }

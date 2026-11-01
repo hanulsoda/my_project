@@ -241,6 +241,50 @@ def test_opening_a_folder_from_the_sidebar_clears_the_search(page, site):
     expect(page.locator(".video-list a:visible")).to_have_count(2)
 
 
+def watched_four(page, site):
+    """강의 넷을 보다 만 기록(제망매가를 가장 최근에)"""
+    titles = [ZMG, ZMG + " 학습활동", "2022개정/고1/미래엔/청산별곡", "2022개정/고1/천재/성에꽃"]
+    remember(page, site, {f"pos:{site.ids[t]}": {"t": 60, "d": 150, "at": 10 - i} for i, t in enumerate(titles)})
+
+
+def test_the_phone_home_screen_starts_with_lectures_to_continue(phone, site):
+    page = phone(390, 844)
+    watched_four(page, site)
+    page.goto(site.url + "/")
+    card = page.locator("#resume")
+    expect(card).to_be_visible()
+    expect(card.locator("a")).to_have_count(3)  # 짧게 셋만
+    expect(card.locator("a").first).to_contain_text("제망매가")
+    expect(card.locator("a").first).to_contain_text("01:00까지")
+    assert on_screen(page, card.locator("a").first)  # 내리지 않아도 보임
+    assert card.bounding_box()["y"] < page.locator("nav.sidebar ul.tree").bounding_box()["y"]
+    for control in ["#guide-only", "#view-grid", "#sort"]:  # 첫 화면에서는 아무 일도 하지 않는 단추
+        expect(page.locator(control)).to_be_hidden()
+
+    page.locator("nav.sidebar a", has_text="2022개정").tap()
+    expect(page.locator("#view-title")).to_have_text("2022개정")
+    expect(card).to_be_hidden()
+    for control in ["#guide-only", "#view-grid", "#sort"]:  # 폴더에서는 다시
+        expect(page.locator(control)).to_be_visible()
+
+
+def test_controls_that_do_nothing_on_a_view_are_hidden(page, site):
+    watched_four(page, site)
+    page.goto(site.url + "/#v/recent")
+    expect(page.locator("#recent-list a").first).to_be_visible()
+    expect(page.locator("#resume")).to_be_hidden()  # 넓은 화면에는 이어 보기 목록이 따로 있음
+    expect(page.locator("#guide-only")).to_be_hidden()  # 요점 정리만·정렬은 이어 보기 목록을 바꾸지 않음
+    expect(page.locator("#sort")).to_be_hidden()
+    expect(page.locator("#view-grid")).to_be_visible()  # 그림 보기는 이어 보기 목록에도 됨
+
+    page.click("#scope-spoken")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    for control in ["#guide-only", "#view-grid", "#sort"]:  # 선생님 말 결과에는 하나도 안 됨
+        expect(page.locator(control)).to_be_hidden()
+
+
 def test_guide_only_header_counts_the_lectures_shown(page, site):
     page.goto(site.url + "/#f/2022개정")
     expect(page.locator(".video-list a:visible").first).to_be_visible()

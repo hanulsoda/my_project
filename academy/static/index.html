@@ -33,6 +33,8 @@
         <select id="sort" aria-label="정렬"><option value="name">이름순</option><option value="new">최근 올라온 순</option></select>
       </form>
     </header>
+    <!-- 휴대폰 첫 화면 맨 위의 '이어 보기'(보다 만 강의 셋). 넓은 화면은 본문에 이어 보기 목록이 따로 있어 숨깁니다. -->
+    <section id="resume" class="resume" aria-labelledby="resume-title" hidden><h2 id="resume-title">이어 보기</h2><ul id="resume-list" class="video-list"></ul></section>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
     <div class="content-body">
       <p id="found-status" class="sr-only" aria-live="polite"></p>
@@ -146,7 +148,8 @@
       $("empty").replaceChildren(empty, ...(searching && !shown ? [" ", askSpoken] : []));
       $("empty").hidden = !empty;
       $("empty").classList.toggle("wide-only", empty === PICK_FOLDER);  // 휴대폰 첫 화면은 폴더가 바로 아래에 있습니다
-      document.body.dataset.view = searching || showingFound ? "search" : view.kind;
+      // found: 선생님 말 결과, search: 제목 찾기. 화면마다 아무 일도 하지 않는 단추(요점 정리만·보기·정렬)를 숨기는 데 씁니다(style.css).
+      document.body.dataset.view = showingFound ? "found" : searching ? "search" : view.kind;
       save();
     }
 
@@ -314,6 +317,8 @@
       total = videos.length;
       side = fillSidebar(videos, { prefix: "" });
       $("recent-list").replaceChildren(...recentVideos(videos).map((v) => el("li", {}, lectureLink(v))));
+      $("resume-list").replaceChildren(...recentVideos(videos).slice(0, 3).map((v) => el("li", {}, lectureLink(v))));
+      $("resume").hidden = !$("resume-list").children.length;
       const day = (seconds) => new Date(seconds * 1000).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
       $("new-list").replaceChildren(...freshVideos(videos).map((v) => el("li", {},
         lectureLink(v, `${v.title.split("/").slice(0, -1).join(" · ")} · ${day(v.added)} 올라옴`))));
