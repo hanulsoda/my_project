@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 import academy.server as server
 from academy.library import find_videos, load_analysis, save_analysis
+from academy.references import ref_key
 from academy.server import create_app
 
 SEGMENTS = [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]
@@ -341,3 +342,213 @@ def test_the_proxy_address_is_recognized_when_the_server_listens_on_ipv6(site):
 
     # uvicorn --host :: 이면 IPv4 주소가 ::ffff:192.168.0.2 모양으로 옵니다
     assert TestClient(app, client=("::ffff:192.168.0.2", 1)).get("/api/videos").status_code == 401
+
+
+# ---- 2단계 고친 것 다시 보기 ----
+
+def internet(app, address, secret="s" * 40):
+    c = TestClient(app, client=(address, 1))
+    c.cookies.set(server.PASS_COOKIE, server.make_pass(secret, time.time()))
+    return c
+
+
+@pytest.fixture
+def two(site):
+    video_dir, data_dir, log_dir, vid = site
+    (video_dir / "2강.mp4").write_bytes(b"xy")
+    other = next(v["id"] for v in find_videos(video_dir) if v["title"] == "2강")
+    save_analysis(data_dir, other, {"title": "2강", "duration": 3.0, "guide": None,
+                                    "segments": [{"start": 0.0, "end": 3.0, "text": "여러분 안녕하세요 반갑습니다"}]})
+    return video_dir, data_dir, log_dir, vid, other
+
+
+@pytest.fixture
+def jemang(tmp_path):  # 파일 이름으로 학원 정리 '제망매가'와 짝지어지는 강의(Claude 요점 정리 없음)
+    video_dir, data_dir = tmp_path / "videos", tmp_path / "data"
+    (video_dir / "고1").mkdir(parents=True)
+    (video_dir / "고1" / "1강 제망매가.mp4").write_bytes(b"x")
+    vid = find_videos(video_dir)[0]["id"]
+    save_analysis(data_dir, vid, {"title": "강의", "duration": 2.0, "segments": SEGMENTS, "guide": None})
+    return video_dir, data_dir, vid
+
+
+def test_a_class_searching_the_same_word_at_once_all_get_the_answer(site, monkeypatch):
+    video_dir, data_dir, _, _ = site
+    client = TestClient(create_app(video_dir, data_dir, None))
+    client.get("/api/videos")
+    real_near = server._near
+    monkeypatch.setattr(server, "_near", lambda *a, **k: time.sleep(1.0) or real_near(*a, **k))
+    answers = []
+    threads = [threading.Thread(target=lambda: answers.append(
+        client.get("/api/search", params={"q": "안녕하세요"}).status_code)) for _ in range(10)]
+    for t in threads:  # 선생님이 "제망매가 찾아 봐" 하면 반 학생이 한꺼번에 누름
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert answers.count(200) == 10  # 한 번 찾은 답을 모두가 받음(줄이 찼다고 돌려보내지 않음)
+
+
+def test_one_internet_network_cannot_take_every_internet_transfer_code(site):
+    video_dir, data_dir, _, _ = site
+    app = create_app(video_dir, data_dir, None, entry_secret="s" * 40)
+    for n in range(10):  # 한 IPv6 집 회선(/64) 안의 주소 10개에서 작은 코드를 10개씩
+        c = internet(app, f"2001:db8:1:2::{n + 1:x}")
+        for _ in range(10):
+            c.post("/api/transfer", json={"data": {}})
+
+    other = internet(app, "198.51.100.7").post("/api/transfer", json={"data": {"speed": 1.5}})
+    assert other.status_code == 200  # 다른 곳의 학생은 코드를 받음
+
+
+def test_a_search_made_while_a_file_was_unreadable_is_not_kept_after_it_is_fixed(two, monkeypatch):
+    video_dir, data_dir, _, vid, other = two
+    real = server.load_analysis
+    client = TestClient(create_app(video_dir, data_dir, None))
+    monkeypatch.setattr(server, "load_analysis",
+                        lambda d, i: (_ for _ in ()).throw(PermissionError(13, "Permission denied")) if i == other
+                        else real(d, i))
+    assert len(client.get("/api/search", params={"q": "안녕하세요"}).json()["exact"]) == 1
+    monkeypatch.setattr(server, "load_analysis", real)  # 권한을 고침(파일 시각·크기는 그대로)
+
+    found = client.get("/api/search", params={"q": "안녕하세요"}).json()["exact"]
+    assert {r["id"] for r in found} == {vid, other}
+
+
+def test_quiz_results_are_counted_again_once_the_analysis_file_is_readable(site, monkeypatch):
+    video_dir, data_dir, log_dir, vid = site
+    real = server.load_analysis
+    client = TestClient(create_app(video_dir, data_dir, None, log_dir=log_dir), client=("192.168.0.5", 1))
+    monkeypatch.setattr(server, "load_analysis", lambda d, i: (_ for _ in ()).throw(OSError(5, "Input/output error")))
+    client.post("/api/quiz-result", json={"id": vid, "key": "제망매가의 갈래는?", "right": False})
+    monkeypatch.setattr(server, "load_analysis", real)  # NAS가 돌아옴
+
+    client.post("/api/quiz-result", json={"id": vid, "key": "제망매가의 갈래는?", "right": False})
+    assert len((log_dir / "quiz.log").read_text().splitlines()) == 1
+
+
+def test_a_broken_analysis_file_is_read_once_not_on_every_request(two, monkeypatch):
+    video_dir, data_dir, _, _, other = two
+    (data_dir / f"{other}.json").write_text('{"title": "2강", "segments": [', encoding="utf-8")  # 저장하다 끊김
+    real, reads = server.load_analysis, []
+    monkeypatch.setattr(server, "load_analysis", lambda d, i: (i == other and reads.append(1)) or real(d, i))
+    client = TestClient(create_app(video_dir, data_dir, None))
+    for word in ["안녕하세요", "반갑습니다", "여러분"]:
+        client.get("/api/status")
+        client.get("/api/search", params={"q": word})
+
+    assert len(reads) == 1
+
+
+def test_an_infinite_failure_count_written_by_hand_does_not_break_the_list_for_everyone(two):
+    video_dir, data_dir, _, _, other = two
+    (data_dir / f"{other}.json").write_text(
+        '{"title": "2강", "duration": 3.0, "guide": null, "guide_failures": Infinity, '
+        '"segments": [{"start": 0.0, "end": 2.0, "text": "안녕하세요"}]}', encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None), raise_server_exceptions=False)
+
+    assert [client.get("/api/videos").status_code, client.get("/api/search", params={"q": "안녕하세요"}).status_code,
+            client.get("/api/status").status_code] == [200, 200, 200]
+
+
+def test_a_lecture_with_an_infinite_length_still_opens_in_the_player(two):
+    video_dir, data_dir, _, _, other = two
+    (data_dir / f"{other}.json").write_text('{"title": "2강", "duration": Infinity, "segments": '
+                                            '[{"start": 0.0, "end": 2.0, "text": "안녕하세요"}], "guide": null}',
+                                            encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None), raise_server_exceptions=False)
+
+    res = client.get(f"/api/videos/{other}")
+    assert res.status_code == 200 and res.json()["analysis"] is None  # 목록처럼 '분석 전'
+
+
+def test_a_listed_video_the_nas_cannot_open_right_now_is_worth_trying_again(site):
+    video_dir, data_dir, _, vid = site
+    client = TestClient(create_app(video_dir, data_dir, None))
+    client.get("/api/videos")
+    (video_dir / "1강.mp4").rename(video_dir / "1강.tmp")  # NAS가 잠깐 끊김: 목록에는 있는데 열리지 않음
+
+    assert client.get(f"/media/{vid}").status_code == 503  # 플레이어가 다시 받아 봄(404면 '찾을 수 없습니다'로 그만둠)
+    (video_dir / "1강.tmp").rename(video_dir / "1강.mp4")
+    assert client.get(f"/media/{vid}").status_code == 200
+
+
+def test_lectures_are_worth_trying_again_while_the_video_folder_looks_empty(tmp_path):
+    (tmp_path / "videos").mkdir()  # 서버가 NAS보다 먼저 켜짐
+    client = TestClient(create_app(tmp_path / "videos", tmp_path / "data", None))
+
+    assert client.get("/media/0123456789ab").status_code == 503
+    assert client.get("/api/videos/0123456789ab").status_code == 503
+
+
+def test_hiding_one_of_two_near_identical_fill_ins_keeps_the_other_in_the_quiz(jemang):
+    video_dir, data_dir, vid = jemang
+    ref = {"title": "제망매가", "grade": "고1", "meta": {"갈래": "향가"},  # PDF에서 두 번 뽑힌 빈칸 문제(끝 마침표만 다름)
+           "fillins": [{"passage": "누이의 죽음", "answer_line": "슬픔을   종교적  으로 극복함"},
+                       {"passage": "누이의 죽음", "answer_line": "슬픔을   종교적  으로 극복함."}]}
+    key = ref_key(ref)
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-1234"),
+                        client=("192.168.0.5", 1))
+    fills = next(s for s in client.get(f"/api/references/{key}").json()["sections"] if s["name"] == "빈칸 문제")["items"]
+    client.put(f"/api/references/{key}/fix", json={"section": "빈칸 문제", "original": fills[1]["original"], "hidden": True},
+               headers={"x-teacher-key": "teacher-key-1234"})
+
+    assert len(client.get(f"/api/videos/{vid}").json()["references"][0]["quiz"]) == 1  # 숨기지 않은 하나는 남음
+
+
+def flaky_reads(monkeypatch, name, fail_on):
+    """name 파일을 읽을 때 fail_on번째(1부터) 읽기에서 입출력 오류(NAS가 잠깐 답하지 않음)."""
+    import pathlib
+    real, state = pathlib.Path.read_text, {"reads": 0, "armed": False}
+
+    def read_text(self, *a, **k):
+        if self.name == name and state["armed"]:
+            state["reads"] += 1
+            if state["reads"] in fail_on:
+                raise OSError(5, "Input/output error")
+        return real(self, *a, **k)
+    monkeypatch.setattr(pathlib.Path, "read_text", read_text)
+    return state
+
+
+def test_one_nas_read_error_does_not_bring_back_what_the_teacher_hid(jemang, monkeypatch):
+    video_dir, data_dir, vid = jemang
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "틀린 설명"}, {"text": "향가"}]}
+    (data_dir / ".reference-fixes").write_text(json.dumps({ref_key(ref): {"핵심 특징": {"틀린 설명": {"hidden": True}}}},
+                                                          ensure_ascii=False), encoding="utf-8")
+    state = flaky_reads(monkeypatch, ".reference-fixes", fail_on={1})
+    client = TestClient(create_app(video_dir, data_dir, None, [ref]), client=("192.168.0.5", 1))
+    state["armed"] = True
+    client.get("/api/videos")  # 이 읽기만 NAS가 답하지 않음
+
+    assert client.get(f"/api/videos/{vid}").json()["references"][0]["sections"][0]["items"] == ["향가"]
+    assert client.get("/api/search", params={"q": "틀린설명"}).json()["notes"] == []
+
+
+def test_a_read_error_while_saving_a_fix_does_not_erase_the_other_fixes(jemang, monkeypatch):
+    video_dir, data_dir, _ = jemang
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "틀린 설명"}, {"text": "향가"}]}
+    before = {ref_key(ref): {"핵심 특징": {"틀린 설명": {"hidden": True}}}, "other-ref": {"어휘": {"x": {"hidden": True}}}}
+    (data_dir / ".reference-fixes").write_text(json.dumps(before, ensure_ascii=False), encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None, [ref], teacher_key="teacher-key-1234"),
+                        client=("192.168.0.5", 1))
+    state = flaky_reads(monkeypatch, ".reference-fixes", fail_on={2})
+    state["armed"] = True
+    client.put(f"/api/references/{ref_key(ref)}/fix", json={"section": "핵심 특징", "original": "향가", "text": "향가(신라)"},
+               headers={"x-teacher-key": "teacher-key-1234"})
+    state["armed"] = False
+
+    saved = json.loads((data_dir / ".reference-fixes").read_text(encoding="utf-8"))
+    assert "other-ref" in saved and "틀린 설명" in saved[ref_key(ref)]["핵심 특징"]
+
+
+def test_a_fix_written_by_hand_with_a_number_for_text_does_not_break_search(jemang):
+    video_dir, data_dir, vid = jemang
+    ref = {"title": "제망매가", "grade": "고1", "features": [{"text": "누이의 죽음"}]}
+    (data_dir / ".reference-fixes").write_text(
+        json.dumps({ref_key(ref): {"핵심 특징": {"누이의 죽음": {"text": 3}}}}), encoding="utf-8")
+    client = TestClient(create_app(video_dir, data_dir, None, [ref]), client=("192.168.0.5", 1),
+                        raise_server_exceptions=False)
+
+    assert client.get("/api/search", params={"q": "향가입니다"}).status_code == 200
+    assert client.get(f"/api/videos/{vid}").json()["references"][0]["sections"][0]["items"] == ["누이의 죽음"]

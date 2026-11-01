@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from itertools import accumulate
 from pathlib import Path
-from threading import BoundedSemaphore, Lock, Thread
+from threading import BoundedSemaphore, Event, Lock, Thread
 from time import monotonic, time as wall_clock
 from typing import Literal
 
@@ -55,11 +55,13 @@ MAX_QUERY = 30         # 검색어 최대 글자 수(띄어쓰기·기호 뺀 �
 NEAR_MAX = 10          # 받아쓰기가 한 소리 다르게 적은 말 찾기는 이 글자 수까지(작품명·용어용, 길면 매우 느림)
 LOG_WRITES_PER_HOUR = 600  # 한 기기가 1시간에 남기는 퀴즈 결과·강의 열기 기록 상한(평소 학생은 닿지 않음, 넘으면 기록만 안 함)
 TRANSFERS_PER_DEVICE = 10  # 한 기기가 10분에 만들 수 있는 기기 옮기기 코드 수
+TRANSFERS_PER_NETWORK = 20  # 인터넷의 한 망(집 회선 하나)이 한꺼번에 맡길 수 있는 코드 수: 인터넷 몫(100개)을 다 차지하지 못하게
 TRANSFER_BYTES = 50_000_000  # 기기 옮기기로 맡아 두는 기록 전체 상한(넘으면 잠시 뒤 다시)
 GUESSES_PER_HOUR = 100  # 인터넷의 한 망(IPv4 /24, IPv6 /64)이 1시간에 선생님 열쇠·옮기기 코드를 틀릴 수 있는 횟수
 #                        (주소를 바꿔 가며 맞혀 보지 못하게. 서버 전체는 그 20배: 한 사람이 모두를 막지 못하게)
 SEARCH_WAIT = 20  # 다른 낱말을 찾는 동안 이만큼만 기다립니다(넘으면 잠시 뒤 다시)
 SEARCH_WAITERS = 4  # 다른 낱말을 찾는 동안 줄 설 수 있는 검색 수. 줄 선 요청이 영상·목록을 처리할 작업자를 붙잡지 않게
+SEARCH_FOLLOWERS = 20  # 지금 찾는 중인 낱말을 함께 찾은 학생은 줄 서지 않고 그 답을 기다림(한 반, 작업자 40개 가운데)
 RECORD_KEY = re.compile(r"(pos|notes|wrong|score):[0-9a-f]{12}|study|speed")  # 기기 옮기기로 맡는 기록(common.js와 같게)
 MAX_BODY = 4 * 1024 * 1024  # 기기 옮기기(기록 2MB까지) 요청 본문 최대 크기
 SMALL_BODY = 256 * 1024  # 다른 요청 본문 최대 크기(질문하기 대화 기록 2만 자도 들어감): 큰 요청을 읽느라 메모리를 채우지 못하게
@@ -364,6 +366,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             if (re.fullmatch(r"[0-9a-f]{12}", video_id) and not scan_lock.locked()
                     and monotonic() - library["at"] > MISS_SECONDS):
                 Thread(target=scan, args=(MISS_SECONDS,), daemon=True).start()
+            if library["empty"]:  # 영상 폴더가 비어 보임(서버가 NAS보다 먼저 켜짐 등): 없는 강의가 아니라 잠시 뒤 다시
+                raise HTTPException(503, "영상 폴더를 읽지 못했습니다. 잠시 뒤 다시 해 주세요")
             raise HTTPException(404, "영상을 찾을 수 없습니다")
         return video
 
@@ -395,6 +399,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         except OSError:
             logging.exception("서버 요약 저장 실패(다음에 켤 때 분석 결과를 처음부터 읽습니다)")
 
+    read_errors = {"n": 0}  # 분석 파일을 읽지 못한(입출력 오류) 횟수
+
     def read_analysis(video_id):
         """손으로 고치다 형식이 깨진 분석 파일은 그 강의만 '분석 전'으로 보고, 목록·검색·현황은 계속 돌게 합니다."""
         try:
@@ -403,6 +409,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             data = []
         except OSError as e:  # 권한 없음·NAS 입출력 오류 등: 이 강의만 '분석 전'(고치면 다시 읽음)
             logging.warning("분석 파일을 읽지 못해 건너뜀: %s.json (%s)", video_id, e.strerror or e)
+            read_errors["n"] += 1  # 그동안 만든 답(검색·퀴즈 문제)은 기억하지 않습니다: 파일 시각이 그대로라 고쳐도 다시 찾지 않음
             return None
         if data is None or isinstance(data, dict):
             return data
@@ -417,8 +424,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             return None
         stamp = (stat.st_mtime_ns, stat.st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
+            errors = read_errors["n"]
             data, entry = read_analysis(video_id), None
-            if data is None:  # 읽지 못함(권한 등): 기억하지 않고 다음에 다시 읽어 봅니다
+            if read_errors["n"] != errors:  # 읽지 못함(권한 등): 기억하지 않고 다음에 다시 읽어 봅니다(깨진 파일은 고칠 때까지 기억)
                 return None
             try:  # 파일이 다시 바뀔(고쳐질) 때까지 '분석 전': 깨졌거나 모양이 다른 파일(손으로 고침) 하나가 모두의 목록을 멈추지 않게
                 if data is not None:
@@ -433,7 +441,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                         "text": "".join(t for t, _ in spoken),
                         "offsets": list(accumulate((len(t) for t, _ in spoken), initial=0))[:-1],
                         "times": [start for _, start in spoken]}
-            except (KeyError, TypeError, ValueError, AttributeError) as e:
+            except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as e:  # OverflowError: 횟수가 Infinity
                 logging.warning("분석 파일 모양이 달라 '분석 전'으로 봅니다: %s.json (%r)", video_id, e)
             status_cache[video_id] = (stamp, entry)
             index_state["dirty"] = True
@@ -476,7 +484,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     def listing():
         current_library()
-        key = (library["version"], stamp(data_dir), stamp(fixes_path), int(monotonic() // 60))
+        key = (library["version"], stamp(data_dir), fixes_stamp(), int(monotonic() // 60))
         with list_lock:  # 한 명이 만드는 동안 나머지는 기다렸다가 그 답을 씁니다
             if list_cache["key"] != key:
                 body = json.dumps(built_list(), ensure_ascii=False, separators=(",", ":")).encode()
@@ -503,13 +511,23 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """
         word = _search_word(q)
         current_library()
-        key = (word, library["version"], stamp(data_dir), stamp(fixes_path), analyses_version())
+        key = (word, library["version"], stamp(data_dir), fixes_stamp(), analyses_version())
         found = searches.get(key)  # 찾아 둔 답은 다른 낱말을 찾는 동안 줄 서지 않고 바로 씁니다
         if found is not None:
             return found
         # 한 기기가 다른 낱말을 끝없이 보내 모두를 줄 세우지 못하게 기기마다 횟수를 셉니다(찾아 둔 답은 세지 않음).
         if not may_log("search", request.client.host if request.client else ""):
             raise HTTPException(429, "검색을 너무 자주 했습니다. 잠시 뒤 다시 해 주세요")
+        # 수업 중 반 학생이 지금 찾는 중인 낱말을 한꺼번에 찾으면 줄 서지 않고 그 답을 기다립니다(찾는 1초쯤만, 많아야 한 반).
+        job = search_now.get("job")
+        if job and job["key"] == key and search_followers.acquire(blocking=False):
+            try:
+                job["done"].wait(SEARCH_WAIT)
+            finally:
+                search_followers.release()
+            if job["answer"] is not None:
+                return job["answer"]
+            raise HTTPException(503, "찾는 학생이 많습니다. 잠시 뒤 다시 해 주세요")
         # 한 번에 하나씩 찾습니다(어차피 CPU를 나눠 써서 함께 돌려도 빠르지 않음). 수업 중 여러 학생이 같은 낱말을 찾으면
         # 처음 찾은 결과를 함께 씁니다. 새 강의·분석 저장·정리 고치기가 있으면 다시 찾습니다.
         # 줄이 차 있으면 기다리지 않고 바로 돌려보냅니다: 줄 선 요청도 작업자를 하나씩 붙잡아, 많이 쌓이면 영상·목록이 멈춥니다.
@@ -522,15 +540,25 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if not got:
             raise HTTPException(503, "찾는 학생이 많습니다. 잠시 뒤 다시 해 주세요")
         try:
-            if key not in searches:
+            if key in searches:
+                return searches[key]
+            job = search_now["job"] = {"key": key, "done": Event(), "answer": None}
+            try:
+                errors = read_errors["n"]
+                job["answer"] = find_spoken(word)
+            finally:
+                search_now["job"] = None
+                job["done"].set()
+            if read_errors["n"] == errors:  # 읽지 못한 분석 파일이 빠진 답은 기억하지 않습니다(고치면 다음에 다시 찾게)
                 if len(searches) >= 64:
                     searches.pop(next(iter(searches)))  # 가장 오래된 것부터
-                searches[key] = find_spoken(word)
-            return searches[key]
+                searches[key] = job["answer"]
+            return job["answer"]
         finally:
             search_lock.release()
 
     searches, search_lock, search_line = {}, Lock(), BoundedSemaphore(SEARCH_WAITERS)
+    search_now, search_followers = {"job": None}, BoundedSemaphore(SEARCH_FOLLOWERS)  # 지금 찾는 낱말과 그 답을 기다리는 수
     analyses_seen = {"minute": None, "version": None}
 
     def analyses_version():
@@ -545,7 +573,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def find_spoken(word):
         near = _near(word) if len(word) <= NEAR_MAX else None
         maybe_near = _near_filter(word) if near else None  # 비슷한 말이 있을 수 없는 대본은 정규식을 돌리지 않음(결과는 같음)
-        exact, similar, notes, fixes, fixes_at = [], [], [], read_fixes(), stamp(fixes_path)
+        exact, similar, notes, fixes, fixes_at = [], [], [], read_fixes(), fixes_stamp()
         for v in current_library()["videos"]:
             entry = analysis_entry(v["id"])
             if not entry:
@@ -599,7 +627,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             matches = list(near.finditer(entry["text"]))
             at, heard = [m.start() for m in matches], [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
         found, _ = found_at(video, entry, at, limit=None)
-        return {"times": found["times"], "chapters": found["chapters"], "heard_as": heard, "notes": noted(video, entry, word, read_fixes(), stamp(fixes_path))}
+        return {"times": found["times"], "chapters": found["chapters"], "heard_as": heard, "notes": noted(video, entry, word, read_fixes(), fixes_stamp())}
 
     def merge_copies(found):
         merged, first = [], {}
@@ -669,8 +697,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     def quiz_keys(video):
         """그 강의에 실제로 있는 문제 글(플레이어의 quizKey와 같게, 1000자까지): Claude 퀴즈와 학원 정리 퀴즈."""
-        key = (stamp(Path(data_dir) / f"{video['id']}.json"), stamp(fixes_path))
+        key = (stamp(Path(data_dir) / f"{video['id']}.json"), fixes_stamp())
         if quiz_keys_cache.get(video["id"], (None,))[0] != key:
+            errors = read_errors["n"]
             data = read_analysis(video["id"]) or {}
             guide = data.get("guide") if isinstance(data.get("guide"), dict) else {}
             quiz = [*(guide.get("quiz") or []), *(q for r in fixed(academy_summaries(video)) for q in r["quiz"])]
@@ -679,6 +708,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 if isinstance(q, dict):
                     text = q.get("question") or " ".join(map(str, [q.get("context", ""), *(q.get("parts") or [])]))
                     keys.add(str(text)[:1000])
+            if read_errors["n"] != errors:  # 분석 파일을 읽지 못했으면 기억하지 않고 다음에 다시(Claude 퀴즈가 빠진 채로 남지 않게)
+                return keys
             quiz_keys_cache[video["id"]] = (key, keys)
         return quiz_keys_cache[video["id"]][1]
 
@@ -821,7 +852,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if len(body) > 2_000_000:  # 2MB: 강의 3,900개의 진도를 다 담아도 0.3MB쯤
             raise HTTPException(413, "기록이 너무 큽니다")
         now, host = wall_clock(), request.client.host if request.client else ""
-        # 학원 안과 인터넷이 자리를 반씩 나눠 쓰고, 인터넷의 한 망은 그중 5분의 1까지: 인터넷 몇 곳이 자리를 다 차지해
+        # 학원 안과 인터넷이 자리를 반씩 나눠 쓰고, 인터넷의 한 망은 그중 5분의 1·코드 20개까지: 인터넷 몇 곳이 자리를 다 차지해
         # 학원 안 학생까지 못 쓰게 하지 못하게.
         place = _network(_real_host(request)) if outside(request) else "lan"
         held = lambda match: [b for b, _, p in transfers.values() if match(p)]
@@ -836,7 +867,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             side = held(lambda p: (p == "lan") == (place == "lan"))
             here = held(lambda p: p == place)
             if (len(side) >= 100 or sum(map(len, side)) + len(body) > TRANSFER_BYTES // 2
-                    or (place != "lan" and sum(map(len, here)) + len(body) > TRANSFER_BYTES // 10)):
+                    or (place != "lan" and (sum(map(len, here)) + len(body) > TRANSFER_BYTES // 10
+                                            or len(here) >= TRANSFERS_PER_NETWORK))):
                 raise HTTPException(503, "잠시 뒤 다시 해 주세요")
             made[host] = mine + [now]  # 만든 것만 셉니다(자리가 없어 거절된 것까지 세어 막히지 않게)
             code = f"{secrets.randbelow(10**6):06d}"
@@ -908,21 +940,36 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         파일이 그대로면 읽어 둔 것을 씁니다(목록을 만들 때 강의마다 부름). 돌려준 값은 고치지 마세요."""
         key = stamp(fixes_path)
         if fixes_cache["stamp"] != key:
-            raw = _read_record(fixes_path) or {}
+            try:
+                raw = json.loads(fixes_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                raw = {}
+            except ValueError:  # 깨진 파일: 고칠 때까지 고친 것 없이(선생님 저장은 refuse_broken이 막음)
+                raw = {}
+            except OSError:  # NAS가 잠깐 답하지 않음: 지난번 것을 쓰고 다음에 다시 읽습니다(숨긴 항목이 다시 보이지 않게)
+                return fixes_cache["fixes"]
+            plain = lambda entry: {k: v for k, v in entry.items() if k != "text" or isinstance(v, str)}  # 손으로 적은 숫자 등
             fixes_cache.update(stamp=key, fixes={
-                key: {name: _SectionFixes({item: entry for item, entry in items.items() if isinstance(entry, dict)})
+                key: {name: _SectionFixes({item: plain(entry) for item, entry in items.items() if isinstance(entry, dict)})
                       for name, items in sections.items() if isinstance(items, dict)}
-                for key, sections in raw.items() if isinstance(sections, dict)})
+                for key, sections in (raw.items() if isinstance(raw, dict) else ()) if isinstance(sections, dict)})
         return fixes_cache["fixes"]
+
+    def fixes_stamp():
+        """찾아 둔 답(목록·검색·강의)의 열쇠: read_fixes가 실제로 읽은 파일 시점(못 읽었으면 지난번 시점 그대로)."""
+        read_fixes()
+        return fixes_cache["stamp"]
 
     def refuse_broken(path, what):
         """깨진 기록 파일 위에는 저장하지 않습니다: 그대로 덮어쓰면 예전에 고친 내용이 모두 사라집니다.
-        지금 깨진 파일을 .broken으로 복사해 둡니다(지난번 것이 있어도 새로: 고칠 것은 지금 파일)."""
-        if _read_record(path) is None:
+        지금 깨진 파일을 .broken으로 복사해 둡니다(지난번 것이 있어도 새로: 고칠 것은 지금 파일). 읽은 기록을 돌려줍니다."""
+        record = _read_record(path)
+        if record is None:
             backup = path.with_name(path.name + ".broken")
             shutil.copyfile(path, backup)
             raise HTTPException(409, f"{what} 파일({path.name})이 깨져 있어 저장하지 않았습니다. 원장님께 알려 주세요"
                                      f"(깨진 파일은 {backup.name}으로 복사해 두었습니다).")
+        return record
 
     def fix_of(section_fixes, item, items=()):
         """정리 파일을 다시 뽑아 띄어쓰기·끝 마침표만 달라진 항목에도 고친 내용을 씁니다. 다만 그 고침의 원래 항목이
@@ -952,8 +999,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             # (숨긴 낱말을 묻거나 고치기 전의 틀린 뜻을 정답으로 내지 않게).
             words = fixes.get(r.get("key"), {}).get("어휘", {})
             fills = fixes.get(r.get("key"), {}).get("빈칸 문제", {})  # 선생님이 숨긴 빈칸 문제도 뺍니다
-            quiz = [q for q in r.get("quiz", []) if ("choices" not in q or not fix_of(words, q["explanation"]))
-                    and not fix_of(fills, q.get("item", "")).get("hidden")]
+            # 지금 항목들: PDF에서 두 번 뽑힌 비슷한 항목이 서로의 고침을 빌려 쓰지 않게(fix_of)
+            words_now = next((set(s["items"]) for s in r["sections"] if s["name"] == "어휘"), set())
+            fills_now = {q["item"] for q in r.get("quiz", []) if "item" in q}
+            quiz = [q for q in r.get("quiz", []) if ("choices" not in q or not fix_of(words, q["explanation"], words_now))
+                    and not fix_of(fills, q.get("item", ""), fills_now).get("hidden")]
             out.append({**r, "sections": sections, "quiz": quiz})
         return out
 
@@ -976,8 +1026,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         fixes = read_fixes()
 
         def open_suspects(r):  # 선생님이 아직 고치거나 숨기지 않은 의심 항목
-            mine = fixes.get(ref_key(r), {})
-            return sum(1 for name, items in suspects(r).items() for item in items if not fix_of(mine.get(name, {}), item))
+            mine, current = fixes.get(ref_key(r), {}), {s["name"]: set(s["items"]) for s in reference_sections(r)}
+            return sum(1 for name, items in suspects(r).items() for item in items
+                       if not fix_of(mine.get(name, {}), item, current.get(name, ())))
         return [{"key": ref_key(r), "title": r["title"], "grade": r["grade"], "suspects": open_suspects(r),
                  "unmatched": len(unmatched_fixes(r, fixes.get(ref_key(r), {})))}
                 for r in references if reference_sections(r)]
@@ -1009,9 +1060,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if req.section == "빈칸 문제" and req.text not in (None, req.original):  # 빈칸 표시(두 칸 띄어쓰기)가 깨지기 쉬워
             raise HTTPException(400, "빈칸 문제는 숨기기만 할 수 있습니다")
         with fixes_lock:
-            refuse_broken(fixes_path, "학원 정리 고침")
-            # 파일 그대로를 고칩니다: 서버가 쓰지 않는 모양으로 손으로 적은 다른 줄도 지우지 않게(이 항목 자리만 바로잡음)
-            fixes = _read_record(fixes_path) or {}
+            # 파일 그대로를 고칩니다: 서버가 쓰지 않는 모양으로 손으로 적은 다른 줄도 지우지 않게(이 항목 자리만 바로잡음).
+            # 한 번만 읽습니다: 다시 읽다 NAS가 답하지 않으면 빈 기록 위에 이 고침만 저장되었습니다.
+            fixes = refuse_broken(fixes_path, "학원 정리 고침")
             if not isinstance(fixes.get(key), dict):
                 fixes[key] = {}
             if not isinstance(fixes[key].get(req.section), dict):
@@ -1094,8 +1145,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         video = get_video(video_id)
         if view:  # 플레이어에서 강의를 열 때만 view=1
             record_open(video_id, request.client.host if request.client else "")
-        key = (stamp(Path(data_dir) / f"{video_id}.json"), stamp(fixes_path))  # 읽기 전에 봐 둡니다(그사이 바뀌면 다음에 다시)
-        analysis = read_analysis(video_id)
+        key = (stamp(Path(data_dir) / f"{video_id}.json"), fixes_stamp())  # 읽기 전에 봐 둡니다(그사이 바뀌면 다음에 다시)
+        # 목록이 '분석 전'으로 보는 파일(Infinity 등 모양이 다름)은 플레이어에도 분석 없이: 보내다 오류 나지 않게
+        analysis = read_analysis(video_id) if analysis_entry(video_id) else None
         # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 대본에서 찾은 시간과 함께 보냅니다.
         summaries = []
         if analysis and not analysis.get("guide"):
@@ -1131,7 +1183,11 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     @app.get("/media/{video_id}")
     def media(video_id: str):
-        return FileResponse(get_video(video_id)["path"])
+        path = get_video(video_id)["path"]
+        # 목록에는 있는데 열리지 않음: NAS가 잠깐 끊김. 플레이어가 다시 받아 보게 503(지운 파일은 다음 훑기에 목록에서 빠져 404)
+        if not path.is_file():
+            raise HTTPException(503, "영상 파일을 잠시 읽지 못했습니다. 잠시 뒤 다시 해 주세요")
+        return FileResponse(path)
 
     limits = _AskLimits()
 
