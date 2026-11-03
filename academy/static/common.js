@@ -42,6 +42,14 @@ const teacher = {
   forget() {
     try { localStorage.removeItem("teacher-key"); } catch {}
   },
+  // 이 기기에서 선생님 기능을 쓸 수 있는지(서버 TEACHER_HOSTS) → {here, address}. 모르면 쓸 수 있다고 보고 저장할 때 서버가 막습니다.
+  device: null,
+  here() {
+    teacher.device ??= fetch("/api/teacher").then((r) => (r.ok ? r.json() : { here: true })).catch(() => ({ here: true }));
+    return teacher.device;
+  },
+  elsewhere: (address) => el("p", { class: "notice teacher-elsewhere" },
+    `선생님 기능은 정한 컴퓨터(원장님 PC)에서만 바꿀 수 있습니다. 이 기기(${address})에서도 쓰려면 서버 설정 TEACHER_HOSTS에 이 주소를 더해야 합니다.`),
   async put(url, body) {  // 돌려주는 값: {res, problem}. problem이 ""이면 저장됨
     const res = await fetch(url, { method: "PUT", body: JSON.stringify(body),
                                    headers: { "Content-Type": "application/json", "X-Teacher-Key": teacher.key() } }).catch(() => null);

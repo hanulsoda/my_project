@@ -102,7 +102,14 @@
     showView(location.hash.slice(1) || store.get("status-view"));
 
     // ---- 선생님: 이번 주 강의 지정(열쇠는 common.js의 teacher가 기억하고 보냄) ----
-    const showTeacher = () => { $("key-form").hidden = !!teacher.key(); $("picker").hidden = !teacher.key(); };
+    let elsewhere = false;  // 정한 컴퓨터가 아니면 열쇠 칸·고르기 대신 안내
+    const showTeacher = () => { $("key-form").hidden = elsewhere || !!teacher.key(); $("picker").hidden = elsewhere || !teacher.key(); };
+    teacher.here().then(({ here, address }) => {
+      if (here) return;
+      elsewhere = true;
+      $("key-form").before(teacher.elsewhere(address));
+      showTeacher();
+    });
     $("key-form").onsubmit = (e) => {
       e.preventDefault();
       if (teacher.remember($("teacher-key"))) showTeacher();

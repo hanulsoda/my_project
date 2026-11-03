@@ -40,6 +40,7 @@
     let refs = [];
     const say = (text) => { $("fix-status").textContent = text; };
     loadVideos().then((videos) => fillSidebar(videos, { here: "" }));
+    teacher.here().then(({ here, address }) => { if (!here) $("key-form").before(teacher.elsewhere(address)); });
 
     $("key-form").onsubmit = (e) => {
       e.preventDefault();
@@ -69,6 +70,7 @@
     }
 
     async function save(key, body) {
+      if (!(await teacher.here()).here) return say("선생님 기능은 정한 컴퓨터에서만 쓸 수 있습니다.");
       if (!teacher.key()) {
         $("key-form").hidden = false;
         return say("고치려면 선생님 열쇠가 필요합니다. 열쇠를 넣어 주세요.");

@@ -109,7 +109,7 @@ class PicksRequest(BaseModel):
 
 
 def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=(),
-               teacher_key=None) -> FastAPI:
+               teacher_key=None, teacher_hosts=()) -> FastAPI:
     """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다."""
     @asynccontextmanager
     async def lifespan(app):
@@ -418,7 +418,18 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         count, last = misses[kind].get(host, (0, 0))
         misses[kind][host] = (count + 1 if wall_clock() - last < 600 else 1, wall_clock())
 
+    # 열쇠는 암호화 없는 http로 오가서 같은 Wi-Fi에서 엿볼 수 있습니다. teacher_hosts를 정하면 그 기기에서만 받아,
+    # 열쇠가 새어도 다른 기기에서는 바꾸지 못합니다(보는 것은 누구나).
+    def teacher_here(request):
+        return not teacher_hosts or client_host(request) in teacher_hosts
+
+    @app.get("/api/teacher")
+    def teacher_device(request: Request):
+        return {"here": teacher_here(request), "address": client_host(request)}
+
     def require_teacher(request):
+        if not teacher_here(request):
+            raise HTTPException(403, "선생님 기능은 정한 컴퓨터에서만 쓸 수 있습니다")
         host = guard("key", request, 10, "선생님 열쇠를 여러 번 틀려 10분 동안 막았습니다")
         given = request.headers.get("x-teacher-key", "")
         if not teacher_key or not secrets.compare_digest(given.encode(), teacher_key.encode()):
@@ -719,4 +730,5 @@ app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  load_references(os.environ.get("REFERENCES_FILE")),
                  os.environ.get("LOG_DIR"),
                  tuple(filter(None, os.environ.get("USAGE_IGNORE", "").split(","))),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
-                 _teacher_key(os.environ.get("TEACHER_KEY_FILE")))
+                 _teacher_key(os.environ.get("TEACHER_KEY_FILE")),
+                 tuple(filter(None, os.environ.get("TEACHER_HOSTS", "").split(","))))  # 선생님 기능을 쓸 기기 주소

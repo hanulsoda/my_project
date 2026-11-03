@@ -599,6 +599,22 @@ def test_long_search_words_skip_the_slow_near_spelling_search(setup, monkeypatch
     assert near_words == ["제망매가", "제망매가"]
 
 
+def test_teacher_changes_only_come_from_the_teachers_computers(tmp_path):
+    video_dir, ids = two_lectures(tmp_path)
+    app = create_app(video_dir, tmp_path / "data", None, teacher_key="right", teacher_hosts=("10.0.0.6",))
+    desk, phone = (TestClient(app, client=(host, 1)) for host in ("10.0.0.6", "10.0.0.50"))
+    key = {"X-Teacher-Key": "right"}
+
+    assert phone.get("/api/teacher").json() == {"here": False, "address": "10.0.0.50"}
+    assert phone.put("/api/picks", json={"ids": ids[:1]}, headers=key).status_code == 403  # 열쇠가 새어도 다른 기기에서는
+    assert phone.put("/api/references/x/fix", json={"section": "s", "original": "o", "hidden": True}, headers=key).status_code == 403
+    assert desk.get("/api/teacher").json() == {"here": True, "address": "10.0.0.6"}
+    assert desk.put("/api/picks", json={"ids": ids[:1]}, headers=key).status_code == 200
+    assert phone.get("/api/picks").json()["lectures"][0]["id"] == ids[0]  # 보는 것은 누구나
+    anywhere = TestClient(create_app(video_dir, tmp_path / "data", None, teacher_key="right"), client=("10.0.0.50", 1))
+    assert anywhere.get("/api/teacher").json()["here"] is True  # 정하지 않으면 어느 기기에서나(지금까지처럼)
+
+
 def test_saving_picks_at_the_same_time_never_fails(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     video_dir, ids = two_lectures(tmp_path)
