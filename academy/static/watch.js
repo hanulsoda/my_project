@@ -448,12 +448,22 @@ document.addEventListener("mousedown", (e) => {
 });
 video.addEventListener("contextmenu", (e) => e.preventDefault());  // 우클릭 '동영상 저장' 메뉴를 숨깁니다
 
-// 안드로이드 크롬은 휴대폰에서만 전체 화면 영상을 가로로 돌려 줍니다. 태블릿(짧은 변 600px 이상)은 여기서 돌립니다.
-// 아이패드 사파리와 컴퓨터는 화면을 돌릴 수 없어 lock이 거절되고, 그냥 넘어갑니다.
+// 안드로이드 크롬은 휴대폰에서만 영상과 화면 방향을 맞춰 줍니다. 태블릿(짧은 변 600px 이상)은 여기서 똑같이 합니다:
+// 전체 화면 버튼을 누르면 가로로 돌리고, 보다가 가로로 돌리면 전체 화면, 그렇게 들어간 전체 화면은 세로로 돌리면 끝냅니다.
+// 아이패드 사파리와 컴퓨터는 화면 돌리기와 누르지 않은 전체 화면을 거절해서, 그때는 그냥 넘어갑니다.
+const tablet = Math.min(screen.width, screen.height) >= 600 && screen.orientation?.lock;
+const landscape = () => screen.orientation.type.startsWith("landscape");
+let turnedIn = false;  // 가로로 돌려서 들어간 전체 화면
 document.addEventListener("fullscreenchange", () => {
-  if (Math.min(screen.width, screen.height) < 600 || !screen.orientation?.lock) return;
-  if (!document.fullscreenElement) screen.orientation.unlock();
-  else if (video.videoWidth > video.videoHeight) screen.orientation.lock("landscape").catch(() => {});
+  if (!tablet) return;
+  if (!document.fullscreenElement) { turnedIn = false; screen.orientation.unlock(); }
+  else if (!landscape() && video.videoWidth > video.videoHeight) screen.orientation.lock("landscape").catch(() => {});
+});
+screen.orientation?.addEventListener("change", () => {
+  if (!tablet) return;
+  // 기기를 돌린 순간에는 화면을 누르지 않아도 전체 화면이 허용됩니다(Fullscreen 표준).
+  if (landscape() && !document.fullscreenElement && !video.paused) video.requestFullscreen().then(() => { turnedIn = true; }, () => {});
+  else if (!landscape() && turnedIn && document.fullscreenElement === video) document.exitFullscreen().catch(() => {});
 });
 
 // ---- 이어보기 + 지금 위치 표시 ----
