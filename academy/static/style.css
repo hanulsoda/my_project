@@ -408,6 +408,9 @@ button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .video-list > li { content-visibility: auto; contain-intrinsic-size: auto 64px; }
 .content-body.grid .video-list > li { contain-intrinsic-size: auto 220px; }
 .thumb { flex: none; width: 72px; aspect-ratio: 16 / 9; border-radius: 6px; background: var(--hover); object-fit: cover; box-shadow: 0 0 0 1px var(--border); }
+/* 교재 그림이 없는 강의(준비 중·그림 없음): 빈 회색 칸은 깨진 그림처럼 보여, 가운데에 흐린 재생 표시를 그립니다(꾸밈) */
+span.thumb { display: grid; place-items: center; }
+span.thumb::before { content: ""; width: 30%; max-width: 30px; aspect-ratio: 1; background: var(--control); opacity: 0.5; -webkit-mask: var(--i-play) center / contain no-repeat; mask: var(--i-play) center / contain no-repeat; }
 .video-text { min-width: 0; }
 .video-title, .video-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .video-title { font-weight: 600; }
