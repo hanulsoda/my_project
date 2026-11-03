@@ -541,6 +541,7 @@ kbd { display: inline-block; min-width: 1.4em; padding: 1px 6px; border: 1px sol
 }
 .tabs { margin: 10px 10px 0; overflow-x: auto; scrollbar-width: none; }
 .tabs button { flex: 1; padding: 6px 8px; font-size: 14px; }
+.status-tabs { max-width: 440px; margin: 0 0 16px; }  /* 현황 화면: 개요 · 선생님 · 통계 · 운영 */
 .tab-body { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 16px; scrollbar-width: thin; }
 
 button.time, a.time {

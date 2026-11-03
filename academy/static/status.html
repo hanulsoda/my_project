@@ -16,10 +16,22 @@
     <header class="content-head"><a class="back" href="./">강의</a><div class="heading"><h1>강의 현황</h1><p id="view-sub" class="sub"></p></div></header>
     <nav class="sidebar" aria-label="보관함과 폴더"></nav>
     <div class="content-body"><div class="list-page">
+    <nav class="tabs status-tabs" role="tablist" aria-label="현황 나누어 보기">
+      <button type="button" role="tab" id="tab-btn-overview" aria-controls="view-overview" data-view="overview">개요</button>
+      <button type="button" role="tab" id="tab-btn-teacher" aria-controls="view-teacher" data-view="teacher">선생님</button>
+      <button type="button" role="tab" id="tab-btn-stats" aria-controls="view-stats" data-view="stats">통계</button>
+      <button type="button" role="tab" id="tab-btn-ops" aria-controls="view-ops" data-view="ops">운영</button>
+    </nav>
+    <div id="view-overview" role="tabpanel" aria-labelledby="tab-btn-overview">
     <p class="notice">강의마다 학생이 받는 것을 셉니다. 한 강의는 Claude 요점 정리 → 학원 정리 → 자동 목차 → 페이지만 순서로 하나에만 셉니다.</p>
     <dl id="counts" class="stats"><dt>불러오는 중…</dt><dd></dd></dl>
+    <h2>자동 목차 진행</h2>
+    <p id="toc" class="notice"></p>
+    <progress id="toc-bar" max="1" value="0" aria-label="자동 목차 진행률"></progress>
+    </div>
+    <div id="view-teacher" role="tabpanel" aria-labelledby="tab-btn-teacher" hidden>
     <section id="teacher">
-      <h2>이번 주 강의 지정 (선생님)</h2>
+      <h2>이번 주 강의 지정</h2>
       <p class="notice">고른 강의는 모든 학생의 사이드바 맨 위에 '이번 주 강의'로 나옵니다. 바꾸려면 선생님 열쇠가 필요하고, 넣은 열쇠는 이 브라우저에 기억합니다.</p>
       <form id="key-form" class="note-form" hidden>
         <input id="teacher-key" type="password" autocomplete="off" aria-label="선생님 열쇠" placeholder="선생님 열쇠">
@@ -37,9 +49,9 @@
       <p><a href="fixes.html">학원 정리 고치기 →</a> 학생이 보는 학원 정리의 틀린 항목을 고치거나 숨깁니다(같은 선생님 열쇠).</p>
       <p><a href="handout.html">학생 안내문 인쇄 →</a> 학원 주소 QR과 쓰는 법을 A4 한 장에 담아 나눠 줍니다.</p>
     </section>
-    <h2>자동 목차 진행</h2>
-    <p id="toc" class="notice"></p>
-    <progress id="toc-bar" max="1" value="0" aria-label="자동 목차 진행률"></progress>
+    </div>
+    <div id="view-stats" role="tabpanel" aria-labelledby="tab-btn-stats" hidden>
+    <p id="stats-none" class="notice" hidden>이 서버는 이용 기록을 모으지 않습니다(LOG_DIR 없음).</p>
     <section id="usage" hidden>
       <h2>이용 통계 (최근 30일)</h2>
       <p id="usage-summary" class="notice"></p>
@@ -54,12 +66,15 @@
       <ol id="quiz-hardest" class="plain"></ol>
       <p class="notice">기기마다 처음 푼 결과만 셉니다(다시 푼 것은 빼고). 세 기기 넘게 풀고 한 번이라도 틀린 문제를 정답률이 낮은 순서로 보여 줍니다. 빈칸 문제는 학생이 '알았어요·몰랐어요'로 스스로 고른 결과입니다.</p>
     </section>
+    </div>
+    <div id="view-ops" role="tabpanel" aria-labelledby="tab-btn-ops" hidden>
     <section id="ops" hidden>
       <h2>운영 기록</h2>
       <dl id="ops-lines" class="stats"></dl>
     </section>
     <h2>분석되지 않은 강의</h2>
     <ul id="unanalyzed" class="plain"></ul>
+    </div>
     </div></div>
   </main>
   <script src="common.js"></script>
@@ -71,6 +86,20 @@
       fillSidebar(videos, { here: "" });
       if ($("pick-search").value) $("pick-search").oninput();  // 강의 목록이 오기 전에 찾기 칸에 쓴 경우
     });
+
+    // ---- 탭: 개요 · 선생님 · 통계 · 운영. 고른 탭은 기억하고, status.html#teacher처럼 주소로 바로 열 수도 있습니다 ----
+    const views = [...document.querySelectorAll(".status-tabs button")];
+    const showView = (name) => {
+      const tab = views.find((b) => b.dataset.view === name) || views[0];
+      for (const b of views) {
+        b.classList.toggle("active", b === tab);
+        b.setAttribute("aria-selected", String(b === tab));
+        $(b.getAttribute("aria-controls")).hidden = b !== tab;
+      }
+      store.set("status-view", tab.dataset.view);
+    };
+    for (const b of views) b.onclick = () => { history.replaceState(null, "", `#${b.dataset.view}`); showView(b.dataset.view); };
+    showView(location.hash.slice(1) || store.get("status-view"));
 
     // ---- 선생님: 이번 주 강의 지정(열쇠는 X-Teacher-Key로 보내고, 틀리면 지우고 다시 묻습니다) ----
     const teacherKey = () => store.get("teacher-key") || "";
@@ -131,7 +160,7 @@
       const { target, done, last_3_days: recent } = s.toc_progress;
       // 최근 3일 속도로 남은 날을 어림합니다. 밤 작업 마지막 기록이 '…멈춥니다'(팬·NAS 문제로 멈춤)면 어림하지 않습니다.
       // 매일 아침의 정상 종료 기록은 '멈춤'이라 여기에 걸리지 않습니다.
-      const pace = s.ops?.night?.includes("멈춥니다") ? "지금은 밤 작업이 멈춰 있습니다(아래 운영 기록 참고)."
+      const pace = s.ops?.night?.includes("멈춥니다") ? "지금은 밤 작업이 멈춰 있습니다(운영 탭의 기록 참고)."
         : recent ? `최근 3일 동안 ${recent.toLocaleString()}개(하루 약 ${Math.round(recent / 3)}개) 만들어, 이대로면 약 ${Math.ceil((target - done) / (recent / 3))}일 더 걸립니다.`
         : "최근 3일 동안 만든 목차가 없습니다(밤 작업이 멈춰 있을 수 있습니다).";
       document.getElementById("toc").textContent = `대상(Claude 요점 정리가 없는 강의) ${target.toLocaleString()}개 중 `
@@ -167,6 +196,7 @@
           el("span", { class: "sr-only" }, `${"월화수목금토일"[i]}요일 ${n}번`))));
         document.getElementById("usage").hidden = false;
       }
+      $("stats-none").hidden = !!(s.usage || s.quiz);
       document.getElementById("unanalyzed").replaceChildren(...(s.unanalyzed.length
         ? s.unanalyzed.map((title) => el("li", {}, title)) : [el("li", { class: "notice" }, "없습니다.")]));
     });
