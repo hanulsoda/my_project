@@ -735,8 +735,25 @@ def test_a_message_that_the_video_cannot_play_stays(phone, site):
     page.clock.run_for(10000)
     expect(status).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")
 
+    page.locator("#bookmark-btn").tap()  # 북마크 안내가 잠깐 덮어도
+    expect(status).to_contain_text("북마크했습니다")
+    page.clock.run_for(6000)
+    expect(status).to_have_text("이 영상을 재생할 수 없습니다. 선생님께 알려 주세요.")  # 지워지지 않고 되살아남
 
-BLOCKED_STORAGE = """Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
+
+def test_the_tabs_do_not_move_under_the_finger_on_an_upright_phone(phone, site):
+    page = phone(390, 844)
+    page.clock.install()
+    open_player(page, site)
+    page.locator("#bookmark-btn").tap()
+    expect(page.locator("#status")).to_contain_text("메모 탭에서 볼 수 있습니다")
+    before = page.locator("[data-tab=notes]").bounding_box()["y"]
+
+    page.clock.run_for(6000)  # 세워 든 휴대폰은 안내가 단추를 가리지 않아 지우지 않음(지우면 탭이 올라가 누른 곳이 빗나감)
+    assert page.locator("[data-tab=notes]").bounding_box()["y"] == before
+
+
+BLOCKED_STORAGE ="""Object.defineProperty(window, 'localStorage', {  // 아이폰 '모든 쿠키 차단', 크롬 '사이트 데이터 차단'
     get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });"""
 
 

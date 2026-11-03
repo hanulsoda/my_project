@@ -63,12 +63,13 @@
     // found는 찾기를 누른 낱말입니다: 결과를 보며 칸에 쓰다 만 낱말을 돌아올 때 대신 찾지 않게, 칸에도 그 낱말을 되살립니다.
     const visit = () => history.state?.list || {};
     const searched = () => (typeof visit().found === "string" ? visit().found : "");  // 예전 기록(found: true)에는 낱말이 없음
-    search.value = searched() || visit().q || "";
+    // 선생님 말에서 찾을 때만 그 낱말을 되살립니다: 제목으로 바꾸고 이 화면에서 제목을 찾았으면 그 글(q)이 맞습니다.
+    search.value = (saved.scope === "spoken" && searched()) || visit().q || "";
     guideOnly.checked = !!saved.guideOnly;
     let scope = saved.scope === "spoken" ? "spoken" : "title";
     let layout = saved.layout === "grid" ? "grid" : "list";  // 목록 보기 | 그림 보기
     $("sort").value = saved.sort === "new" ? "new" : "name";  // 이름순 | 최근 올라온 순
-    let foundHere = searched();  // 이 화면에서 선생님 말 결과를 보던 낱말: 돌아오면 다시 찾아 보여 줍니다
+    let foundHere = saved.scope === "spoken" ? searched() : "";  // 이 화면에서 선생님 말 결과를 보던 낱말: 돌아오면 다시 찾아 보여 줍니다
     const save = () => {
       store.set("list", { guideOnly: guideOnly.checked, scope, layout, sort: $("sort").value });
       if (visit().q === search.value && searched() === foundHere) return;
@@ -238,7 +239,7 @@
     window.onhashchange = () => {  // 폴더를 고르면 찾던 것 없이 그 폴더. 뒤로 가기로 찾던 화면에 오면 그때 찾던 것을 다시 보여 줍니다.
       showingFound = false;
       search.value = visit().q || "";
-      foundHere = searched();
+      foundHere = scope === "spoken" ? searched() : "";
       reveal();
       render();
       scrollTo(0, 0);
@@ -296,6 +297,8 @@
       if (scope === "title") return;  // 제목은 입력하는 대로 걸러 보여 줍니다
       const q = search.value.trim(), box = $("found"), seq = ++searchSeq, back = again;
       again = false;
+      // 새로 찾으면 앞서 연 강의(이어 보기·다른 낱말의 결과에서 연 것)는 잊습니다: 이 결과로 돌아올 때 그 줄로 내려가지 않게
+      if (!back) try { sessionStorage.removeItem("opened"); } catch {}
       showingFound = true;
       foundHere = q;
       render();

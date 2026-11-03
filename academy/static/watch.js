@@ -19,13 +19,19 @@ const MISSING = "이 영상을 찾을 수 없습니다. 선생님께 알려 주�
 // 서버가 다른 답(파일 없음 404, 파일을 읽지 못한 500 등)을 하면 다시 받아도 소용없어 그만두고 알립니다.
 const serverDown = (res) => !res || [502, 503, 504].includes(res.status);
 const giveUp = (text) => { lost = null; clearTimeout(retry); $("status").textContent = text; };
-// 알리기만 하는 안내(이어 보기·북마크·다시 연결됨 등)는 5초 뒤 지웁니다. 옆으로 눕힌 휴대폰에서는 안내가 단추 위에 있어
-// 남겨 두면 챕터·속도 단추가 화면 아래로 밀렸습니다. 오류·연결 안내는 그대로 두고, 그사이 바뀐 안내도 지우지 않습니다.
+// 알리기만 하는 안내(이어 보기·북마크·다시 연결됨 등)는 옆으로 눕힌 휴대폰에서 5초 뒤 지웁니다. 거기서는 안내가 단추 위에 있어
+// 남겨 두면 챕터·속도 단추가 화면 아래로 밀렸습니다(style.css와 같은 조건). 세워 든 휴대폰은 안내가 단추를 가리지 않고,
+// 지우면 아래 탭이 올라가 누르려던 곳이 빗나가 그대로 둡니다. 오류·연결 안내는 그대로 두고, 그사이 바뀐 안내도 지우지 않습니다.
+// 영상을 볼 수 없다는 안내를 덮었으면 지우지 않고 그 안내로 되돌립니다.
+const SIDEWAYS = "(orientation: landscape) and (max-height: 500px)";
 let briefly = null;
 function sayBriefly(text) {
+  const before = $("status").textContent, keep = [UNPLAYABLE, MISSING].includes(before) ? before : "";
   $("status").textContent = text;
   clearTimeout(briefly);
-  briefly = setTimeout(() => { if ($("status").textContent === text) $("status").textContent = ""; }, 5000);
+  briefly = setTimeout(() => {
+    if ($("status").textContent === text && (keep || matchMedia(SIDEWAYS).matches)) $("status").textContent = keep;
+  }, 5000);
 }
 video.addEventListener("error", async () => {
   const code = video.error?.code;

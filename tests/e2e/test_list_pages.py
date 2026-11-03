@@ -948,3 +948,69 @@ def test_a_review_set_while_the_phone_clock_was_ahead_comes_back_within_a_week(p
     page.goto(site.url + "/review.html")
 
     expect(page.locator("#review")).to_contain_text("다음 복습: 7일 뒤 1개")  # 가장 긴 간격(7일)보다 멀지 않게
+
+
+# 사파리처럼 새로 고침·뒤로 가기에서 찾기 칸에 쓰던 글을 되살리지 않게(크롬은 되살려 문제를 가림)
+NO_FORM_RESTORE = """new MutationObserver((_, o) => { const s = document.getElementById('search');
+    if (s) { s.setAttribute('autocomplete', 'off'); o.disconnect(); } }).observe(document, { childList: true, subtree: true });"""
+
+
+def many_spoken_results(page, site, at=25):
+    real, others = site.ids[ZMG], [f"{i:012x}" for i in range(1, 40)]
+    page.route("**/api/search?**", lambda route: route.fulfill(json={
+        "exact": [{"id": real if i == at else others[i], "title": f"2022개정/고1/미래엔/결과 {i:02d}", "times": [10.0 + i],
+                   "chapters": [""], "count": 1, "also": []} for i in range(30)], "similar": [], "notes": []}))
+
+
+def test_spoken_results_do_not_scroll_to_a_lecture_opened_from_another_list(page, site):
+    many_spoken_results(page, site)
+    remember(page, site, {"list": {"scope": "spoken"}, f"pos:{site.ids[ZMG]}": {"t": 60, "d": 150, "at": 1}})
+    page.goto(site.url + "/")
+    page.locator("#recent .video-list a").first.click()  # 이어 보기에서 연 강의
+    page.wait_for_url("**/watch.html**")
+    page.go_back()
+    expect(page.locator("#recent .video-list a").first).to_be_visible()
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+
+    page.reload()  # 이 결과에서는 아무것도 열지 않음
+    expect(page.locator("#found h2").first).to_contain_text("반어법")
+    page.wait_for_timeout(500)
+    assert page.evaluate("scrollY") == 0  # 이어 보기에서 연 강의 줄로 내려가지 않음
+
+
+def test_a_title_search_typed_after_peeking_at_a_folder_survives_back_on_safari(page, site):
+    page.add_init_script(NO_FORM_RESTORE)
+    remember(page, site, {"list": {"scope": "spoken"}})
+    page.goto(site.url + "/")
+    page.fill("#search", "반어법")
+    page.press("#search", "Enter")
+    expect(page.locator("#found h2").first).to_contain_text("‘반어법’")
+    page.locator("nav.sidebar a", has_text="시험").click()  # 옆 폴더에 들러 제목으로 바꿈
+    expect(page.locator("#view-title")).to_have_text("시험")
+    page.click("#scope-title")
+    page.go_back()
+    page.fill("#search", "청산")  # 이제 제목에서 찾아 강의를 엶
+    page.wait_for_timeout(300)
+    page.locator(".video-list a:visible", has_text="청산별곡").first.click()
+    page.wait_for_url("**/watch.html**")
+
+    page.go_back()
+    expect(page.locator("#view-sub")).to_contain_text("‘청산’")  # 예전 선생님 말 낱말 '반어법'이 아님
+    expect(page.locator("#search")).to_have_value("청산")
+
+
+def test_why_a_new_code_was_refused_stays_next_to_the_earlier_codes_time(page, site):
+    answers = [dict(json={"code": "123456", "expires": 0}),
+               dict(status=429, json={"detail": "코드를 너무 많이 만들었습니다. 10분 뒤 다시 해 주세요"})]
+    page.route("**/api/transfer", lambda route: route.fulfill(**answers.pop(0)))
+    page.goto(site.url + "/move.html")
+    page.click("#send")
+    expect(page.locator("#code")).to_have_text("123 456")
+    page.click("#send")
+    expect(page.locator("#send-status")).to_contain_text("코드를 너무 많이 만들었습니다")
+
+    page.wait_for_timeout(1500)  # 앞서 만든 코드의 남은 시간이 1초마다 바뀌어도
+    expect(page.locator("#send-status")).to_contain_text("코드를 너무 많이 만들었습니다")
+    expect(page.locator("#send-status")).to_contain_text("남은 시간")
