@@ -1,6 +1,7 @@
 anthropic>=1.15
 fastapi>=0.143
 uvicorn>=0.54
+segno>=1.6,<2  # 학생 안내문 QR
 faster-whisper>=1.2
 # shortcut: faster-whisper 1.2.1이 PyAV 19에서 깨짐(metadata_errors 인자), faster-whisper가 고치면 제거
 av<19

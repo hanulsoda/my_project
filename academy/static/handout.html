@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>학생 안내문</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="handout-page">
+  <p class="handout-tools"><a href="status.html">← 강의 현황</a><button type="button" id="print" class="retry">인쇄</button></p>
+  <article class="handout">
+    <h1>학습 플레이어 사용 안내</h1>
+    <p class="lead">학원 수업 영상을 휴대폰·태블릿·컴퓨터로 다시 보고, 요점 정리와 퀴즈로 복습합니다.</p>
+    <div class="handout-qr">
+      <img src="qr.svg" alt="학습 플레이어 주소 QR" width="180" height="180">
+      <div>
+        <p><b>학원 Wi-Fi</b>에 연결한 뒤 카메라로 QR을 찍거나 아래 주소를 입력하세요. 학원 안 Wi-Fi에서만 열립니다.</p>
+        <p id="url" class="handout-url"></p>
+        <p id="local-warn" class="notice" hidden>이 주소는 이 컴퓨터에서만 열립니다. 학생이 여는 주소(예: http://192.168.0.32:8001)로 이 화면을 다시 열어 인쇄하세요.</p>
+      </div>
+    </div>
+    <ol class="handout-steps">
+      <li><b>홈 화면에 추가</b> — 아이폰은 Safari의 공유 버튼 → '홈 화면에 추가', 안드로이드는 Chrome의 ⋮ → '홈 화면에 추가'. 다음부터 앱처럼 바로 열립니다.</li>
+      <li><b>강의 찾기</b> — '폴더'에서 학년·과목을 고르거나 위 찾기 칸에 작품 이름을 넣으세요. 맨 위 '이번 주 강의'는 선생님이 고른 강의입니다.</li>
+      <li><b>보면서 공부하기</b> — 챕터를 눌러 원하는 곳으로 건너뛰고, 요점 정리·퀴즈·찾기·메모 탭을 쓰세요. 보던 곳은 '이어 보기'에 남습니다.</li>
+      <li><b>틀린 문제 복습</b> — 퀴즈에서 틀린 문제는 1일·3일·7일 간격으로 '틀린 문제 복습'에 다시 나옵니다.</li>
+      <li><b>기기 옮기기</b> — 공부 기록은 쓰는 기기에만 남습니다. 휴대폰을 바꿀 때는 '기기 옮기기'에서 여섯 자리 번호로 옮기세요.</li>
+    </ol>
+    <p class="notice">이름·전화번호는 받지 않습니다. 잘 안 열리면 선생님께 말해 주세요.</p>
+  </article>
+  <script>
+    document.getElementById("url").textContent = location.origin;  // QR(qr.svg)도 지금 연 주소로 만듭니다
+    document.getElementById("local-warn").hidden = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+    document.getElementById("print").onclick = () => print();
+  </script>
+</body>
+</html>

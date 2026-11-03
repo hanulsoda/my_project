@@ -678,3 +678,27 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
   .answers { break-before: page; }
   .answers p { margin: 3pt 0; }
 }
+
+/* 학생 안내문: 화면에서는 종이처럼, 인쇄하면 A4 한 장 */
+.handout-page { padding: 24px 16px; }
+.handout-tools { display: flex; justify-content: space-between; align-items: center; max-width: 720px; margin: 0 auto 12px; }
+.handout { max-width: 720px; margin: 0 auto; padding: 32px; word-break: keep-all; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.handout h1 { margin: 0 0 4px; font-size: 26px; }
+.handout .lead { margin: 0 0 20px; color: var(--muted); }
+.handout-qr { display: flex; gap: 20px; align-items: center; padding: 16px; border: 1px solid var(--border); border-radius: 10px; }
+.handout-qr img { flex: none; width: 180px; height: 180px; }
+.handout-qr p { margin: 0; }
+.handout-qr p + p { margin-top: 8px; }
+.handout-url { font-size: 22px; font-weight: 600; overflow-wrap: anywhere; }
+.handout-steps { margin: 20px 0; padding-left: 22px; line-height: 1.7; }
+.handout-steps li + li { margin-top: 8px; }
+@media (max-width: 520px) {
+  .handout { padding: 20px; }
+  .handout-qr { flex-direction: column; text-align: center; }
+}
+@media print {
+  @page { size: A4; margin: 16mm; }
+  .handout-page { padding: 0; }
+  .handout-tools { display: none; }
+  .handout { max-width: none; padding: 0; border: 0; }
+}

@@ -3,6 +3,7 @@ import threading
 import time
 
 import pytest
+import segno
 from fastapi.testclient import TestClient
 
 from academy import server
@@ -722,6 +723,20 @@ def test_pages_can_be_added_to_the_home_screen(setup):
     for page in ["/", "/watch.html", "/review.html", "/notes.html", "/status.html"]:
         html = client.get(page).text
         assert 'rel="manifest" href="manifest.json"' in html and 'rel="apple-touch-icon"' in html
+
+
+def test_handout_qr_opens_the_address_the_teacher_printed_from(setup):
+    client, _, _ = setup
+
+    qr = client.get("/qr.svg", headers={"Host": "192.168.0.32:8001"})
+    other = client.get("/qr.svg", headers={"Host": "academy.test"})
+
+    assert qr.status_code == 200 and qr.headers["content-type"].startswith("image/svg+xml")
+    assert qr.text == server.qr_svg("http://192.168.0.32:8001/") != other.text
+    assert segno.make("http://192.168.0.32:8001/", error="m").designator in ("2-M", "3-M")  # 휴대폰 카메라가 잘 읽는 작은 QR
+    assert 'fill="#fff"' in qr.text  # 어두운 화면에서도 읽히게 흰 바탕
+    assert 'src="qr.svg"' in client.get("/handout.html").text
+    assert 'href="handout.html"' in client.get("/status.html").text
 
 
 def test_student_pages_are_revalidated_so_updates_reach_browsers(setup):

@@ -4,6 +4,7 @@
 """
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -20,9 +21,10 @@ from time import monotonic, time as wall_clock
 from typing import Literal
 
 import anthropic
+import segno
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -40,6 +42,13 @@ INDEX_VERSION = 1  # 저장해 두는 서버 요약(.server-index.cache)에 넣�
 class Turn(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=10000)
+
+
+def qr_svg(url):
+    """학생 안내문에 찍을 QR(흰 바탕이라 어두운 화면에서도 읽힘)."""
+    out = io.BytesIO()
+    segno.make(url, error="m").save(out, kind="svg", scale=10, light="#fff")
+    return out.getvalue().decode()
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -594,6 +603,10 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             logging.exception("AI 답변 실패")
             raise HTTPException(502, f"AI 답변을 받지 못했습니다: {e}")
         return {"answer": text}
+
+    @app.get("/qr.svg")
+    def qr(request: Request):  # 선생님이 연 주소 그대로(학원 Wi-Fi의 학생도 같은 주소로 들어옴)
+        return Response(qr_svg(str(request.base_url)), media_type="image/svg+xml")
 
     app.mount("/", RevalidatedStaticFiles(directory=STATIC_DIR, html=True))
     return app
