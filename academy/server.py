@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from itertools import accumulate
 from pathlib import Path
-from threading import BoundedSemaphore, Event, Lock, Thread
+from threading import BoundedSemaphore, Event, Lock, Thread, local
 from time import monotonic, time as wall_clock
 from typing import Literal
 
@@ -61,6 +61,7 @@ GUESSES_PER_HOUR = 100  # 인터넷의 한 망(IPv4 /24, IPv6 /64)이 1시간에
 #                        (주소를 바꿔 가며 맞혀 보지 못하게. 서버 전체는 그 20배: 한 사람이 모두를 막지 못하게)
 SEARCH_WAIT = 20  # 다른 낱말을 찾는 동안 이만큼만 기다립니다(넘으면 잠시 뒤 다시)
 SEARCH_WAITERS = 4  # 다른 낱말을 찾는 동안 줄 설 수 있는 검색 수. 줄 선 요청이 영상·목록을 처리할 작업자를 붙잡지 않게
+UNREADABLE_RETRY = 60  # 읽지 못한 분석 파일이 빠진 검색 답은 이만큼(초)만 쓰고 다시 찾습니다(권한을 고치면 1분 안에 나옴)
 SEARCH_FOLLOWERS = 20  # 지금 찾는 중인 낱말을 함께 찾은 학생은 줄 서지 않고 그 답을 기다림(한 반, 작업자 40개 가운데)
 RECORD_KEY = re.compile(r"(pos|notes|wrong|score):[0-9a-f]{12}|study|speed")  # 기기 옮기기로 맡는 기록(common.js와 같게)
 MAX_BODY = 4 * 1024 * 1024  # 기기 옮기기(기록 2MB까지) 요청 본문 최대 크기
@@ -399,7 +400,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         except OSError:
             logging.exception("서버 요약 저장 실패(다음에 켤 때 분석 결과를 처음부터 읽습니다)")
 
-    read_errors = {"n": 0}  # 분석 파일을 읽지 못한(입출력 오류) 횟수
+    # 이 작업자(스레드)가 분석 파일을 읽지 못한(입출력 오류) 횟수: 함께 도는 다른 요청의 실패를 이 요청의 것으로 보지 않게
+    read_errors = local()
+    read_error_count = lambda: getattr(read_errors, "n", 0)
 
     def read_analysis(video_id):
         """손으로 고치다 형식이 깨진 분석 파일은 그 강의만 '분석 전'으로 보고, 목록·검색·현황은 계속 돌게 합니다."""
@@ -409,7 +412,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             data = []
         except OSError as e:  # 권한 없음·NAS 입출력 오류 등: 이 강의만 '분석 전'(고치면 다시 읽음)
             logging.warning("분석 파일을 읽지 못해 건너뜀: %s.json (%s)", video_id, e.strerror or e)
-            read_errors["n"] += 1  # 그동안 만든 답(검색·퀴즈 문제)은 기억하지 않습니다: 파일 시각이 그대로라 고쳐도 다시 찾지 않음
+            read_errors.n = read_error_count() + 1  # 그동안 만든 답(검색·퀴즈 문제)은 오래 기억하지 않습니다(파일 시각이 그대로라)
             return None
         if data is None or isinstance(data, dict):
             return data
@@ -424,9 +427,9 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             return None
         stamp = (stat.st_mtime_ns, stat.st_size)
         if status_cache.get(video_id, (None,))[0] != stamp:
-            errors = read_errors["n"]
+            errors = read_error_count()
             data, entry = read_analysis(video_id), None
-            if read_errors["n"] != errors:  # 읽지 못함(권한 등): 기억하지 않고 다음에 다시 읽어 봅니다(깨진 파일은 고칠 때까지 기억)
+            if read_error_count() != errors:  # 읽지 못함(권한 등): 기억하지 않고 다음에 다시 읽어 봅니다(깨진 파일은 고칠 때까지 기억)
                 return None
             try:  # 파일이 다시 바뀔(고쳐질) 때까지 '분석 전': 깨졌거나 모양이 다른 파일(손으로 고침) 하나가 모두의 목록을 멈추지 않게
                 if data is not None:
@@ -512,7 +515,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         word = _search_word(q)
         current_library()
         key = (word, library["version"], stamp(data_dir), fixes_stamp(), analyses_version())
-        found = searches.get(key)  # 찾아 둔 답은 다른 낱말을 찾는 동안 줄 서지 않고 바로 씁니다
+        found = kept(key)  # 찾아 둔 답은 다른 낱말을 찾는 동안 줄 서지 않고 바로 씁니다
         if found is not None:
             return found
         # 한 기기가 다른 낱말을 끝없이 보내 모두를 줄 세우지 못하게 기기마다 횟수를 셉니다(찾아 둔 답은 세지 않음).
@@ -540,24 +543,29 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if not got:
             raise HTTPException(503, "찾는 학생이 많습니다. 잠시 뒤 다시 해 주세요")
         try:
-            if key in searches:
-                return searches[key]
+            if (found := kept(key)) is not None:
+                return found
             job = search_now["job"] = {"key": key, "done": Event(), "answer": None}
             try:
-                errors = read_errors["n"]
+                errors = read_error_count()
                 job["answer"] = find_spoken(word)
             finally:
                 search_now["job"] = None
                 job["done"].set()
-            if read_errors["n"] == errors:  # 읽지 못한 분석 파일이 빠진 답은 기억하지 않습니다(고치면 다음에 다시 찾게)
-                if len(searches) >= 64:
-                    searches.pop(next(iter(searches)))  # 가장 오래된 것부터
-                searches[key] = job["answer"]
+            if key not in searches and len(searches) >= 64:
+                searches.pop(next(iter(searches)))  # 가장 오래된 것부터
+            # 읽지 못한 분석 파일이 빠진 답은 잠깐만 씁니다: 고친 뒤에도 파일 시각이 그대로라 열쇠가 바뀌지 않습니다.
+            # 고쳐지지 않는 파일이 있어도 같은 낱말을 매번 다시 찾지 않게(수업 중 줄이 차지 않게) 버리지는 않습니다.
+            searches[key] = (job["answer"], None if read_error_count() == errors else monotonic() + UNREADABLE_RETRY)
             return job["answer"]
         finally:
             search_lock.release()
 
-    searches, search_lock, search_line = {}, Lock(), BoundedSemaphore(SEARCH_WAITERS)
+    searches, search_lock, search_line = {}, Lock(), BoundedSemaphore(SEARCH_WAITERS)  # 열쇠 → (답, 다시 찾을 때 또는 None)
+
+    def kept(key):
+        answer, until = searches.get(key, (None, None))
+        return answer if until is None or monotonic() < until else None
     search_now, search_followers = {"job": None}, BoundedSemaphore(SEARCH_FOLLOWERS)  # 지금 찾는 낱말과 그 답을 기다리는 수
     analyses_seen = {"minute": None, "version": None}
 
@@ -699,7 +707,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         """그 강의에 실제로 있는 문제 글(플레이어의 quizKey와 같게, 1000자까지): Claude 퀴즈와 학원 정리 퀴즈."""
         key = (stamp(Path(data_dir) / f"{video['id']}.json"), fixes_stamp())
         if quiz_keys_cache.get(video["id"], (None,))[0] != key:
-            errors = read_errors["n"]
+            errors = read_error_count()
             data = read_analysis(video["id"]) or {}
             guide = data.get("guide") if isinstance(data.get("guide"), dict) else {}
             quiz = [*(guide.get("quiz") or []), *(q for r in fixed(academy_summaries(video)) for q in r["quiz"])]
@@ -708,7 +716,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 if isinstance(q, dict):
                     text = q.get("question") or " ".join(map(str, [q.get("context", ""), *(q.get("parts") or [])]))
                     keys.add(str(text)[:1000])
-            if read_errors["n"] != errors:  # 분석 파일을 읽지 못했으면 기억하지 않고 다음에 다시(Claude 퀴즈가 빠진 채로 남지 않게)
+            if read_error_count() != errors:  # 분석 파일을 읽지 못했으면 기억하지 않고 다음에 다시(Claude 퀴즈가 빠진 채로 남지 않게)
                 return keys
             quiz_keys_cache[video["id"]] = (key, keys)
         return quiz_keys_cache[video["id"]][1]
@@ -1185,7 +1193,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def media(video_id: str):
         path = get_video(video_id)["path"]
         # 목록에는 있는데 열리지 않음: NAS가 잠깐 끊김. 플레이어가 다시 받아 보게 503(지운 파일은 다음 훑기에 목록에서 빠져 404)
-        if not path.is_file():
+        if not os.path.isfile(path):  # Path.is_file()은 입출력 오류(EIO 등, NAS가 잠깐 끊김)에 오류를 냄
             raise HTTPException(503, "영상 파일을 잠시 읽지 못했습니다. 잠시 뒤 다시 해 주세요")
         return FileResponse(path)
 

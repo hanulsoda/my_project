@@ -403,6 +403,7 @@ def test_one_internet_network_cannot_take_every_internet_transfer_code(site):
 
 def test_a_search_made_while_a_file_was_unreadable_is_not_kept_after_it_is_fixed(two, monkeypatch):
     video_dir, data_dir, _, vid, other = two
+    monkeypatch.setattr(server, "UNREADABLE_RETRY", 0)  # 실제로는 1분 뒤 다시 찾음
     real = server.load_analysis
     client = TestClient(create_app(video_dir, data_dir, None))
     monkeypatch.setattr(server, "load_analysis",
@@ -552,3 +553,60 @@ def test_a_fix_written_by_hand_with_a_number_for_text_does_not_break_search(jema
 
     assert client.get("/api/search", params={"q": "향가입니다"}).status_code == 200
     assert client.get(f"/api/videos/{vid}").json()["references"][0]["sections"][0]["items"] == ["누이의 죽음"]
+
+
+# ---- 2단계 고친 것 다시 보기(2) ----
+
+def eio(*_):
+    raise OSError(5, "Input/output error")
+
+
+def test_a_file_that_stays_unreadable_does_not_make_every_search_start_over(two, monkeypatch):
+    video_dir, data_dir, _, _, other = two
+    real = server.load_analysis
+    monkeypatch.setattr(server, "load_analysis", lambda d, i: eio() if i == other else real(d, i))  # 권한이 계속 틀림
+    client = TestClient(create_app(video_dir, data_dir, None))
+    client.get("/api/videos")
+    real_near, runs = server._near, []
+    monkeypatch.setattr(server, "_near", lambda *a, **k: runs.append(1) or real_near(*a, **k))
+
+    for _ in range(3):  # 같은 낱말: 다른 학생들, 결과에서 뒤로 가기
+        assert client.get("/api/search", params={"q": "안녕하세요"}).status_code == 200
+
+    assert len(runs) == 1  # 찾아 둔 답을 씀(1분 뒤에는 다시 찾아 고쳐진 파일을 넣음)
+
+
+def test_another_lectures_read_error_does_not_hide_a_fine_lecture_in_the_player(two, monkeypatch):
+    video_dir, data_dir, _, vid, other = two
+    real = server.load_analysis
+
+    def load(d, i):
+        if i == other:
+            time.sleep(0.1)
+            eio()
+        time.sleep(0.4)  # NAS에서 큰 분석 파일을 읽는 동안
+        return real(d, i)
+    monkeypatch.setattr(server, "load_analysis", load)
+    client = TestClient(create_app(video_dir, data_dir, None))
+    client.get("/api/moves")  # 영상 폴더만 훑음(밤 작업 뒤처럼 분석은 아직 안 읽음)
+    out = {}
+    fine = threading.Thread(target=lambda: out.update(fine=client.get(f"/api/videos/{vid}").json()))
+    bad = threading.Thread(target=lambda: client.get(f"/api/videos/{other}"))
+    fine.start()
+    time.sleep(0.05)
+    bad.start()
+    fine.join()
+    bad.join()
+
+    assert out["fine"]["analysis"] is not None  # 다른 강의의 읽기 실패로 '준비 중'이 되지 않음
+
+
+def test_a_video_the_nas_answers_with_an_io_error_is_worth_trying_again(site, monkeypatch):
+    import os
+    video_dir, data_dir, _, vid = site
+    client = TestClient(create_app(video_dir, data_dir, None), raise_server_exceptions=False)
+    client.get("/api/videos")
+    target, real_stat = str(video_dir / "1강.mp4"), os.stat
+    monkeypatch.setattr(os, "stat", lambda path, *a, **k: eio() if os.fspath(path) == target else real_stat(path, *a, **k))
+
+    assert client.get(f"/media/{vid}").status_code == 503  # 공유 폴더가 잠깐 끊기면 '없음'이 아니라 입출력 오류
