@@ -64,7 +64,8 @@ def test_what_the_server_handles_by_itself_is_not_a_problem(tmp_path, monkeypatc
 
     found = checks(env)
 
-    assert [text for level, text in found if level == "문제"] == ["형식이 깨진 분석 파일 1개(손으로 고친 곳의 쉼표·따옴표 확인): 옛것.json"]
+    assert [text for level, text in found if level == "문제"] == [  # 폴더는 쉼표·따옴표로 고칠 것이 아님
+        "읽을 수 없는 분석 파일 1개(파일 권한·NAS 연결 확인. 그 강의는 '준비 중'으로 보이고 밤 분석도 건너뜀): 옛것.json"]
     assert any(level == "참고" and "로그 폴더" in text for level, text in found)
     assert any(level == "확인" and "학원 정리 1개" in text for level, text in found)  # 서버가 쓰는 수(제목만 남은 것은 뺌)
 
@@ -99,7 +100,21 @@ def test_the_check_reports_damaged_teacher_files_and_fixes_that_no_longer_apply(
     found = checks(env)
 
     assert any(level == "문제" and "이번 주 강의" in text and "깨졌" in text for level, text in found)
+    assert any(level == "문제" and "이번 주 강의" in text and "학생" in text for level, text in found)  # 학생 화면에서도 빠짐
     assert any(level == "참고" and "적용되지 않는 학원 정리 고침 2개" in text for level, text in found)
+
+
+def test_an_analysis_file_that_cannot_be_read_is_not_called_a_comma_mistake(tmp_path, monkeypatch):
+    import academy.check as check
+    env, _ = setup(tmp_path)
+    save_analysis(tmp_path / "data", "0123456789ab", {"title": "옛 강의", "segments": [], "guide": None})
+    real = check.load_analysis
+    monkeypatch.setattr(check, "load_analysis", lambda d, i: (_ for _ in ()).throw(PermissionError(13, "Permission denied"))
+                        if i == "0123456789ab" else real(d, i))  # 다른 계정이 만든 파일
+
+    found = " / ".join(problems(env))
+
+    assert "읽을 수 없는 분석 파일 1개" in found and "권한" in found and "쉼표" not in found
 
 
 def test_a_short_teacher_key_is_pointed_out(tmp_path):

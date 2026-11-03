@@ -275,6 +275,9 @@ def _analyze_one(video, data_dir, transcribe, make_guide, force, detect_pages, r
     except ValueError as e:  # 손으로 고치다 형식이 깨진 파일: 덮어쓰지 않고 이 강의만 건너뜁니다
         print(f"  분석 파일 형식 오류, 건너뜀(고친 곳의 쉼표·따옴표를 확인하세요): {e}", file=sys.stderr)
         return 1
+    except OSError as e:  # 읽을 수 없음(다른 계정이 만든 파일·NAS 오류): 밤 작업 전체를 멈추지 않고 이 강의만 건너뜁니다
+        print(f"  분석 파일을 읽지 못해 건너뜀(파일 권한·NAS 연결을 확인하세요): {e}", file=sys.stderr)
+        return 1
     if old and old.get("guide") == SILENT_GUIDE:  # 예전에는 소리 없는 강의에 빈 요점 정리를 넣어 학원 정리가 가려졌습니다
         old = {**old, "guide": None, "silent": True}
         save_analysis(data_dir, video["id"], old)

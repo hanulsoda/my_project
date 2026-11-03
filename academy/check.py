@@ -48,12 +48,15 @@ def checks(env) -> list[tuple[str, str]]:
         except OSError as e:
             say(PROBLEM, f"분석 폴더에 쓸 수 없습니다: {data_dir.resolve()} ({e.strerror}). 서버·분석이 결과를 저장하지 못합니다")
         known = {v["id"] for v in videos}
-        analyzed, broken, orphans = 0, [], 0
+        analyzed, broken, unreadable, orphans = 0, [], [], 0
         for path in sorted(data_dir.glob("*.json")):
             try:
                 ok = isinstance(load_analysis(data_dir, path.stem), dict)
-            except (OSError, ValueError):
+            except ValueError:
                 ok = False
+            except OSError:  # 다른 계정이 만든 파일·NAS 오류: 쉼표·따옴표 문제가 아님
+                unreadable.append(path.name)
+                continue
             if not ok:
                 broken.append(path.name)
             elif path.stem in known:
@@ -64,10 +67,15 @@ def checks(env) -> list[tuple[str, str]]:
         if broken:
             say(PROBLEM, f"형식이 깨진 분석 파일 {len(broken)}개(손으로 고친 곳의 쉼표·따옴표 확인): {', '.join(broken[:5])}"
                          + (" 등" if len(broken) > 5 else ""))
+        if unreadable:
+            say(PROBLEM, f"읽을 수 없는 분석 파일 {len(unreadable)}개(파일 권한·NAS 연결 확인. 그 강의는 '준비 중'으로 보이고 "
+                         f"밤 분석도 건너뜀): {', '.join(unreadable[:5])}" + (" 등" if len(unreadable) > 5 else ""))
         if orphans:
             say(NOTE, f"지금 영상 폴더에 없는 강의의 분석 {orphans:,}개(옮기거나 이름을 바꾼 강의는 다음 분석 때 이어 씁니다)")
-        for name, what, stops in [(".reference-fixes", "학원 정리 고침", "선생님이 고친 내용을 저장할 수 없습니다"),
-                                  (".teacher-picks", "이번 주 강의", "선생님이 이번 주 강의를 저장할 수 없습니다"),
+        for name, what, stops in [(".reference-fixes", "학원 정리 고침",
+                                   "학생 화면에서 선생님이 고친 내용이 빠지고, 새로 고쳐도 저장할 수 없습니다"),
+                                  (".teacher-picks", "이번 주 강의",
+                                   "학생 화면에 이번 주 강의가 나오지 않고, 선생님이 새로 저장할 수도 없습니다"),
                                   (".moved-lectures", "옮긴 강의 기록", "옮긴 강의의 학생 기록을 이어 주지 못합니다"),
                                   (".lecture-sizes", "영상 크기 기록", "옮기거나 다시 올린 영상을 알아보지 못합니다")]:
             if (data_dir / name).exists() and not isinstance(_json(data_dir / name), dict):

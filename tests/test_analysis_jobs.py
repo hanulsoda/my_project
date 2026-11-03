@@ -650,3 +650,18 @@ def test_an_infinite_failure_count_written_by_hand_does_not_stop_the_night_run(t
     analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
 
     assert "2강.mp4" in rec.transcribed
+
+
+def test_an_analysis_file_that_cannot_be_read_does_not_stop_the_night_run(tmp_path, monkeypatch, capsys):
+    import academy.analyze as analyze
+    ids = make_videos(tmp_path / "videos", "1강.mp4", "2강.mp4")
+    save_analysis(tmp_path / "data", ids["1강"], {"title": "1강", "duration": 120.0, "segments": SEGMENTS, "guide": None})
+    real = analyze.load_analysis
+    monkeypatch.setattr(analyze, "load_analysis", lambda d, i: (_ for _ in ()).throw(PermissionError(13, "Permission denied"))
+                        if i == ids["1강"] else real(d, i))  # 다른 계정이 만든 파일
+    rec = Recorder()
+
+    failed = analyze_all(tmp_path / "videos", tmp_path / "data", rec.transcribe, rec.make_guide)
+
+    assert rec.transcribed == ["2강.mp4"] and failed == 1  # 뒤의 강의는 계속, 그 강의는 다시 사지 않고 실패로 셈
+    assert "권한" in capsys.readouterr().err

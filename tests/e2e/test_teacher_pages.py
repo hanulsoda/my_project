@@ -116,6 +116,8 @@ def test_the_status_page_points_out_what_stopped(page, site):
 
     alerts = page.locator("#alerts")
     expect(alerts).to_contain_text("NAS")  # 영상 폴더가 비어 보임
+    expect(alerts).to_contain_text("5분 안에")  # 서버를 NAS보다 먼저 켜면 목록이 비어 '이전 목록 그대로'가 아님
+    expect(alerts).not_to_contain_text("이전 것을 그대로")
     expect(alerts).to_contain_text("--retry-failed")  # 요점 정리가 두 번 잘린 강의
     expect(alerts).to_contain_text("고1/1강 제망매가")
     expect(page.locator("#ops-lines")).to_contain_text("3일 전 기록")  # 매일 도는 작업이 멈춘 듯함
