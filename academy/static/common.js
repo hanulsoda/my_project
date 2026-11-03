@@ -82,18 +82,31 @@ function picksSection() {
     const select = el("select", { class: "my-grade", "aria-label": "내 학년" },
       ...["", "중1", "중2", "중3", "고1", "고2", "고3"].map((g) => el("option", { value: g }, g || "모든 학년")));
     select.value = store.get("grade") || "";
-    const list = el("ul");
+    const list = el("ul"), count = el("p", { class: "picks-note" });
     const show = () => {
       const shown = picks.lectures.filter((l) => !select.value || !l.grade || l.grade === select.value);
-      list.replaceChildren(...shown.map((l) => el("li", {}, el("a", { href: `watch.html?id=${l.id}` },
-        el("span", { class: "icon i-star", "aria-hidden": "true" }), el("span", { class: "name" }, l.title.split("/").pop()),
-        el("span", { class: "n" }, l.grade)))));
+      let done = 0;
+      list.replaceChildren(...shown.map((l) => {
+        // 이 기기에서 본 만큼(이어 보기 위치)과 마지막 퀴즈 점수
+        const pos = store.get(`pos:${l.id}`), score = store.get(`score:${l.id}`);
+        const share = pos?.d ? Math.min(1, pos.t / pos.d) : 0, finished = pos?.d && pos.t >= pos.d - 5;
+        done += finished ? 1 : 0;
+        const state = finished ? el("span", { class: "done" }, "다 봄") : !pos ? "아직 안 봄"
+          : el("span", { class: "progress" }, el("span", { class: "bar", "aria-hidden": "true" },
+              el("span", { style: `width: ${Math.round(share * 100)}%` })), `${Math.round(share * 100)}%`);
+        return el("li", {}, el("a", { href: `watch.html?id=${l.id}` },
+          el("span", { class: "icon i-star", "aria-hidden": "true" }),
+          el("span", { class: "pick-text" }, el("span", { class: "name" }, l.title.split("/").pop()),
+            el("span", { class: "pick-sub" }, state, ...(score ? [`· 퀴즈 ${score.right}/${score.total}`] : []))),
+          el("span", { class: "n" }, l.grade)));
+      }));
+      count.textContent = shown.length ? `${shown.length}개 중 ${done}개 다 봄` : "";
       if (!shown.length) list.append(el("li", { class: "picks-note" }, `${select.value} 강의는 아직 없습니다.`));
     };
     select.onchange = () => { store.set("grade", select.value); show(); };
     box.replaceChildren(el("div", { class: "picks-head" }, el("h2", {}, "이번 주 강의"),
                                     ...(picks.lectures.some((l) => l.grade) ? [select] : [])),
-      ...(picks.note ? [el("p", { class: "picks-note" }, picks.note)] : []), list);
+      ...(picks.note ? [el("p", { class: "picks-note" }, picks.note)] : []), count, list);
     show();
     box.hidden = false;
   });

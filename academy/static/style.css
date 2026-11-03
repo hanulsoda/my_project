@@ -312,6 +312,10 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .sidebar a[aria-current="page"] .n { color: inherit; }
 /* 선생님이 고른 '이번 주 강의'(사이드바 맨 위)와 현황 화면의 고르기 */
 .picks-note { margin: 0 8px 4px; color: var(--muted); font-size: 12px; }
+.pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }  /* 이번 주 강의: 이름 아래 진도·퀴즈 */
+.pick-text .name { flex: none; }
+.pick-sub { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
+.pick-sub .done::before { width: 12px; height: 12px; }
 .picks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .picks-head select, #pick-list select { padding: 2px 6px; border: 1px solid var(--control); border-radius: 6px; background: var(--surface); font-size: 12px; }
 .picks-head select { margin: 12px 4px 0 0; }
