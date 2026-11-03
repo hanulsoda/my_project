@@ -152,7 +152,7 @@ button[type="submit"]:disabled { opacity: 0.6; }
   box-shadow: var(--raised);
 }
 
-.notice { color: var(--muted); line-height: 1.6; }
+.notice { color: var(--muted); font-size: 14px; line-height: 1.6; }
 .storage-warning { margin: 0; padding: 10px 16px; background: var(--wrong-soft); color: var(--text); border-bottom: 1px solid var(--wrong); }
 
 .icon { flex: none; display: inline-block; width: 16px; height: 16px; background: var(--accent); -webkit-mask: var(--i) center / contain no-repeat; mask: var(--i) center / contain no-repeat; }
@@ -219,8 +219,10 @@ button[type="submit"]:disabled { opacity: 0.6; }
 
 /* ---- 다른 화면(틀린 문제 복습·내 메모·현황)의 본문 ---- */
 .list-page { max-width: 760px; margin: 0 auto; padding: 16px; }
-.list-page section { margin-bottom: 16px; }
-.list-page h2 { margin: 20px 4px 8px; font-size: 15px; }
+.list-page section { margin-bottom: 28px; }  /* 절 사이를 절 안의 줄 간격보다 넓게(기기 옮기기·현황) */
+.list-page h2 { margin: 20px 0 8px; font-size: 15px; }
+.list-page h2 a { text-decoration: none; }
+.list-page h2 a:hover { text-decoration: underline; }
 .stats {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -263,14 +265,25 @@ button[type="submit"]:disabled { opacity: 0.6; }
 .content-head .back { display: none; }
 .heading { flex: 1 1 200px; min-width: 0; }
 .content-head h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sub { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.sub { min-height: 1.5em; margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .search-box { display: flex; gap: 6px; }  /* 찾기 칸과 '선생님 말'일 때의 찾기 단추 */
 .tools input[type="search"] { width: 240px; }
 .seg button { padding: 4px 12px; font-size: 13px; }
 .layout button { display: flex; align-items: center; padding: 4px 9px; }
 .seg .icon { background: currentColor; }
-#sort { padding: 5px 8px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); font-size: 13px; }
+#sort {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 6px 30px 6px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238a8a8f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E") no-repeat right 10px center / 12px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+#sort:hover { background-color: var(--hover); }
 /* 맥 스위치: 체크칸을 켜고 끄는 막대로 그립니다(role="switch") */
 .switch-label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 .switch {
@@ -361,13 +374,15 @@ button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .day.today .label { color: var(--text); font-weight: 700; }
 .streak { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
 /* 현황 화면: 요일별 강의 열기 막대 */
-.usage-week-title { margin: 16px 4px 6px; font-size: 14px; }
-.usage-bars { max-width: 420px; margin: 0 4px 8px; }
+.usage-week-title { margin: 16px 0 6px; font-size: 14px; }
+.usage-bars { max-width: 420px; margin: 0 0 8px; }
 .usage-bars .day .bar { height: 80px; }
 
 .resume { display: none; }  /* 휴대폰 첫 화면의 '이어 보기'(아래 휴대폰 부분) */
 .content-body { grid-area: body; min-width: 0; padding: 8px 28px 40px; }
 .content-body > section > h2 { margin: 18px 12px 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
+/* 선생님 말 찾기 결과의 설명: 위 묶음 제목과 같은 줄에, 제목보다 크지 않게(제목·설명·결과가 서로 다른 줄에서 시작했음) */
+#found > .notice { margin: 4px 12px 12px; font-size: 13px; }
 .folder-name { margin: 22px 12px 2px; font-size: 15px; }
 .group h3 { margin: 14px 12px 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .content-body > .notice { margin: 24px 12px; }
@@ -424,7 +439,8 @@ button.disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
 .found-list:empty { display: none; }
 .found-list li { padding: 10px 16px; line-height: 2; }
 .found-list li + li { border-top: 1px solid var(--border); }
-.found-list li > a:first-child { color: inherit; font-weight: 600; text-decoration: none; }
+.found-list li > a:first-child, .found-list li > button.link:first-child { color: inherit; font-weight: 600; text-decoration: none; }
+.found-list li > button.link:first-child:hover { text-decoration: underline; }
 .found-list .also { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .lecture-where { display: block; margin-top: 1px; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.5; }  /* 강의 이름 아래 위치 */
 a.time { display: inline-block; text-decoration: none; }
@@ -482,6 +498,10 @@ a.time { display: inline-block; text-decoration: none; }
 /* 아이폰은 16px보다 작은 글자의 칸을 누르면 화면을 확대해 버려, 휴대폰에서는 글 칸·고르기를 16px로 씁니다(위의 작은 글자보다 뒤에).
    옆으로 눕힌 큰 아이폰(Plus·Pro Max)은 900px보다 넓어 손가락 화면(pointer: coarse)도 봅니다. */
 @media (max-width: 900px), (pointer: coarse) { input, textarea, select, #sort, .picks-head select { font-size: 16px; } }
+@media (min-width: 901px) and (pointer: fine) {
+  .tools input[type="search"] { padding-top: 5px; padding-bottom: 5px; font-size: 14px; }
+  .search-box button[type="submit"] { padding: 5px 14px; font-size: 14px; }
+}
 
 /* ---- 학습 플레이어 ---- */
 .watch-page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
