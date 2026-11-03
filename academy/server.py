@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 from bisect import bisect_right
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -24,7 +25,7 @@ import anthropic
 import segno
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -37,11 +38,28 @@ STATIC_DIR = Path(__file__).parent / "static"
 REFRESH_SECONDS = 300  # 이보다 오래된 목록은 뒤에서 다시 훑습니다
 MISS_SECONDS = 30  # 모르는 id가 와도 이 안에 훑었으면 다시 훑지 않습니다
 INDEX_VERSION = 1  # 저장해 두는 서버 요약(.server-index.cache)에 넣는 항목을 바꾸면 올립니다
+# 학생 브라우저는 믿을 수 없어 받는 양을 막아 둡니다(메모리·디스크를 채우지 못하게).
+MAX_BODY = 3_000_000  # 요청 본문 상한: 기기 옮기기 기록(2MB)과 여유. 다 읽기 전에 거절합니다
+TRANSFER_BYTES = 50_000_000  # 기기 옮기기로 맡아 둔 기록을 모두 합한 상한
+LOG_LINES_PER_DAY = 500  # 이용·퀴즈 기록을 기기마다 하루에 남기는 줄 수 상한
+LOG_MIN_FREE = 2_000_000_000  # 디스크 여유가 이보다 적으면 기록을 남기지 않습니다(분석 결과와 같은 디스크)
+# 한 소리 다른 말 찾기 정규식은 낱말 길이의 제곱으로 커져, 길게 붙여 넣은 글은 강의 3,900개를 훑는 데 몇 분이 걸립니다.
+NEAR_MAX = 20
 
 
 class Turn(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=10000)
+
+
+def save_json(path, data):
+    """저마다 다른 임시 파일에 다 쓴 뒤 바꿔 끼웁니다: 저장이 겹쳐도 깨지거나 실패하지 않고 나중 것이 남습니다."""
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def qr_svg(url):
@@ -103,6 +121,13 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     app = FastAPI(title="학원 학습 플레이어", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
+    async def limit_body(request, call_next):  # 길이를 밝히지 않았거나 너무 큰 본문은 읽기 전에 거절
+        size = request.headers.get("content-length", "")
+        if request.method in ("POST", "PUT") and (not size.isdigit() or int(size) > MAX_BODY):
+            return JSONResponse({"detail": "보낸 내용이 너무 큽니다"}, status_code=413)
+        return await call_next(request)
+
+    @app.middleware("http")
     async def security_headers(request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"  # 브라우저가 파일 종류를 멋대로 짐작하지 않게
@@ -159,11 +184,8 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def save_index():
         if not Path(data_dir).is_dir():
             return
-        tmp = index_path.with_suffix(".tmp")
         try:
-            tmp.write_text(json.dumps({"version": INDEX_VERSION, "entries": dict(status_cache)}, ensure_ascii=False),
-                           encoding="utf-8")
-            tmp.replace(index_path)
+            save_json(index_path, {"version": INDEX_VERSION, "entries": dict(status_cache)})
         except OSError:
             logging.exception("서버 요약 저장 실패(다음에 켤 때 분석 결과를 처음부터 읽습니다)")
 
@@ -228,7 +250,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         word = _norm(q)
         if len(word) < 2:
             raise HTTPException(400, "두 글자 이상 넣어 주세요")
-        near = _near(word)
+        near = _near(word) if len(word) <= NEAR_MAX else None
         exact, similar, notes = [], [], []
         for v in current_library()["videos"]:
             entry = analysis_entry(v["id"])
@@ -276,7 +298,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         if not entry:
             return {"times": [], "chapters": [], "heard_as": [], "notes": []}
         at, heard = [m.start() for m in re.finditer(re.escape(word), entry["text"])], []
-        if not at and (near := _near(word)):
+        if not at and len(word) <= NEAR_MAX and (near := _near(word)):
             matches = list(near.finditer(entry["text"]))
             at, heard = [m.start() for m in matches], [w for w, _ in Counter(m.group() for m in matches).most_common(2)]
         found, _ = found_at(video, entry, at, limit=None)
@@ -295,7 +317,10 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     # ---- 선생님용 이용 통계: 플레이어에서 강의를 연 시각·강의·기기 번호만 log_dir/usage.log에 한 줄씩 ----
     # 기기 번호는 서버만 아는 비밀값(.usage-salt)을 섞어 바꾼 짧은 글자라 기기 주소로 되돌릴 수 없습니다.
     # usage_ignore(원장님 PC 등)의 접속과, 복습 화면처럼 강의를 열지 않고 정보만 읽는 것(view 없음)은 세지 않습니다.
-    usage_lock = Lock()
+    log_lock, log_budget = Lock(), {"day": None, "lines": Counter()}  # 기기마다 오늘 남긴 줄 수
+
+    def client_host(request):
+        return request.client.host if request.client else ""
 
     def device(host):
         salt_path = Path(log_dir) / ".usage-salt"
@@ -303,22 +328,31 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
             salt_path.write_text(secrets.token_hex(16), encoding="utf-8")
         return hashlib.sha256((salt_path.read_text(encoding="utf-8") + host).encode()).hexdigest()[:10]
 
-    def record_open(video_id, host):
+    def write_log(name, row, host):
+        """log_dir/name에 한 줄. 원장님 PC는 빼고, 기기마다 하루 LOG_LINES_PER_DAY줄까지, 디스크 여유가 적으면 남기지 않습니다.
+        통계용이라 못 남겨도 학생 화면은 그대로 둡니다."""
         if not log_dir or host in usage_ignore:
             return
-        with usage_lock, (Path(log_dir) / "usage.log").open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": int(wall_clock()), "id": video_id, "who": device(host)}) + "\n")
+        with log_lock:
+            day = int(wall_clock() // 86400)
+            if log_budget["day"] != day:
+                log_budget.update(day=day, lines=Counter())
+            log_budget["lines"][host] += 1
+            if log_budget["lines"][host] > LOG_LINES_PER_DAY:
+                return
+            try:
+                if shutil.disk_usage(log_dir).free < LOG_MIN_FREE:
+                    return
+                with (Path(log_dir) / name).open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({"t": int(wall_clock()), **row, "who": device(host)}, ensure_ascii=False) + "\n")
+            except OSError:
+                logging.warning("%s에 기록을 남기지 못함", name, exc_info=True)
 
     # ---- 많이 틀리는 문제: 퀴즈를 풀 때 강의·문제·맞음/틀림·기기 번호만 log_dir/quiz.log에(이용 통계와 같은 방식) ----
     @app.post("/api/quiz-result", status_code=204)
     def quiz_result(req: QuizResult, request: Request):
         get_video(req.id)
-        host = request.client.host if request.client else ""
-        if not log_dir or host in usage_ignore:
-            return
-        with usage_lock, (Path(log_dir) / "quiz.log").open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": int(wall_clock()), "id": req.id, "k": req.key, "who": device(host), "right": req.right},
-                               ensure_ascii=False) + "\n")
+        write_log("quiz.log", {"id": req.id, "k": req.key, "right": req.right}, client_host(request))
 
     def quiz_summary():
         first = {}  # (기기, 강의, 문제) → 처음 푼 결과: 다시 푼 것은 정답률을 흐리므로 세지 않습니다
@@ -368,13 +402,13 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     # ---- 선생님이 고른 '이번 주 강의': 누구나 보고, 바꾸는 것은 선생님 열쇠(X-Teacher-Key)가 있어야 합니다 ----
     # 열쇠를 정하지 않은 서버(teacher_key 없음)는 아무도 바꿀 수 없습니다. 분석 결과 폴더에 두어 매일 백업에 들어갑니다.
-    picks_path = Path(data_dir) / ".teacher-picks"
+    picks_path, picks_lock = Path(data_dir) / ".teacher-picks", Lock()  # 저장이 겹치거나 저장 중에 읽지 않게
 
     # 마구 넣어 보기 막기: 기기마다 틀린 횟수를 세어 limit번 틀리면 10분 동안 429
     misses = {"key": {}, "code": {}}  # 종류 → 기기 주소 → (틀린 횟수, 마지막으로 틀린 시각)
 
     def guard(kind, request, limit, message):
-        host = request.client.host if request.client else ""
+        host = client_host(request)
         count, last = misses[kind].get(host, (0, 0))
         if count >= limit and wall_clock() - last < 600:
             raise HTTPException(429, message)
@@ -394,36 +428,41 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
 
     # ---- 기기 옮기기: 학생 기록(메모·진도·틀린 문제 등)을 6자리 코드로 잠깐 맡겼다가 다른 기기가 한 번 찾아 갑니다 ----
     # 서버 메모리에만 두고(파일에 남기지 않음) 10분이 지나거나 한 번 찾아 가면 지웁니다.
-    transfers = {}  # 코드 → (기록, 사라지는 시각)
+    # 기기마다 마지막에 맡긴 하나만 두고, 풀어 둔 것보다 메모리를 훨씬 덜 쓰는 JSON 글(바이트)로 맡아 둡니다.
+    transfers, transfer_lock = {}, Lock()  # 코드 → (기록 JSON 바이트, 사라지는 시각, 맡긴 기기)
 
     @app.post("/api/transfer")
-    def start_transfer(req: TransferRequest):
-        if len(json.dumps(req.data, ensure_ascii=False).encode()) > 2_000_000:  # 2MB: 강의 3,900개의 진도를 다 담아도 0.3MB쯤
+    def start_transfer(req: TransferRequest, request: Request):
+        data = json.dumps(req.data, ensure_ascii=False).encode()
+        if len(data) > 2_000_000:  # 2MB: 강의 3,900개의 진도를 다 담아도 0.3MB쯤
             raise HTTPException(413, "기록이 너무 큽니다")
-        now = wall_clock()
-        for code in [c for c, (_, until) in transfers.items() if until < now]:
-            del transfers[code]
-        if len(transfers) >= 200:
-            raise HTTPException(503, "잠시 뒤 다시 해 주세요")
-        code = f"{secrets.randbelow(10**6):06d}"
-        while code in transfers:
+        now, host = wall_clock(), client_host(request)
+        with transfer_lock:
+            for code in [c for c, (_, until, who) in transfers.items() if until < now or who == host]:
+                del transfers[code]  # 시간이 지난 것과 이 기기가 전에 맡긴 것
+            if sum(len(d) for d, _, _ in transfers.values()) + len(data) > TRANSFER_BYTES:
+                raise HTTPException(503, "잠시 뒤 다시 해 주세요")
             code = f"{secrets.randbelow(10**6):06d}"
-        transfers[code] = (req.data, now + 600)
+            while code in transfers:
+                code = f"{secrets.randbelow(10**6):06d}"
+            transfers[code] = (data, now + 600, host)
         return {"code": code, "expires": int(now + 600)}
 
     @app.post("/api/transfer/{code}")
     def claim_transfer(code: str, request: Request):
         host = guard("code", request, 20, "코드를 여러 번 틀려 10분 동안 막았습니다")
-        data, until = transfers.pop(code, (None, 0))
+        with transfer_lock:
+            data, until, _ = transfers.pop(code, (None, 0, None))
         if data is None or until < wall_clock():
             missed("code", host)
             raise HTTPException(404, "코드가 없거나 시간이 지났습니다")
-        return {"data": data}
+        return Response(b'{"data": ' + data + b"}", media_type="application/json")
 
     @app.get("/api/picks")
     def picks():
         try:
-            saved = json.loads(picks_path.read_text(encoding="utf-8"))
+            with picks_lock:
+                saved = json.loads(picks_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             saved = {}
         by_id = current_library()["by_id"]
@@ -437,12 +476,10 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         for video_id in req.ids:
             get_video(video_id)  # 없는 강의면 404
         picks_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = picks_path.with_name(picks_path.name + ".tmp")
         ids = list(dict.fromkeys(req.ids))
         grades = {i: g for i, g in req.grades.items() if i in ids and g}
-        tmp.write_text(json.dumps({"ids": ids, "grades": grades, "note": req.note.strip(), "at": int(wall_clock())},
-                                  ensure_ascii=False), encoding="utf-8")
-        tmp.replace(picks_path)
+        with picks_lock:
+            save_json(picks_path, {"ids": ids, "grades": grades, "note": req.note.strip(), "at": int(wall_clock())})
         return picks()
 
     # ---- 학원 정리 고치기(선생님): 원본 정리는 그대로 두고, 고친 글·숨긴 항목만 DATA_DIR/.reference-fixes에 ----
@@ -513,9 +550,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                 if not node[path[-1]]:
                     del node[path[-1]]
             fixes_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = fixes_path.with_name(fixes_path.name + ".tmp")
-            tmp.write_text(json.dumps(fixes, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(fixes_path)
+            save_json(fixes_path, fixes)
         return reference_detail(key)
 
     @app.get("/api/status")
@@ -553,7 +588,7 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
     def video_detail(video_id: str, request: Request, view: bool = False):
         video = get_video(video_id)
         if view:  # 플레이어에서 강의를 열 때만 view=1
-            record_open(video_id, request.client.host if request.client else "")
+            write_log("usage.log", {"id": video_id}, client_host(request))
         analysis = read_analysis(video_id)
         # Claude 요점 정리는 학원 정리를 바탕으로 만들었으니, 없을 때만 학원 정리를 대본에서 찾은 시간과 함께 보냅니다.
         summaries = (link_times(fixed(academy_summaries(video)), analysis.get("segments") or [])

@@ -525,6 +525,91 @@ def test_teachers_see_the_questions_students_miss_most(tmp_path):
     assert "10.0.0." not in log
 
 
+def two_lectures(tmp_path):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+    for name in ["1강", "2강"]:
+        (video_dir / f"{name}.mp4").write_bytes(b"x")
+    return video_dir, [v["id"] for v in find_videos(video_dir)]
+
+
+def test_refuses_oversized_bodies_before_reading_them(setup):
+    client, ids, _ = setup
+    big = b'{"data": {"x": "' + b"a" * 3_100_000 + b'"}}'
+    json_header = {"Content-Type": "application/json"}
+
+    assert client.post("/api/transfer", content=big, headers=json_header).status_code == 413
+    assert client.post("/api/quiz-result", content=big, headers=json_header).status_code == 413
+    assert client.post("/api/transfer", content=iter([big]), headers=json_header).status_code == 413  # 길이를 안 밝힌 것도
+    assert client.post("/api/quiz-result", json={"id": ids["1강"], "key": "Q", "right": True}).status_code == 204
+
+
+def test_each_device_keeps_one_transfer_and_all_transfers_have_a_size_cap(tmp_path, monkeypatch):
+    app = create_app(tmp_path / "videos", tmp_path / "data", None)
+    a, b, other = (TestClient(app, client=(host, 1)) for host in ("10.0.0.1", "10.0.0.2", "10.0.0.3"))
+    send = lambda client, data: client.post("/api/transfer", json={"data": data})
+
+    first, second = send(a, {"n": 1}).json()["code"], send(a, {"n": 2}).json()["code"]
+    assert other.post(f"/api/transfer/{first}").status_code == 404  # 같은 기기가 다시 맡기면 앞의 것은 지웁니다
+    assert other.post(f"/api/transfer/{second}").json() == {"data": {"n": 2}}
+    monkeypatch.setattr(server, "TRANSFER_BYTES", 3_000)  # 맡긴 기록을 모두 합해 이만큼까지(서버 메모리를 지키려고)
+    assert send(a, {"x": "가" * 600}).status_code == 200
+    assert send(b, {"x": "가" * 600}).status_code == 503
+    assert send(b, {"x": "가"}).status_code == 200
+
+
+def test_the_player_keeps_working_when_the_log_cannot_be_written(tmp_path):
+    video_dir, (first, _) = two_lectures(tmp_path)
+    not_a_folder = tmp_path / "logs"
+    not_a_folder.write_text("x")
+    client = TestClient(create_app(video_dir, tmp_path / "data", None, log_dir=not_a_folder))
+
+    assert client.get(f"/api/videos/{first}", params={"view": 1}).status_code == 200
+    assert client.post("/api/quiz-result", json={"id": first, "key": "Q", "right": True}).status_code == 204
+
+
+def test_each_device_writes_only_so_many_log_lines_a_day(tmp_path, monkeypatch):
+    video_dir, (first, _) = two_lectures(tmp_path)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    clock = [1000.0]
+    monkeypatch.setattr(server, "wall_clock", lambda: clock[0])
+    monkeypatch.setattr(server, "LOG_LINES_PER_DAY", 3)  # 마구 보내 디스크를 채우지 못하게
+    app = create_app(video_dir, tmp_path / "data", None, log_dir=log_dir)
+    a, b = (TestClient(app, client=(host, 1)) for host in ("10.0.0.1", "10.0.0.2"))
+    answer = lambda client, n: client.post("/api/quiz-result", json={"id": first, "key": f"Q{n}", "right": True}).status_code
+    lines = lambda: len((log_dir / "quiz.log").read_text(encoding="utf-8").splitlines())
+
+    assert [answer(a, n) for n in range(5)] == [204] * 5  # 학생 화면에는 늘 성공
+    assert answer(b, 0) == 204
+    assert lines() == 4  # a는 3줄까지, b는 따로
+    clock[0] += 86400
+    assert answer(a, 9) == 204 and lines() == 5  # 다음 날 다시
+
+
+def test_long_search_words_skip_the_slow_near_spelling_search(setup, monkeypatch):
+    client, ids, _ = setup
+    near_words = []
+    real_near = server._near
+    monkeypatch.setattr(server, "_near", lambda word, **kw: near_words.append(word) or real_near(word, **kw))
+
+    for q in ["제망매가", "가나다라마" * 5]:  # 길게 붙여 넣은 글은 한 소리 다른 말 찾기가 몇 분 걸립니다
+        assert client.get("/api/search", params={"q": q}).status_code == 200
+        assert client.get(f"/api/videos/{ids['1강']}/search", params={"q": q}).status_code == 200
+    assert near_words == ["제망매가", "제망매가"]
+
+
+def test_saving_picks_at_the_same_time_never_fails(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    video_dir, ids = two_lectures(tmp_path)
+    client = TestClient(create_app(video_dir, tmp_path / "data", None, teacher_key="right"))
+    save = lambda n: client.put("/api/picks", json={"ids": ids[n % 2:]}, headers={"X-Teacher-Key": "right"}).status_code
+
+    with ThreadPoolExecutor(8) as pool:
+        assert set(pool.map(save, range(60))) == {200}  # 두 번 누름 등으로 저장이 겹쳐도
+    assert not list((tmp_path / "data").glob("*.tmp"))
+
+
 def test_teachers_fix_or_hide_summary_items_without_touching_the_original(tmp_path):
     from academy.references import ref_key
     video_dir, data_dir = tmp_path / "videos", tmp_path / "data"

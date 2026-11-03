@@ -251,12 +251,13 @@ function mergeRecords(data) {
       const merged = [...new Map(all.map((n) => [`${n.t}|${n.text || ""}`, { t: n.t, text: n.text || "" }])).values()].sort((a, b) => a.t - b.t);
       counts.notes += merged.length - (mine || []).length;
       store.set(key, merged);
-    } else if (kind === "wrong" && MOVABLE.test(key) && Array.isArray(value)) {  // 틀린 문제는 복습이 더 나간 쪽
+    } else if (kind === "wrong" && MOVABLE.test(key) && Array.isArray(value)) {  // 틀린 문제는 더 나중에 푼 쪽
       const items = new Map(wrongItems(key.slice(6)).map((w) => [w.k, w]));
+      const answered = (w) => w.due - [1, 3, 7][w.stage] * DAY_MS;  // 푼 때 = 복습 날 - 단계마다 미룬 날(markWrong)
       for (const w of value.map((v) => (typeof v === "string" ? { k: v, stage: 0, due: 0 } : v))) {
         if (typeof w?.k !== "string" || !num(w.stage) || !num(w.due)) continue;
         if (!items.has(w.k)) counts.wrong++;
-        if (!items.has(w.k) || w.stage > items.get(w.k).stage) items.set(w.k, { k: w.k, stage: w.stage, due: w.due });
+        if (!items.has(w.k) || answered(w) > answered(items.get(w.k))) items.set(w.k, { k: w.k, stage: w.stage, due: w.due });
       }
       store.set(key, [...items.values()]);
     } else if (key === "study" && value && typeof value === "object") {  // 날마다 큰 값: 두 번 받아도 늘지 않게
