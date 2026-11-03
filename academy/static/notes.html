@@ -45,8 +45,7 @@
           }, "삭제")))))));
     }
 
-    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => [])
-      .then((list) => { videos = list; titles = new Map(videos.map((v) => [v.id, v.title])); render(); });
+    loadVideos().then((list) => { videos = list; titles = new Map(videos.map((v) => [v.id, v.title])); render(); });
   </script>
 </body>
 </html>

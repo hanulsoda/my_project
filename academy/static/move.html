@@ -42,7 +42,7 @@
     // 기기 옮기기: 보내는 기기는 기록을 서버에 맡기고 6자리 코드를, 받는 기기는 그 코드로 한 번 찾아 와 합칩니다.
     const $ = (elementId) => document.getElementById(elementId);
     let videos = [];
-    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => { videos = list; fillSidebar(videos, { here: "move.html" }); });
+    loadVideos().then((list) => { videos = list; fillSidebar(videos, { here: "move.html" }); });
 
     const describe = (data) => {
       const n = (prefix) => Object.keys(data).filter((k) => k.startsWith(prefix)).length;

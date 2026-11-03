@@ -38,15 +38,12 @@
     // 의심 항목(너무 긴 항목, 한 단계에 내용이 몰림)은 표시해 둡니다. 저장은 X-Teacher-Key가 맞아야 됩니다.
     const $ = (elementId) => document.getElementById(elementId);
     let refs = [];
-    const teacherKey = () => store.get("teacher-key") || "";
     const say = (text) => { $("fix-status").textContent = text; };
-    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((videos) => fillSidebar(videos, { here: "" }));
+    loadVideos().then((videos) => fillSidebar(videos, { here: "" }));
 
     $("key-form").onsubmit = (e) => {
       e.preventDefault();
-      if (!$("teacher-key").value.trim()) return;
-      store.set("teacher-key", $("teacher-key").value.trim());
-      $("teacher-key").value = "";
+      if (!teacher.remember($("teacher-key"))) return;
       $("key-form").hidden = true;
       say("열쇠를 넣었습니다. 다시 저장해 주세요.");
     };
@@ -72,19 +69,13 @@
     }
 
     async function save(key, body) {
-      if (!teacherKey()) {
+      if (!teacher.key()) {
         $("key-form").hidden = false;
         return say("고치려면 선생님 열쇠가 필요합니다. 열쇠를 넣어 주세요.");
       }
-      const res = await fetch(`/api/references/${key}/fix`, {
-        method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() }, body: JSON.stringify(body) });
-      if (res.status === 429) return say("열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
-      if (res.status === 403) {
-        localStorage.removeItem("teacher-key");
-        $("key-form").hidden = false;
-        return say("선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.");
-      }
-      if (!res.ok) return say("저장하지 못했습니다. 잠시 뒤 다시 해 주세요.");
+      const { res, problem } = await teacher.put(`/api/references/${key}/fix`, body);
+      $("key-form").hidden = !!teacher.key();  // 열쇠가 틀렸으면 다시 묻습니다
+      if (problem) return say(problem);
       renderDetail(await res.json());
       say("저장했습니다. 학생 화면에 바로 나옵니다.");
     }

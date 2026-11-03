@@ -27,6 +27,32 @@ const store = {
   },
 };
 
+// 강의 목록(사이드바용). 서버에 닿지 못하면 빈 목록.
+const loadVideos = () => fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []);
+
+// 선생님 열쇠: 이 브라우저에 기억해 X-Teacher-Key로 보냅니다. 틀리면(403) 지우고, 여러 번 틀려 막히면(429) 알립니다.
+const teacher = {
+  key: () => store.get("teacher-key") || "",
+  remember(input) {  // 넣은 열쇠를 기억하고 칸을 비웁니다. 빈칸이면 false
+    const key = input.value.trim();
+    input.value = "";
+    if (key) store.set("teacher-key", key);
+    return !!key;
+  },
+  forget() {
+    try { localStorage.removeItem("teacher-key"); } catch {}
+  },
+  async put(url, body) {  // 돌려주는 값: {res, problem}. problem이 ""이면 저장됨
+    const res = await fetch(url, { method: "PUT", body: JSON.stringify(body),
+                                   headers: { "Content-Type": "application/json", "X-Teacher-Key": teacher.key() } }).catch(() => null);
+    if (res?.status === 403) teacher.forget();
+    const problem = res?.status === 429 ? "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요."
+      : res?.status === 403 ? "선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요."
+      : res?.ok ? "" : "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.";
+    return { res, problem };
+  },
+};
+
 // ---- 왼쪽 사이드바(보관함·폴더): 강의 목록·내 메모·틀린 문제 복습·현황이 함께 씁니다 ----
 // 이어 보기: 다 보지 않은 강의를 최근에 본 순서로 5개
 function recentVideos(videos) {

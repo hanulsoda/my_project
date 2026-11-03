@@ -24,7 +24,7 @@
     const say = (...nodes) => box.replaceChildren(...nodes);
     let videos = [], all = false;  // all: '기다리지 않고 지금 풀기'
     const sidebar = () => fillSidebar(videos, { here: "review.html" });
-    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => { videos = list; sidebar(); });
+    loadVideos().then((list) => { videos = list; sidebar(); });
 
     // 앞으로의 복습: "내일 2개 · 3일 뒤 1개"
     function schedule(items) {

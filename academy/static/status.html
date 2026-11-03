@@ -81,7 +81,7 @@
   <script>
     const $ = (elementId) => document.getElementById(elementId);
     let videos = [], chosen = [];  // chosen: 고른 강의 [{id, title}]
-    fetch("/api/videos").then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => {
+    loadVideos().then((list) => {
       videos = list;
       fillSidebar(videos, { here: "" });
       if ($("pick-search").value) $("pick-search").oninput();  // 강의 목록이 오기 전에 찾기 칸에 쓴 경우
@@ -101,17 +101,13 @@
     for (const b of views) b.onclick = () => { history.replaceState(null, "", `#${b.dataset.view}`); showView(b.dataset.view); };
     showView(location.hash.slice(1) || store.get("status-view"));
 
-    // ---- 선생님: 이번 주 강의 지정(열쇠는 X-Teacher-Key로 보내고, 틀리면 지우고 다시 묻습니다) ----
-    const teacherKey = () => store.get("teacher-key") || "";
-    const showTeacher = () => { $("key-form").hidden = !!teacherKey(); $("picker").hidden = !teacherKey(); };
+    // ---- 선생님: 이번 주 강의 지정(열쇠는 common.js의 teacher가 기억하고 보냄) ----
+    const showTeacher = () => { $("key-form").hidden = !!teacher.key(); $("picker").hidden = !teacher.key(); };
     $("key-form").onsubmit = (e) => {
       e.preventDefault();
-      if (!$("teacher-key").value.trim()) return;
-      store.set("teacher-key", $("teacher-key").value.trim());
-      $("teacher-key").value = "";
-      showTeacher();
+      if (teacher.remember($("teacher-key"))) showTeacher();
     };
-    $("key-forget").onclick = () => { localStorage.removeItem("teacher-key"); showTeacher(); };
+    $("key-forget").onclick = () => { teacher.forget(); showTeacher(); };
     function renderChosen() {
       const grade = (l) => {  // 대상 학년(없으면 모든 학년)
         const select = el("select", { "aria-label": `${l.title} 대상 학년`, onchange: () => { l.grade = select.value; } },
@@ -133,18 +129,11 @@
                        onclick: () => { chosen.push({ id: v.id, title: v.title }); renderChosen(); $("pick-search").oninput(); } }, "더하기"))));
     };
     $("pick-save").onclick = async () => {
-      const res = await fetch("/api/picks", { method: "PUT", headers: { "Content-Type": "application/json", "X-Teacher-Key": teacherKey() },
-                                              body: JSON.stringify({ ids: chosen.map((l) => l.id), note: $("pick-note").value,
-                                                                     grades: Object.fromEntries(chosen.map((l) => [l.id, l.grade || ""])) }) });
-      if (res.status === 429) return void ($("pick-status").textContent = "열쇠를 여러 번 틀려 10분 동안 막혔습니다. 잠시 뒤 다시 해 주세요.");
-      if (res.status === 403) {
-        localStorage.removeItem("teacher-key");
-        showTeacher();
-        $("pick-status").textContent = "선생님 열쇠가 맞지 않습니다. 다시 넣어 주세요.";
-        return;
-      }
-      $("pick-status").textContent = res.ok ? "저장했습니다. 학생 화면에 바로 나옵니다." : "저장하지 못했습니다. 잠시 뒤 다시 해 주세요.";
-      if (res.ok) { picksLoad = null; fillSidebar(videos, { here: "" }); }
+      const { problem } = await teacher.put("/api/picks", { ids: chosen.map((l) => l.id), note: $("pick-note").value,
+                                                            grades: Object.fromEntries(chosen.map((l) => [l.id, l.grade || ""])) });
+      showTeacher();  // 열쇠가 틀렸으면 다시 묻습니다
+      $("pick-status").textContent = problem || "저장했습니다. 학생 화면에 바로 나옵니다.";
+      if (!problem) { picksLoad = null; fillSidebar(videos, { here: "" }); }
     };
     fetch("/api/picks").then((r) => r.json()).then((picks) => {
       chosen = picks.lectures;
