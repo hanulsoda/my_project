@@ -136,3 +136,44 @@ def remember(page, site, records):
 
 def stored(page, key):
     return page.evaluate("key => JSON.parse(localStorage.getItem(key))", key)
+
+
+@pytest.fixture(scope="session")
+def study_site(tmp_path_factory):
+    """요점노트·시험대비 항목을 연결한 서버를 따로 띄우는 함수. study_site(항목들) → site.url, site.ids[제목].
+    기존 site와 별개의 서버라서 강의 수 등 다른 시험에 영향이 없습니다. 영상은 4-2번 하나(분석 없음)."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg가 없어 화면 테스트를 건너뜀")
+    import uvicorn
+
+    from academy.server import create_app
+
+    clip = tmp_path_factory.mktemp("study-clip") / "clip.webm"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x36:r=5:d=5",
+                    "-c:v", "libvpx-vp9", "-b:v", "20k", "-g", "25", str(clip)], check=True)
+    started = []
+
+    def start(entries):
+        root = tmp_path_factory.mktemp("study-site")
+        videos, data = root / "videos", root / "data"
+        data.mkdir()
+        for rel in ("고1/미래엔/4-2. 가짜 제목.webm", "고1/천재/4-2. 연결 안 된 영상.webm"):
+            (videos / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(clip, videos / rel)
+        ids = {v["title"].rsplit("/", 1)[-1]: v["id"] for v in find_videos(videos)}
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        app = create_app(videos, data, None, (), log_dir=root / "logs", study=entries)
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        while not server.started:
+            time.sleep(0.05)
+        started.append((server, thread))
+        return SimpleNamespace(url=f"http://127.0.0.1:{port}", ids=ids)
+
+    yield start
+    for server, thread in started:
+        server.should_exit = True
+        thread.join(timeout=10)

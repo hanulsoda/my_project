@@ -617,6 +617,24 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .overview dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; line-height: 1.6; }
 .overview dt { color: var(--muted); font-weight: 600; }
 .overview dd { margin: 0; }
+
+/* 요점노트 */
+.study-title h3 { margin: 0; font-size: 18px; }
+.study-sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.study-big { margin: 16px 0; }
+.study-big > h3 { margin: 0 0 8px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); font-size: 16px; }
+.study-h h4, .study-card h4, .study-flow h4 { margin: 12px 0 4px; font-size: 15px; }
+.study-def, .study-tip { margin: 8px 0; padding: 10px 14px; border-radius: 10px; line-height: 1.7; }
+.study-def { background: var(--accent-soft); }
+.study-tip { background: var(--highlight); }
+.study-card { margin: 8px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; }
+.study-card h4 { margin-top: 0; }
+.study-card ul, .study-list, .study-flow ol { margin: 4px 0; padding-left: 20px; line-height: 1.7; }
+.study-flow li strong { margin-right: 8px; }
+.study-table-wrap { margin: 8px 0; overflow-x: auto; }
+.study-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.6; }
+.study-table th, .study-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+.study-table th { background: var(--fill); }
 .overview h3 { margin: 10px 0 4px; font-size: 15px; }
 .reference h3 { margin-top: 0; }
 .reference h4 { margin: 10px 0 2px; color: var(--muted); font-size: 14px; }
