@@ -89,3 +89,12 @@ def test_one_broken_entry_does_not_stop_the_others(tmp_path):
 
     assert [s["id"] for s in client.get(f"/api/videos/{vid}").json()["study"]] == ["midaen-4-2"]
     assert client.get("/api/study/broken").status_code == 404
+
+
+def test_direct_links_reach_the_server(tmp_path):
+    title = "고1/다른출판사/4-2. 가짜 제목"  # 규칙으로는 연결되지 않는 영상
+    app, vid = build(tmp_path, folder="고1/다른출판사", study=[make_entry()], study_links={title: "midaen-4-2"})
+
+    detail = TestClient(app, client=ACADEMY).get(f"/api/videos/{vid}").json()
+
+    assert detail["study"] == [{"id": "midaen-4-2", "title": "가짜 단원 제목입니다", "unit": "4-2"}]
