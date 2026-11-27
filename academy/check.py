@@ -18,7 +18,7 @@ from pathlib import Path
 from academy.library import find_videos, folders_problem, load_analysis
 from academy.references import read_references, ref_key, unmatched_fixes, usable_references
 from academy.settings import ENV_FILE, entry_settings, load_env_file, teacher_key
-from academy.study import entry_problems, read_links, read_study
+from academy.study import NO_GRADE, entry_problems, lacks_grade, read_links, read_study
 
 PROBLEM, OK, NOTE = "문제", "확인", "참고"
 MARKS = {PROBLEM: "✘", OK: "✔", NOTE: "·"}
@@ -149,10 +149,19 @@ def checks(env) -> list[tuple[str, str]]:
         except SystemExit as e:
             say(PROBLEM, f"{e} — 서버가 켜지지 않습니다")
         else:
+            seen = set()
             for n, entry in enumerate(study, 1):
-                name = entry.get("id") if isinstance(entry, dict) and isinstance(entry.get("id"), str) else f"{n}번째 항목"
-                for problem in entry_problems(entry):
+                has_id = isinstance(entry, dict) and isinstance(entry.get("id"), str)
+                name = entry["id"] if has_id else f"{n}번째 항목"
+                problems = entry_problems(entry)
+                for problem in problems:
                     say(PROBLEM, f"시험대비 자료 {name}: {problem}(이 항목은 학생에게 보이지 않습니다)")
+                if has_id and name in seen:  # usable_study는 뒤쪽 항목을 조용히 버립니다
+                    say(PROBLEM, f"시험대비 자료 id가 겹칩니다: {name} (뒤쪽 항목은 서버가 쓰지 않습니다)")
+                elif not problems and lacks_grade(entry):
+                    say(NOTE, f"시험대비 자료 {name}: {NO_GRADE}")
+                if has_id:
+                    seen.add(name)
             if not any(level == PROBLEM and text.startswith("시험대비 자료 ") for level, text in found):
                 say(OK, f"시험대비 자료 {len(study):,}개")
     if env.get("STUDY_LINKS_FILE"):

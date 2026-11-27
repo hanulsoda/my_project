@@ -98,3 +98,18 @@ def test_direct_links_reach_the_server(tmp_path):
     detail = TestClient(app, client=ACADEMY).get(f"/api/videos/{vid}").json()
 
     assert detail["study"] == [{"id": "midaen-4-2", "title": "가짜 단원 제목입니다", "unit": "4-2"}]
+
+
+def test_study_is_closed_for_a_proxied_request_without_forwarding_headers(tmp_path):
+    # 프록시 설정에서 X-Forwarded-For를 빠뜨려도 인터넷으로 보고 시험대비 자료를 내주지 않습니다.
+    proxy = ("192.168.0.10", 50000)
+    app, vid = build(tmp_path, study=[make_entry()], entry_secret=SECRET, study_internet=True, proxy_addrs=(proxy[0],))
+    client = TestClient(app, follow_redirects=False, client=proxy)
+
+    assert client.get("/api/study/midaen-4-2").status_code in (401, 404)
+    assert client.get(f"/api/videos/{vid}").status_code == 401
+    forwarded = {"x-forwarded-for": HOME[0]}
+    assert client.get("/api/study/midaen-4-2", headers=forwarded).status_code in (401, 404)
+    assert client.get(f"/api/videos/{vid}", headers=forwarded).status_code == 401
+    inside = client.get(f"/api/videos/{vid}", headers={"x-forwarded-for": "192.168.0.7"})
+    assert inside.status_code == 200 and inside.json()["study"] == [{"id": "midaen-4-2", "title": "가짜 단원 제목입니다", "unit": "4-2"}]

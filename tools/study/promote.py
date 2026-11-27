@@ -7,7 +7,9 @@
 """
 
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -33,7 +35,14 @@ def promote(draft_path: str, out_path: str, ids: list[str]) -> list[str]:
     merged = [chosen.pop(e["id"], e) if isinstance(e, dict) and e.get("id") in chosen else e for e in existing]
     merged += chosen.values()
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=out.parent, prefix=out.name + ".", suffix=".tmp")  # 같은 폴더에 써 두었다가 바꿔치기
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(merged, ensure_ascii=False, indent=2) + "\n")
+        os.replace(tmp, out)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     return ids
 
 

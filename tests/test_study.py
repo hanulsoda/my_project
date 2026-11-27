@@ -202,3 +202,17 @@ def test_read_links(tmp_path):
         read_links(str(path))
     with pytest.raises(SystemExit):
         read_links(str(tmp_path / "없음.json"))
+
+
+def test_entries_with_a_grade_do_not_link_other_grades_or_other_units():
+    entry = make_entry(scope=["2022개정", "고1", "미래엔"], unit="5-1", unit_title="다섯째 단원 이름입니다", works=["공동 보고서"])
+    own = "2022개정/고1/미래엔/"
+
+    assert link_video([entry], own + "5-1. 아무 제목")["status"] == "number_only"
+    assert link_video([entry], own + "5-1. 공동 보고서 쓰기")["status"] == "matched"
+    assert link_video([entry], "2022개정/고2/미래엔/5-1. 공동 보고서 쓰기")["status"] == "none"  # 다른 학년
+    assert link_video([entry], own + "3-1. 공동 보고서 쓰기")["status"] == "none"  # 다른 단원 번호로 시작
+    assert link_video([entry], own + "3 - 1 공동 보고서 쓰기")["status"] == "none"
+    assert link_video([entry], own + "공동 보고서 쓰기")["status"] == "matched"  # 번호 없는 이름은 그대로
+    direct = own + "3-1. 공동 보고서 쓰기"
+    assert link_video([entry], direct, {direct: "midaen-4-2"})["status"] == "direct"  # 직접 연결은 규칙보다 앞섭니다

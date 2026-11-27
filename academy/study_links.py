@@ -10,7 +10,7 @@ from pathlib import Path
 
 from academy.library import find_videos
 from academy.settings import load_env_file
-from academy.study import link_video, read_links, read_study, usable_study
+from academy.study import NO_GRADE, lacks_grade, link_video, read_links, read_study, usable_study
 
 UNLINKED_SHOWN = 50
 
@@ -18,10 +18,11 @@ UNLINKED_SHOWN = 50
 def report(videos: list[dict], entries: list[dict], links: dict | None = None) -> list[str]:
     """첫 줄에 종류별 영상 수, 이어서 확인이 필요한 영상 줄(연결 안 됨은 최대 50개)."""
     counts = dict.fromkeys(("matched", "direct", "number_only", "ambiguous", "none"), 0)
-    number_only, ambiguous, unlinked = [], [], []
+    number_only, ambiguous, unlinked, linked_ids = [], [], [], set()
     for video in videos:
         result = link_video(entries, video["title"], links)
         counts[result["status"]] += 1
+        linked_ids.update(e["id"] for e in result["entries"])
         if result["status"] == "number_only":
             number_only.append(f"[번호로만 연결] {video['title']} → {result['entries'][0]['id']}")
         elif result["status"] == "ambiguous":  # 모호하면 항목을 돌려주지 않으므로 항목마다 따로 맞혀 봅니다
@@ -34,6 +35,7 @@ def report(videos: list[dict], entries: list[dict], links: dict | None = None) -
     lines += number_only + ambiguous + unlinked[:UNLINKED_SHOWN]
     if len(unlinked) > UNLINKED_SHOWN:
         lines.append(f"… 외 {len(unlinked) - UNLINKED_SHOWN}개")
+    lines += [f"[학년 미확인] 항목 {e['id']}: {NO_GRADE}" for e in entries if e["id"] in linked_ids and lacks_grade(e)]
     return lines
 
 

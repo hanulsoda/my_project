@@ -242,3 +242,25 @@ def test_mc_and_ox_titles_and_choices_allow_b_u_br_only(page, study_site):
     ox.locator(".choice").nth(0).click()
     expect(ox).to_contain_text("정답입니다!")
     assert page.evaluate("window.hacked") is None
+
+
+def test_mc_and_ox_explanations_allow_b_u_br_only(page, study_site):
+    evil = "<img src=x onerror=window.hacked=1>"
+    entry = make_entry()
+    entry["quiz"]["mc"][0].update(exp=f"해설 <u>밑줄</u> {evil}", answer=0)
+    entry["quiz"]["ox"][0].update(q="다음 문장은 맞다", answer=True, exp=f"OX해설 <u>밑줄</u> {evil}")
+    site = study_site([entry])
+    box = open_quiz(page, site)
+    mc = box.locator(".question").first
+    mc.locator(".choice").first.click()
+    expect(mc.locator(".feedback u")).to_have_text("밑줄")
+    expect(mc.locator(".feedback")).to_contain_text("정답입니다!")
+    expect(mc.locator(".feedback")).to_contain_text(evil)
+    expect(mc.locator(".feedback")).not_to_contain_text("<u>")
+    ox = box.locator(".question", has_text="다음 문장은 맞다")
+    ox.locator(".choice").nth(1).click()
+    expect(ox.locator(".feedback u")).to_have_text("밑줄")
+    expect(ox.locator(".feedback")).to_contain_text("아쉬워요.")
+    expect(ox.locator(".feedback")).to_contain_text(evil)
+    assert box.locator("img").count() == 0
+    assert page.evaluate("window.hacked") is None

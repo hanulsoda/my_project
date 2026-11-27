@@ -111,6 +111,14 @@ def usable_study(entries) -> list[dict]:
     return usable
 
 
+NO_GRADE = "scope에 학년(중1~고3)이 없어 같은 출판사의 다른 학년 영상에도 연결될 수 있습니다. scope에 학년 낱말을 넣어 주세요."
+
+
+def lacks_grade(entry: dict) -> bool:
+    """scope에 학년 낱말(중1~중3, 고1~고3)이 하나도 없으면 True: 다른 학년 폴더의 영상에도 연결될 수 있습니다."""
+    return not any(re.search("[중고][1-3]", unicodedata.normalize("NFC", str(word))) for word in entry.get("scope") or [])
+
+
 def norm(text: str) -> str:
     """한글을 NFC로 합치고 띄어쓰기·기호를 지웁니다(맥에서 옮긴 자모 분리 이름도 같아집니다)."""
     return re.sub(r"[\W_]+", "", unicodedata.normalize("NFC", text))
@@ -137,6 +145,10 @@ def _matches(entry, folder, name) -> tuple[bool, bool]:
     if not scope or not folder or any(not word or word not in folder for word in scope):
         return False, False  # scope가 비었거나 빈 낱말이 있으면 연결하지 않음
     flat = norm(name)
+    lead = re.match(r"\s*(\d+)\s*[-–]\s*(\d+)(?!\d)", unicodedata.normalize("NFC", name))
+    unit = [p.strip() for p in re.split(r"-", unicodedata.normalize("NFC", str(entry.get("unit", "")))) if p.strip()]
+    if lead and list(lead.groups()) != unit:
+        return False, False  # 다른 단원 번호로 시작하는 이름은 작품 이름이 겹쳐도 이 항목이 아닙니다
     parts = [p for p in re.split(r"-", unicodedata.normalize("NFC", str(entry.get("unit", "")))) if p.strip()]
     by_number = bool(parts) and re.match(r"\s*" + r"\s*[-–]\s*".join(re.escape(p.strip()) for p in parts) + r"(?!\d)",
                                          unicodedata.normalize("NFC", name)) is not None

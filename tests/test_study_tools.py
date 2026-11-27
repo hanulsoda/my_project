@@ -88,3 +88,17 @@ def test_promote_refuses_unknown_id_and_bad_entries(promote_mod, tmp_path):
     with pytest.raises(SystemExit):
         promote_mod.promote(_draft(tmp_path, bad), str(out), ["midaen-4-2"])
     assert not out.exists()
+
+
+def test_promote_writes_through_a_temp_file_and_leaves_output_untouched_on_failure(promote_mod, tmp_path, monkeypatch):
+    out = tmp_path / "study.json"
+    draft = _draft(tmp_path, make_entry())
+    promote_mod.promote(draft, str(out), ["midaen-4-2"])
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("study")) == ["study.json"]  # .tmp를 남기지 않음
+
+    before = out.read_text(encoding="utf-8")
+    monkeypatch.setattr(promote_mod.os, "replace", lambda *a: (_ for _ in ()).throw(OSError("디스크 오류")))
+    with pytest.raises(OSError):
+        promote_mod.promote(_draft(tmp_path, make_entry(unit_title="바꾼 제목입니다")), str(out), ["midaen-4-2"])
+    assert out.read_text(encoding="utf-8") == before
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("study")) == ["study.json"]
