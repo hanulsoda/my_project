@@ -1,0 +1,9 @@
+{
+  "name": "study-pdf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "요점노트·시험대비문제 PDF 만들기 도구(글꼴). Playwright는 따로 설치해 둡니다",
+  "dependencies": {
+    "@fontsource/noto-sans-kr": "^5.3.1"
+  }
+}
