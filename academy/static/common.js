@@ -393,7 +393,7 @@ const dueCount = (videos) => wrongLists(videos).reduce((n, l) => n + l.items.fil
 
 // q는 4지선다({question, choices, answer, explanation, time?})나 빈칸 문제({context, parts: 글·빈칸 번갈아}).
 // onResult(맞았는지)는 보기를 고르거나 '알았어요·몰랐어요'를 누를 때 부르고, replay(q)는 '설명 다시 보기' 요소(없으면 null).
-function quizCard(q, n, onResult, replay) {
+function quizCard(q, n, onResult, replay, options = {}) {  // options.review === false: 틀린 문제 복습에 넣지 않는 화면(시험대비)
   if (q.parts) {
     const line = el("p", { class: "blank-line" });
     const show = (open) => line.replaceChildren(...q.parts.flatMap((part, i) =>
@@ -429,7 +429,7 @@ function quizCard(q, n, onResult, replay) {
       });
       const link = replay(q), right = i === q.answer;
       feedback.replaceChildren(el("strong", {}, right ? "정답입니다! " : "아쉬워요. "), q.explanation,
-        ...(right ? [] : [" ‘틀린 문제 복습’에 넣었어요."]), ...(link ? [" ", link] : []));
+        ...(right || options.review === false ? [] : [" ‘틀린 문제 복습’에 넣었어요."]), ...(link ? [" ", link] : []));
       feedback.hidden = false;
       feedback.scrollIntoView({ block: "nearest" });  // 휴대폰에서는 해설이 화면 아래에 생겨 보이지 않았습니다
       onResult(right);

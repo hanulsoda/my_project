@@ -97,10 +97,132 @@ function renderNotes(box, notes) {
       el("ul", {}, ...goals.map((goal) => studyText("li", "", goal)))));
   }
   parts.push(...studyBlocks(notes.blocks));
-  // 낱말: [낱말, 뜻] 쌍(사전 {w, def}도 받습니다)
-  const words = studyList(notes.words).map((word) => (Array.isArray(word) ? word : [word?.w, word?.def]));
+  // 낱말: {w, def} 사전의 목록
+  const words = studyList(notes.words).map((word) => [word?.w, word?.def]);
   if (words.length) {
     parts.push(el("section", { class: "study-big" }, el("h3", {}, "낱말"), studyTable(["낱말", "뜻"], words)));
   }
   box.replaceChildren(...parts);
+}
+
+// ---- 시험대비 ----
+// 학생이 쓴 답을 비교하려고 고릅니다: NFC, 소문자, 공백과 문장부호 제거
+function normalizeAnswer(text) {
+  return String(text ?? "").normalize("NFC").toLowerCase().replace(/[\s.,·:;!?'"‘’“”()[\]~-]/g, "");
+}
+
+// 줄 단위로 나눠 <br>로 잇습니다(글은 inlineMarkup으로만 넣습니다)
+function studyLines(text) {
+  const out = document.createDocumentFragment();
+  String(text ?? "").split("\n").forEach((line, i) => {
+    if (i) out.append(document.createElement("br"));
+    out.append(inlineMarkup(line));
+  });
+  return out;
+}
+
+const STUDY_TOTAL = 30;  // 점수에 들어가는 문제: 객관식·OX·단답형
+
+// 시험대비 탭을 box에 그립니다. quiz: {passages, mc, sub, ox, short}. 점수는 "study:<studyId>"에만 저장합니다.
+function renderStudyQuiz(box, quiz, studyId) {
+  quiz = quiz && typeof quiz === "object" ? quiz : {};
+  const results = new Map();  // 문제 번호 → 맞았는지
+  const last = store.get("study:" + studyId);
+  const score = el("p", { class: "study-score", "aria-live": "polite" });
+  let number = 0;
+  const lastText = last && Number.isFinite(last.right) ? ` · 지난번 ${last.right}/${STUDY_TOTAL}` : "";
+  const showScore = () => {
+    const right = [...results.values()].filter(Boolean).length;
+    score.replaceChildren(`맞힌 문제 ${right}/${STUDY_TOTAL}${lastText}`);
+    if (results.size >= STUDY_TOTAL) {  // 모두 풀었으면 저장(‘내 답도 맞아요’로 고치면 다시 저장)
+      score.append(" · 모두 풀었습니다.");
+      store.set("study:" + studyId, { right, total: STUDY_TOTAL, at: Date.now() });
+    }
+  };
+  const record = (id, right) => { results.set(id, right); showScore(); };
+  const section = (title, cards) => (cards.length ? [el("h3", { class: "study-section" }, title), ...cards] : []);
+  const heading = (n, text) => { const h = el("h3", {}, `Q${n}. `); h.append(inlineMarkup(text)); return h; };
+
+  const passages = studyList(quiz.passages).map((p) => {
+    const body = el("details", { class: "study-passage", open: "" },
+      el("summary", {}, `[${p?.label ?? ""}] `, inlineMarkup(p?.title)));
+    for (const para of studyList(p?.paras)) body.append(studyText("p", "", para));
+    if (p?.source) body.append(studyText("p", "study-sub", p.source));
+    return body;
+  });
+
+  const choiceCard = (q, n, id) => {
+    const [title, ...rest] = String(q.question).split("\n");
+    const card = quizCard({ question: title, choices: q.choices, answer: q.answer, explanation: q.explanation },
+      n, (right) => record(id, right), () => null, { review: false });
+    if (rest.some((line) => line.trim())) card.querySelector("h3").after(el("blockquote", {}, studyLines(rest.join("\n"))));
+    return card;
+  };
+
+  const mc = studyList(quiz.mc).map((q) => {
+    const n = ++number;
+    return choiceCard({ question: String(q?.q ?? ""), choices: studyList(q?.choices).map(String), answer: q?.answer, explanation: String(q?.exp ?? "") }, n, `q${n}`);
+  });
+
+  const sub = studyList(quiz.sub).map((q) => {
+    const n = ++number;
+    const model = el("div", { class: "study-model-box", hidden: "" });
+    const reveal = el("button", { class: "choice", type: "button", onclick: () => {
+      reveal.hidden = true;
+      const done = el("div", { class: "study-judge" });
+      const decide = (knew) => { done.replaceChildren(el("p", { class: "feedback" }, knew ? "좋아요!" : "모범 답안을 한 번 더 읽어 보세요.")); };
+      done.append(el("button", { class: "choice", type: "button", onclick: () => decide(true) }, "알았어요"),
+                  el("button", { class: "choice", type: "button", onclick: () => decide(false) }, "몰랐어요"));
+      model.replaceChildren(studyText("p", "study-model", q?.model), ...(q?.note ? [studyText("p", "study-sub", q.note)] : []), done);
+      model.hidden = false;
+      model.scrollIntoView({ block: "nearest" });
+    } }, "모범 답안 보기");
+    return el("article", { class: "question" }, heading(n, q?.q),
+      el("textarea", { rows: "3", "aria-label": `${n}번 내 답 쓰기(저장하지 않습니다)` }), reveal, model);
+  });
+
+  const ox = studyList(quiz.ox).map((q) => {
+    const n = ++number;
+    return choiceCard({ question: String(q?.q ?? ""), choices: ["O", "X"], answer: q?.answer ? 0 : 1, explanation: String(q?.exp ?? "") }, n, `q${n}`);
+  });
+
+  const short = studyList(quiz.short).map((q) => {
+    const n = ++number, id = `q${n}`;
+    const input = el("input", { type: "text", autocomplete: "off", "aria-label": `${n}번 답` });
+    const button = el("button", { type: "submit" }, "확인");
+    const feedback = el("div", { class: "feedback", hidden: "", "aria-live": "polite" });
+    const accepted = [q?.answer, ...studyList(q?.alts)].map(normalizeAnswer).filter(Boolean);
+    const explain = () => [studyText("span", "", q?.exp)];
+    const form = el("form", { class: "study-short" }, input, button);
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const typed = normalizeAnswer(input.value);
+      if (!typed) {  // 빈 입력은 채점하지 않습니다
+        feedback.replaceChildren("답을 써 주세요.");
+        feedback.hidden = false;
+        return;
+      }
+      input.disabled = button.disabled = true;
+      feedback.hidden = false;
+      if (accepted.includes(typed)) {
+        feedback.replaceChildren(el("strong", {}, "정답입니다! "), ...explain());
+        record(id, true);
+      } else {
+        const fix = el("button", { class: "choice", type: "button", onclick: () => {
+          feedback.replaceChildren(el("strong", {}, "정답입니다! "), ...explain());
+          record(id, true);
+        } }, "내 답도 맞아요");
+        feedback.replaceChildren(el("strong", {}, "아쉬워요. "), `정답: ${q?.answer ?? ""}. `, ...explain(), " ", fix);
+        record(id, false);
+      }
+    };
+    return el("article", { class: "question" }, heading(n, q?.q), form, feedback);
+  });
+
+  if (!number) { box.replaceChildren(el("p", { class: "notice" }, "시험 문제가 없습니다.")); return; }
+  showScore();
+  const again = el("button", { type: "button", onclick: () => { renderStudyQuiz(box, quiz, studyId); box.scrollIntoView({ block: "start" }); } }, "다시 풀기");
+  box.replaceChildren(el("p", { class: "notice" }, "점수는 연습용이며 실제 평가가 아닙니다."), ...passages,
+    ...section("객관식 (5지선다)", mc), ...section("주관식", sub), ...section("OX", ox), ...section("단답형", short),
+    el("div", { class: "study-score-row" }, score, again));
 }

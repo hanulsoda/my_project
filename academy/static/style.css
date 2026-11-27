@@ -635,6 +635,16 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent); tex
 .study-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.6; }
 .study-table th, .study-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
 .study-table th { background: var(--fill); }
+.study-passage { margin: 8px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; line-height: 1.8; }
+.study-passage summary { cursor: pointer; font-weight: 600; }
+.study-section { margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); font-size: 16px; }
+.study-short { display: flex; gap: 8px; }
+.study-short input { flex: 1; min-width: 0; }
+.question > textarea { width: 100%; margin-bottom: 8px; resize: vertical; }
+.study-model-box { margin-top: 8px; line-height: 1.7; }
+.study-model { margin: 0 0 4px; padding: 8px 12px; border-radius: 10px; background: var(--accent-soft); }
+.study-score-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0; }
+.study-score { margin: 0; font-weight: 600; }
 .overview h3 { margin: 10px 0 4px; font-size: 15px; }
 .reference h3 { margin-top: 0; }
 .reference h4 { margin: 10px 0 2px; color: var(--muted); font-size: 14px; }
