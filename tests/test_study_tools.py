@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -32,9 +33,13 @@ def test_quiz_html_has_all_sections_and_answers_on_a_new_page(build_pdf):
     html = build_pdf.quiz_html(make_entry())
     positions = [html.index(word) for word in ("객관식", "주관식", "OX", "단답형")]
     assert positions == sorted(positions)
-    answers = html.index("정답과 해설")
-    assert answers > positions[-1]
-    assert "break-before: page" in html[:answers]
+    match = re.search(r'</div>\s*<div class="cols pb">', html)
+    assert match, "쪽 나누기 래퍼가 문제 단 바로 뒤에 따로 열려야 한다"
+    wrapper = match.start()  # 쪽 나누기 래퍼는 문제 단(다단)이 닫힌 뒤에 따로 열린다
+    assert "break-before: page" in html and ".pb {" in html
+    assert html.count('<div class="cols pb">') == 1
+    assert "정답과 해설" not in html[:wrapper]  # 문제 쪽에는 답이 없다
+    assert html.index("정답과 해설") > wrapper > positions[-1]
     assert "⑤" in html
     assert "가짜 지문 제목" in html
 
