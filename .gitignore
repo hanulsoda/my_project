@@ -6,3 +6,7 @@ data/
 
 # 학원 자료로 만든 점검 보고서(공개 저장소에 올리지 않음)
 reports/
+
+# 교재 지문이 든 초안 자료와 설치한 패키지(커밋하지 않음)
+tools/study/data/
+tools/study/node_modules/

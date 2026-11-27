@@ -53,6 +53,8 @@
         <button data-tab="quiz" role="tab" id="tab-btn-quiz" aria-controls="tab-quiz" aria-selected="false">퀴즈</button>
         <!-- Claude API 크레딧을 쓰지 않으려고 숨겨 둡니다. 다시 쓰려면 hidden을 지웁니다. -->
         <button data-tab="ask" hidden role="tab" id="tab-btn-ask" aria-controls="tab-ask" aria-selected="false">질문하기</button>
+        <button data-tab="study-notes" hidden role="tab" id="tab-btn-study-notes" aria-controls="tab-study-notes" aria-selected="false">요점노트</button>
+        <button data-tab="study-quiz" hidden role="tab" id="tab-btn-study-quiz" aria-controls="tab-study-quiz" aria-selected="false">시험대비</button>
         <button data-tab="notes" role="tab" id="tab-btn-notes" aria-controls="tab-notes" aria-selected="false">메모</button>
         <button data-tab="find" role="tab" id="tab-btn-find" aria-controls="tab-find" aria-selected="false">찾기</button>
       </nav>
@@ -76,6 +78,10 @@
           </div>
         </form>
       </div>
+
+      <div class="tab-body" id="tab-study-notes" role="tabpanel" aria-labelledby="tab-btn-study-notes" hidden></div>
+
+      <div class="tab-body" id="tab-study-quiz" role="tabpanel" aria-labelledby="tab-btn-study-quiz" hidden></div>
 
       <div class="tab-body" id="tab-notes" role="tabpanel" aria-labelledby="tab-btn-notes" hidden>
         <form id="note-form" class="note-form">
@@ -110,6 +116,7 @@
     <form method="dialog"><button type="submit">닫기</button></form>
   </dialog>
   <script src="common.js"></script>
+  <script src="study.js"></script>
   <script src="watch.js"></script>
 </body>
 </html>

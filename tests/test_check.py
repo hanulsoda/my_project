@@ -134,3 +134,52 @@ def test_damaged_move_and_size_records_are_problems_with_the_right_advice(tmp_pa
 
     assert "옮긴 강의 기록" in found and "영상 크기 기록" in found
     assert "깨지기 전" not in found and "백업" in found  # .broken은 깨진 파일 그대로라 되살릴 것이 아님
+
+
+def test_check_reports_study_file_states(tmp_path):
+    from tests.study_data import make_entry
+    env, _ = setup(tmp_path)
+    assert any(level == "참고" and "STUDY_FILE" in text for level, text in checks(env))  # 설정 없음
+
+    study = tmp_path / "study.json"
+    study.write_text(json.dumps([make_entry()], ensure_ascii=False), encoding="utf-8")
+    env["STUDY_FILE"] = str(study)
+    assert any(level == "확인" and "시험대비 자료 1개" in text for level, text in checks(env))
+    assert problems(env) == []
+
+    bad = make_entry()
+    bad["quiz"]["mc"] = bad["quiz"]["mc"][:9]
+    study.write_text(json.dumps([bad], ensure_ascii=False), encoding="utf-8")
+    assert any("객관식 문항이 10개" in text and "midaen-4-2" in text for text in problems(env))
+
+    study.write_text(json.dumps([make_entry()], ensure_ascii=False), encoding="utf-8")
+    env["ENTRY_SECRET"] = "s" * 40
+    assert any(level == "참고" and "STUDY_INTERNET" in text for level, text in checks(env))
+    env["STUDY_INTERNET"] = "1"
+    assert not any("STUDY_INTERNET" in text for _, text in checks(env))
+
+
+def test_check_flags_duplicate_study_ids_broken_links_file_and_gradeless_scope(tmp_path):
+    from tests.study_data import make_entry
+    env, _ = setup(tmp_path)
+    study = tmp_path / "study.json"
+    study.write_text(json.dumps([make_entry(), make_entry(unit_title="뒤쪽 겹치는 항목입니다")], ensure_ascii=False), encoding="utf-8")
+    env["STUDY_FILE"] = str(study)
+
+    found = checks(env)
+
+    assert any(level == "문제" and "id가 겹칩니다: midaen-4-2" in text and "서버가 쓰지 않습니다" in text for level, text in found)
+    assert not any(level == "확인" and "시험대비 자료" in text for level, text in found)  # 서버가 쓰는 수와 다른 '확인'은 없음
+    assert any(level == "참고" and "midaen-4-2" in text and "scope에 학년(중1~고3)이 없어" in text for level, text in found)
+    assert not any("[학년 미확인]" in text for _, text in found)
+
+    study.write_text(json.dumps([make_entry(scope=["2022개정", "고1", "미래엔"])], ensure_ascii=False), encoding="utf-8")
+    assert not any("학년" in text and "scope" in text for _, text in checks(env))
+
+    links = tmp_path / "links.json"
+    env["STUDY_LINKS_FILE"] = str(links)  # 파일 없음
+    assert any("영상 직접 연결 파일을 읽지 못했습니다" in text and "서버가 켜지지 않습니다" in text for text in problems(env))
+    links.write_text("{깨짐", encoding="utf-8")
+    assert any("영상 직접 연결 파일을 읽지 못했습니다" in text for text in problems(env))
+    links.write_text("{}", encoding="utf-8")
+    assert problems(env) == []

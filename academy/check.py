@@ -18,6 +18,7 @@ from pathlib import Path
 from academy.library import find_videos, folders_problem, load_analysis
 from academy.references import read_references, ref_key, unmatched_fixes, usable_references
 from academy.settings import ENV_FILE, entry_settings, load_env_file, teacher_key
+from academy.study import NO_GRADE, entry_problems, lacks_grade, read_links, read_study
 
 PROBLEM, OK, NOTE = "문제", "확인", "참고"
 MARKS = {PROBLEM: "✘", OK: "✔", NOTE: "·"}
@@ -126,8 +127,10 @@ def checks(env) -> list[tuple[str, str]]:
         except SystemExit as e:
             say(PROBLEM, f"{e} — 서버가 켜지지 않습니다")
 
+    secret_on = False
     try:
         secret, site = entry_settings(env)
+        secret_on = bool(secret)
         if secret:
             say(OK, "인터넷 입장 확인이 켜져 있습니다(학원 사이트의 '강의 보기'로만 들어옴)")
             if not site:
@@ -136,6 +139,38 @@ def checks(env) -> list[tuple[str, str]]:
             say(NOTE, "학원 내부망 전용입니다(인터넷 요청은 막음). 인터넷으로 열려면 docs/인터넷-열기.md")
     except SystemExit as e:
         say(PROBLEM, f"{e}")
+
+    study_file = env.get("STUDY_FILE")
+    if not study_file:
+        say(NOTE, "시험대비 자료(STUDY_FILE)를 설정하지 않았습니다. 요점노트·시험대비 없이 씁니다")
+    else:
+        try:
+            study = read_study(study_file)  # 서버와 똑같이 읽습니다
+        except SystemExit as e:
+            say(PROBLEM, f"{e} — 서버가 켜지지 않습니다")
+        else:
+            seen = set()
+            for n, entry in enumerate(study, 1):
+                has_id = isinstance(entry, dict) and isinstance(entry.get("id"), str)
+                name = entry["id"] if has_id else f"{n}번째 항목"
+                problems = entry_problems(entry)
+                for problem in problems:
+                    say(PROBLEM, f"시험대비 자료 {name}: {problem}(이 항목은 학생에게 보이지 않습니다)")
+                if has_id and name in seen:  # usable_study는 뒤쪽 항목을 조용히 버립니다
+                    say(PROBLEM, f"시험대비 자료 id가 겹칩니다: {name} (뒤쪽 항목은 서버가 쓰지 않습니다)")
+                elif not problems and lacks_grade(entry):
+                    say(NOTE, f"시험대비 자료 {name}: {NO_GRADE}")
+                if has_id:
+                    seen.add(name)
+            if not any(level == PROBLEM and text.startswith("시험대비 자료 ") for level, text in found):
+                say(OK, f"시험대비 자료 {len(study):,}개")
+    if env.get("STUDY_LINKS_FILE"):
+        try:
+            read_links(env["STUDY_LINKS_FILE"])
+        except SystemExit as e:
+            say(PROBLEM, f"{e} — 서버가 켜지지 않습니다")
+    if secret_on and env.get("STUDY_INTERNET", "").strip().lower() not in ("1", "true", "yes", "on"):
+        say(NOTE, "인터넷으로 들어오는 학생에게는 요점노트·시험대비가 보이지 않습니다(STUDY_INTERNET=1로 켭니다)")
 
     log_dir = env.get("LOG_DIR")
     if not log_dir:

@@ -142,9 +142,13 @@ function loadLecture() {
 }
 loadLecture();
 
-function render({ title, analysis, references = [], prev = null, next = null, ask = false }) {
+function render({ title, analysis, references = [], prev = null, next = null, ask = false, study = [] }) {
   document.title = title;
   $("tab-btn-ask").hidden = !ask;  // 질문하기는 서버가 켜 둘 때만(ASK_ENABLED, 질문마다 Claude 비용)
+  if (study.length) {  // 이 영상에 연결된 요점노트가 있으면(분석이 없는 영상도) 탭을 보입니다
+    $("tab-btn-study-notes").hidden = $("tab-btn-study-quiz").hidden = false;
+    loadStudy(study[0].id);
+  }
   // 머리글: 작품 이름과 그 위치(2022개정 · 고1 · 모의고사) 두 줄, 왼쪽 위 버튼은 그 폴더로 돌아갑니다.
   const parts = title.split("/");
   $("title").textContent = parts.pop();
@@ -200,6 +204,18 @@ function render({ title, analysis, references = [], prev = null, next = null, as
     $("tab-guide").replaceChildren(notice(msg));
     $("tab-quiz").replaceChildren(notice(msg));
   }
+}
+
+// ---- 요점노트(연결된 항목): 항목 전체(/api/study/{id})를 받아 탭마다 그립니다 ----
+function loadStudy(entryId) {
+  const box = $("tab-study-notes"), quizBox = $("tab-study-quiz");
+  fetch(`/api/study/${encodeURIComponent(entryId)}`)
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((entry) => { renderNotes(box, entry.notes); renderStudyQuiz(quizBox, entry.quiz, entryId); },
+      () => {
+        box.replaceChildren(notice(`요점노트를 불러오지 못했습니다. ${OFFLINE}`));
+        quizBox.replaceChildren(notice(`시험대비를 불러오지 못했습니다. ${OFFLINE}`));
+      });
 }
 
 // 이 사이트의 목록 화면에서 왔으면 그 화면 이름, 아니면 null. 새 탭으로 열었으면(돌아갈 곳이 없음) null.
@@ -450,7 +466,7 @@ function setupAsk() {
 // ---- 메모·북마크 ----
 const notesKey = `notes:${id}`;
 
-function renderNotes() {
+function renderMemos() {
   const notes = store.get(notesKey) || [];
   $("notes").replaceChildren(...notes.map((n) => el("li", {},
     timeButton(n.t),
@@ -458,7 +474,7 @@ function renderNotes() {
     el("button", {
       class: "delete",
       "aria-label": `${fmt(n.t)} 메모 삭제`,
-      onclick: () => { if (!tappedTwice()) { removeNote(id, n); renderNotes(); } },
+      onclick: () => { if (!tappedTwice()) { removeNote(id, n); renderMemos(); } },
     }, "삭제"))));
   if (!notes.length) $("notes").append(el("li", { class: "notice" }, "아직 메모가 없습니다. 영상을 보다가 기억할 장면에서 추가하세요."));
 }
@@ -469,7 +485,7 @@ function addNote(text, t = video.currentTime) {  // t초 장면에 메모(글이
   notes.push({ t, text });
   notes.sort((a, b) => a.t - b.t);
   if (!store.set(notesKey, notes)) return false;
-  renderNotes();
+  renderMemos();
   return true;
 }
 
@@ -502,8 +518,8 @@ $("bookmark-btn").onclick = () => {
   if (addNote("")) sayBriefly(`${fmt(video.currentTime)} 장면을 북마크했습니다. 메모 탭에서 볼 수 있습니다.`);
   else $("status").textContent = `북마크를 ${notSaved}`;
 };
-renderNotes();
-recordsMoved.then(renderNotes);  // 옮긴 강의를 처음 열 때: 예전 번호의 메모를 옮겨 온 뒤 다시 그립니다
+renderMemos();
+recordsMoved.then(renderMemos);  // 옮긴 강의를 처음 열 때: 예전 번호의 메모를 옮겨 온 뒤 다시 그립니다
 
 // ---- 구간 반복: 한 번 누르면 시작점, 두 번째는 끝점(반복 시작), 세 번째는 끄기. 어려운 설명을 여러 번 들을 때 ----
 // 시작점만 찍은 뒤 시작점이나 그 앞에서 다시 누르면 시작점을 지웁니다.

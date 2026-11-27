@@ -37,6 +37,7 @@ from academy.library import GUIDE_TRIES, find_videos, load_analysis, load_moves,
 from academy.settings import entry_settings, load_env_file, teacher_key as _teacher_key
 from academy.references import (matcher, read_references, ref_key, reference_sections, same_text, suspects,
                                unmatched_fixes, usable_references)
+from academy.study import link_video, read_links, read_study, usable_study
 from academy.timelink import link_times
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -240,14 +241,18 @@ class PicksRequest(BaseModel):
 
 
 def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=None, usage_ignore=(),
-               teacher_key=None, entry_secret="", site_url="", proxy_addrs=()) -> FastAPI:
+               teacher_key=None, entry_secret="", site_url="", proxy_addrs=(),
+               study=(), study_links=None, study_internet=False) -> FastAPI:
     """log_dir를 주면 현황(/api/status)에 백업·밤 작업·새 강의 분석 로그의 마지막 줄을 함께 보여 줍니다.
 
     entry_secret을 주면 인터넷(학원 내부망 밖)에서 온 요청은 학원 사이트 입장 링크로 받은 통과 쿠키가 있어야 합니다.
     proxy_addrs: 시놀로지(역방향 프록시) 주소. 거기서 머리글 없이 온 요청은 인터넷으로 봅니다.
+    study·study_links: 영상에 연결해 보여 줄 요점노트·시험대비 항목과 직접 연결 목록. study_internet을 켜야 인터넷 요청도 봅니다.
     """
     outside = lambda request: _from_outside(request, proxy_addrs)
     references = usable_references(references)  # 모양이 다른 정리 하나가 목록·검색·현황을 멈추지 않게
+    study = usable_study(study)  # 모양이 다른 항목 하나가 다른 항목을 멈추지 않게
+    study_open = lambda request: study_internet or not outside(request)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -464,6 +469,13 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
                                      "sections": [s for s in r["sections"] if s["name"] != "빈칸 문제"]}
                                     for r in find_references(video["title"])]
         return matched[video["id"]]
+
+    study_linked = {}  # 영상 id → 연결된 요점노트·시험대비 항목(영상 제목이 같으면 결과도 같아 기억해 둡니다)
+
+    def study_for(video):
+        if video["id"] not in study_linked:
+            study_linked[video["id"]] = link_video(study, video["title"], study_links)["entries"]
+        return study_linked[video["id"]]
 
     def stamp(path):  # 파일이 바뀌었는지 보는 값(없으면 None)
         try:
@@ -1178,8 +1190,19 @@ def create_app(video_dir: Path, data_dir: Path, answer, references=(), log_dir=N
         ids = [v["id"] for v in siblings]
         at = ids.index(video_id) if video_id in ids else len(siblings) + 1  # 목록을 막 다시 훑은 순간이면 앞뒤 없음
         near = lambda i: {"id": siblings[i]["id"], "title": siblings[i]["title"]} if 0 <= i < len(siblings) else None
+        # study: 이 강의에 연결된 요점노트·시험대비(인터넷 요청은 study_internet을 켰을 때만)
+        linked_study = [{"id": e["id"], "title": e["unit_title"], "unit": e["unit"]}
+                        for e in study_for(video)] if study_open(request) else []
         return {"id": video_id, "title": video["title"], "analysis": analysis, "references": summaries,
-                "prev": near(at - 1), "next": near(at + 1), "ask": answer is not None}  # ask: 플레이어의 질문하기 탭
+                "prev": near(at - 1), "next": near(at + 1), "ask": answer is not None,  # ask: 플레이어의 질문하기 탭
+                "study": linked_study}
+
+    @app.get("/api/study/{entry_id}")
+    def study_entry(entry_id: str, request: Request):
+        found = next((e for e in study if e["id"] == entry_id), None) if study_open(request) else None
+        if found is None:  # 닫힌 요청도 모르는 id와 같은 답을 해 자료가 있는지 드러나지 않게
+            raise HTTPException(404, "자료를 찾을 수 없습니다")
+        return {k: found[k] for k in ("id", "unit", "unit_title", "notes", "quiz")}
 
     @app.get("/api/videos/{video_id}/pages/{n}.jpg")
     def page_thumbnail(video_id: str, n: int):
@@ -1398,4 +1421,7 @@ app = create_app(Path(os.environ.get("VIDEO_DIR", "videos")),
                  _ignored_hosts(os.environ.get("USAGE_IGNORE", "")),  # 이용 통계에서 뺄 기기 주소(원장님 PC 등)
                  _teacher_key(os.environ.get("TEACHER_KEY_FILE")),
                  *entry_settings(os.environ),  # 인터넷으로 열 때만: 학원 사이트 입장 확인(docs/인터넷-열기.md)
-                 proxy_addrs=_ignored_hosts(os.environ.get("PROXY_ADDR", "")))  # 시놀로지 주소(머리글 빠뜨림 대비)
+                 proxy_addrs=_ignored_hosts(os.environ.get("PROXY_ADDR", "")),  # 시놀로지 주소(머리글 빠뜨림 대비)
+                 study=read_study(os.environ.get("STUDY_FILE")),  # 요점노트·시험대비(쓸 수 있는 항목 고르기는 create_app이)
+                 study_links=read_links(os.environ.get("STUDY_LINKS_FILE")),
+                 study_internet=os.environ.get("STUDY_INTERNET", "").strip().lower() in ("1", "true", "yes", "on"))
