@@ -16,10 +16,11 @@
 - 환경 변수: `STUDY_FILE`, `STUDY_LINKS_FILE`, `STUDY_INTERNET`. 설정하지 않으면 새 기능은 꺼지고 기존 동작은 그대로다.
 - 연결은 `scope`의 모든 낱말이 **폴더 경로**에 있어야 한다. `scope`가 비면 연결하지 않는다. 서로 다른 항목 둘 이상과 맞으면 연결하지 않는다.
 - 규칙 1(단원 번호)은 **파일 이름이 단원 번호로 시작**할 때만(바로 뒤에 숫자가 이어지면 안 됨). 규칙 2는 `unit_title` 네 글자 이상, 규칙 3은 `works` 세 글자 이상. 한글은 NFC로 합치고 띄어쓰기·기호는 무시한다.
+- `notes.words`는 `{"w": "낱말", "def": "뜻"}` 객체의 목록이다(쌍이 아님).
 - 글 속 꾸밈은 `<b>`, `<u>`, `<br>`만 해석한다. 통째로 `innerHTML`에 넣지 않는다.
 - 새 화면은 `wrong:`·`score:` 저장 칸을 쓰지 않고 `study:`만 쓴다. 공용 `quizCard`의 기본 동작은 바꾸지 않는다.
 - 인터넷(학원 내부망 밖)에서 온 요청에는 `STUDY_INTERNET`이 켜졌을 때만 `study`와 `/api/study`를 준다.
-- 화면에 보이는 글은 한국어 해요체. 점수는 연습용이며 합격과 무관하다는 안내를 지우지 않는다.
+- 화면에 보이는 글은 이 플레이어의 기존 말투(대체로 합니다체)를 따른다. 점수는 연습용이며 합격과 무관하다는 안내를 지우지 않는다.
 - 저장소에 교재 원문을 넣지 않는다. 시험 자료는 가짜 지문만 쓴다. 실제 자료 JSON은 `tools/study/data/`에 두되 `.gitignore`한다.
 - 시험은 `tests/`의 기존 방식을 따른다. 실행: `python -m pytest <파일> -v` (필요 패키지: fastapi, httpx, anthropic, uvicorn, pytest, numpy. faster-whisper는 이 시험들에 필요 없음).
 
@@ -170,7 +171,7 @@
 - Consumes: Task 3의 `/api/study/{id}`, 영상 상세의 `study`; `common.js`의 `el`, `watch.js`의 `$`·`notice`.
 - Produces (전역 함수, `study.js`): `inlineMarkup(text: string): DocumentFragment`(`<b>`, `<u>`, `<br>`만 해석, 나머지는 글자로 보임), `renderNotes(box: HTMLElement, notes: object): void`. 탭: 버튼 `tab-btn-study-notes`(글자 "요점노트"), 본문 `tab-study-notes`. `watch.js`의 `loadStudy(entryId: string): void`가 `/api/study/{id}`를 받아 `renderNotes`를 부른다(실패하면 `notice`).
 
-`watch.html`은 `common.js`와 `watch.js` 사이에 `study.js`를 넣고 탭 버튼을 `hidden`으로 둔다. `render()`는 `$("tab-btn-ask").hidden = !ask;` 바로 아래에서(분석이 없어 일찍 돌아가는 경로보다 앞) `study`가 비지 않으면 버튼을 보이고 `loadStudy(study[0].id)`를 부른다. `renderNotes`는 스펙의 `notes.blocks` 종류(`big`, `h`, `def`, `tip`, `card`, `list`, `flow`, `table`)와 `words`(낱말·뜻 표)를 그리고, 알 수 없는 `t`는 건너뛴다. 스타일은 기존 색 변수만 쓴다(새 색을 만들지 않음: `tests/test_style.py`가 대비를 검사함).
+`watch.html`은 `common.js`와 `watch.js` 사이에 `study.js`를 넣고 탭 버튼을 `hidden`으로 둔다. `render()`는 `$("tab-btn-ask").hidden = !ask;` 바로 아래에서(분석이 없어 일찍 돌아가는 경로보다 앞) `study`가 비지 않으면 버튼을 보이고 `loadStudy(study[0].id)`를 부른다. `renderNotes`는 스펙의 `notes.blocks` 종류(`big`, `h`, `def`, `tip`, `card`, `list`, `flow`, `table`)와 `words`(`{"w","def"}` 객체 목록, 낱말·뜻 표)를 그리고, 알 수 없는 `t`는 건너뛴다. 스타일은 기존 색 변수만 쓴다(새 색을 만들지 않음: `tests/test_style.py`가 대비를 검사함).
 
 - [ ] **Step 1: 실패하는 시험을 쓴다.** (`tests/e2e/test_study.py`, 기존 `test_player.py` 방식. e2e 서버 fixture에 `STUDY_FILE`용 항목과 `고1/미래엔/4-2. …` 영상을 더한다.)
   - `test_study_tabs_are_hidden_for_unlinked_videos`: 연결 안 된 영상에서 `#tab-btn-study-notes`가 보이지 않는다.
@@ -231,7 +232,7 @@
 - [ ] **Step 1: 실패하는 시험을 쓴다.**
   - `test_quiz_html_has_all_sections_and_answers_on_a_new_page`: `quiz_html(make_entry())`에 "객관식", "주관식", "OX", "단답형"이 순서대로 있고, "정답과 해설"이 그 뒤에 있으며 그 앞에 `break-before: page`가 있다. 보기 번호 `⑤`가 있다. 지문 제목이 있다.
   - `test_html_escapes_everything_but_allowed_markup`: 지문 글에 `<script>`가 있으면 결과에 `<script>`가 없고 `&lt;script&gt;`가 있다. `<b>굵게</b>`는 그대로.
-  - `test_notes_html_has_unit_title_and_blocks`: `notes_html(make_entry())`에 단원 제목, `def` 글, 낱말이 있다.
+  - `test_notes_html_has_unit_title_and_blocks`: `notes_html(make_entry())`에 단원 제목, `def` 글, 낱말(`{"w","def"}`)이 있다.
   - `test_promote_writes_only_approved_and_replaces_same_id`: 항목 둘이 든 초안에서 하나만 승격 → 출력에는 그 하나뿐. 같은 id를 다시 승격하면 교체되어 개수가 늘지 않는다.
   - `test_promote_refuses_unknown_id_and_bad_entries`: 없는 id → `SystemExit`이고 출력 파일이 만들어지지 않는다. 문제 있는 항목 → `SystemExit`.
 - [ ] **Step 2: 실패를 확인한다.** `python -m pytest tests/test_study_tools.py -v` → FAIL.
