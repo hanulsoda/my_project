@@ -155,6 +155,9 @@ function renderStudyQuiz(box, quiz, studyId) {
     const [title, ...rest] = String(q.question).split("\n");
     const card = quizCard({ question: title, choices: q.choices, answer: q.answer, explanation: q.explanation },
       n, (right) => record(id, right), () => null, { review: false });
+    // quizCard는 글자 그대로 넣으므로, <b> <u> <br>만 살리도록 제목과 보기를 다시 채웁니다(✓·✗ 표시는 클릭 뒤에 붙습니다)
+    card.querySelector("h3").replaceChildren(`Q${n}. `, inlineMarkup(title));
+    card.querySelectorAll("button.choice").forEach((button, i) => button.replaceChildren(`${i + 1}. `, inlineMarkup(q.choices[i])));
     if (rest.some((line) => line.trim())) card.querySelector("h3").after(el("blockquote", {}, studyLines(rest.join("\n"))));
     return card;
   };

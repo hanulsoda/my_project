@@ -148,6 +148,7 @@ def test_short_answer_ignores_spaces_case_and_punctuation(page, study_site):
     entry = entry_with_short("매스 미디어")
     entry["quiz"]["short"][1].update(answer="SNS", alts=[])
     entry["quiz"]["short"][2].update(answer="정답", alts=[])
+    entry["quiz"]["short"][5].update(answer="매스 미디어", alts=[])
     site = study_site([entry])
     box = open_quiz(page, site)
     score = box.locator(".study-score")
@@ -161,14 +162,16 @@ def test_short_answer_ignores_spaces_case_and_punctuation(page, study_site):
     blank = answer_short(box, 4, "   ")
     expect(blank).to_contain_text("답을 써 주세요.")
     expect(score).to_contain_text("3/30")
+    expect(answer_short(box, 5, "매스 미디어.")).to_contain_text("정답입니다!")
+    expect(score).to_contain_text("4/30")
     # 틀린 답: 정답·해설을 보이고 '내 답도 맞아요'로 정정
     wrong = answer_short(box, 2, "<b>엉뚱</b>")
     expect(wrong).to_contain_text("정답")
     expect(wrong).to_contain_text("가짜 해설입니다")
     assert wrong.locator("b").count() == 0  # 학생이 쓴 글은 HTML로 그리지 않음
-    expect(score).to_contain_text("3/30")
-    wrong.get_by_role("button", name="내 답도 맞아요").click()
     expect(score).to_contain_text("4/30")
+    wrong.get_by_role("button", name="내 답도 맞아요").click()
+    expect(score).to_contain_text("5/30")
     expect(wrong).to_contain_text("정답입니다!")
 
 
@@ -212,3 +215,30 @@ def test_score_is_saved_under_study_key_only(page, study_site):
     page.locator("#tab-study-quiz").locator(".choice").first.click()
     page.get_by_role("button", name="다시 풀기").click()
     expect(page.locator("#tab-study-quiz .choice:disabled")).to_have_count(0)
+
+
+def test_mc_and_ox_titles_and_choices_allow_b_u_br_only(page, study_site):
+    evil = "<img src=x onerror=window.hacked=1>"
+    entry = make_entry()
+    entry["quiz"]["mc"][0].update(q=f"다음 <u>밑줄</u> 친 말은? {evil}\n〈보기〉 <u>보기밑줄</u>",
+                                  choices=["<u>밑줄보기</u>", f"가짜 {evil}", "셋", "넷", "다섯"], answer=0)
+    entry["quiz"]["ox"][0].update(q="다음 <u>밑줄</u> 문장은 맞다", answer=True)
+    site = study_site([entry])
+    box = open_quiz(page, site)
+    mc = box.locator(".question").first
+    expect(mc.locator("h3 u")).to_have_text("밑줄")
+    expect(mc.locator("h3")).to_contain_text("<img src=x onerror=window.hacked=1>")
+    expect(mc.locator("blockquote u")).to_have_text("보기밑줄")
+    expect(mc.locator(".choice").first.locator("u")).to_have_text("밑줄보기")
+    expect(mc.locator(".choice").nth(1)).to_contain_text("<img src=x onerror=window.hacked=1>")
+    assert mc.locator("img").count() == 0
+    mc.locator(".choice").nth(1).click()
+    expect(mc.locator(".choice").first).to_contain_text("✓ 정답")
+    expect(mc.locator(".choice").nth(1)).to_contain_text("✗ 내가 고른 답")
+    expect(mc.locator(".choice").first.locator("u")).to_have_text("밑줄보기")
+    expect(mc.locator(".feedback")).to_contain_text("아쉬워요.")
+    ox = box.locator(".question", has_text="문장은 맞다")
+    expect(ox.locator("h3 u")).to_have_text("밑줄")
+    ox.locator(".choice").nth(0).click()
+    expect(ox).to_contain_text("정답입니다!")
+    assert page.evaluate("window.hacked") is None
