@@ -746,7 +746,7 @@ def test_video_detail(setup):
     assert analyzed["analysis"]["guide"] == GUIDE
     assert "segments" not in analyzed["analysis"]  # 받아쓰기 대본은 학생 브라우저로 보내지 않습니다
     assert not_yet == {"id": ids["2강"], "title": "2강", "analysis": None, "references": [],
-                       "prev": {"id": ids["1강"], "title": "1강"}, "next": None, "ask": True}
+                       "prev": {"id": ids["1강"], "title": "1강"}, "next": None, "ask": True, "study": []}
     assert client.get("/api/videos/nope").status_code == 404
 
 
