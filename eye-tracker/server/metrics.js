@@ -197,11 +197,21 @@ function computeMetrics(samples, words, screen) {
   return metrics;
 }
 
-// Below the word-level quality threshold only line-level figures are trustworthy, so word-level
-// arrays are withheld. Returns a copy; the stored metrics are never altered.
-function applyQualityRule(metrics) {
-  if (metrics.detail !== 'line') return metrics;
-  return { ...metrics, dwellMsByWord: [], longDwellWords: [] };
+// "참고용" (reference only). Line metrics (server/line-metrics.js) carry `reliable`; legacy stored
+// word-level metrics do not, and keep their old meaning: detail === 'line' was reference only.
+function isReferenceOnly(metrics) {
+  if (typeof metrics.reliable === 'boolean') return !metrics.reliable;
+  return metrics.detail === 'line';
 }
 
-module.exports = { detectFixations, assignToWords, computeMetrics, applyQualityRule };
+// Reference-only sessions never show per-line or per-word dwell. Returns a copy; the stored
+// metrics are never altered. Legacy rows keep their shape (no line fields are added).
+function applyQualityRule(metrics) {
+  if (!isReferenceOnly(metrics)) return metrics;
+  const out = { ...metrics, dwellMsByWord: [], longDwellWords: [] };
+  if ('lineDwellMs' in metrics) out.lineDwellMs = [];
+  if ('longDwellLines' in metrics) out.longDwellLines = [];
+  return out;
+}
+
+module.exports = { detectFixations, assignToWords, computeMetrics, applyQualityRule, isReferenceOnly };
