@@ -4,6 +4,7 @@ const { GRADE_BANDS, listPassages } = require('../passages');
 const { audit } = require('../audit');
 
 const MAX_LEN = 32;
+const MAX_NOTE_LEN = 500;
 const NOT_FOUND = { error: 'not found' };
 
 function isValidIsoDate(s) {
@@ -16,6 +17,24 @@ function isLabel(v) {
   return typeof v === 'string' && v.trim().length > 0 && v.length <= MAX_LEN;
 }
 
+// Optional free-text fields: null, '' or blank clears (stored as NULL). `group` is trimmed (it is
+// matched exactly by the list filter); `note` is kept as typed.
+function parseGroup(v) {
+  if (v === null || v === undefined) return { value: null };
+  if (typeof v !== 'string') return { error: `group must be a string up to ${MAX_LEN} chars, or null to clear` };
+  const g = v.trim();
+  if (g.length > MAX_LEN) return { error: `group must be a string up to ${MAX_LEN} chars, or null to clear` };
+  return { value: g || null };
+}
+
+function parseNote(v) {
+  if (v === null || v === undefined) return { value: null };
+  if (typeof v !== 'string' || v.length > MAX_NOTE_LEN) {
+    return { error: `note must be a string up to ${MAX_NOTE_LEN} chars, or null to clear` };
+  }
+  return { value: v.trim() ? v : null };
+}
+
 // consent_date is NOT NULL in the schema; '' means "no consent recorded yet".
 function toChild(row) {
   return {
@@ -24,6 +43,8 @@ function toChild(row) {
     initials: row.initials,
     gradeBand: row.grade_band,
     consentDate: row.consent_date || null,
+    group: row.group_name ?? null,
+    note: row.note ?? null,
     createdAt: row.created_at,
   };
 }
@@ -33,11 +54,16 @@ function toChild(row) {
 function createChildrenRouter({ db, now }) {
   const q = {
     list: db.prepare('SELECT * FROM children WHERE teacher_id = ? ORDER BY id'),
+    listGroup: db.prepare('SELECT * FROM children WHERE teacher_id = ? AND group_name = ? ORDER BY id'),
     get: db.prepare('SELECT * FROM children WHERE id = ? AND teacher_id = ?'),
     insert: db.prepare(
-      'INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at, group_name, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
-    setConsent: db.prepare('UPDATE children SET consent_date = ? WHERE id = ? AND teacher_id = ?'),
+    update: db.prepare(
+      `UPDATE children SET code = ?, initials = ?, grade_band = ?, consent_date = ?, group_name = ?, note = ?
+       WHERE id = ? AND teacher_id = ?`,
+    ),
     remove: db.prepare('DELETE FROM children WHERE id = ? AND teacher_id = ?'),
   };
 
@@ -45,18 +71,34 @@ function createChildrenRouter({ db, now }) {
   const router = express.Router();
 
   router.get('/', (req, res) => {
-    res.json(q.list.all(req.user.id).map(toChild));
+    const { group } = req.query;
+    if (group === undefined) return res.json(q.list.all(req.user.id).map(toChild));
+    if (typeof group !== 'string') return res.status(400).json({ error: 'group must be a single string' });
+    res.json(q.listGroup.all(req.user.id, group).map(toChild));
+  });
+
+  router.get('/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    const row = id === null ? undefined : q.get.get(id, req.user.id);
+    if (!row) return res.status(404).json(NOT_FOUND);
+    res.json(toChild(row));
   });
 
   router.post('/', (req, res) => {
     const { code, initials, gradeBand, consentDate } = req.body ?? {};
+    const group = parseGroup(req.body?.group);
+    const note = parseNote(req.body?.note);
     if (!isLabel(code)) return res.status(400).json({ error: `code must be a non-empty string up to ${MAX_LEN} chars` });
     if (!isLabel(initials)) return res.status(400).json({ error: `initials must be a non-empty string up to ${MAX_LEN} chars` });
     if (!GRADE_BANDS.includes(gradeBand)) return res.status(400).json({ error: `gradeBand must be one of ${GRADE_BANDS.join('|')}` });
     if (consentDate != null && !isValidIsoDate(consentDate)) return res.status(400).json({ error: 'consentDate must be a valid YYYY-MM-DD date' });
+    if (group.error) return res.status(400).json({ error: group.error });
+    if (note.error) return res.status(400).json({ error: note.error });
 
     try {
-      const { lastInsertRowid } = q.insert.run(req.user.id, code, initials, gradeBand, consentDate ?? '', now());
+      const { lastInsertRowid } = q.insert.run(
+        req.user.id, code, initials, gradeBand, consentDate ?? '', now(), group.value, note.value,
+      );
       res.status(201).json(toChild(q.get.get(lastInsertRowid, req.user.id)));
     } catch (err) {
       if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'code already in use' });
@@ -69,12 +111,52 @@ function createChildrenRouter({ db, now }) {
     const row = id === null ? undefined : q.get.get(id, req.user.id);
     if (!row) return res.status(404).json(NOT_FOUND);
     const body = req.body ?? {};
-    // null or '' clears consent (stored as ''); the key must be present.
-    const clearing = body.consentDate === null || body.consentDate === '';
-    if (!clearing && !isValidIsoDate(body.consentDate)) {
-      return res.status(400).json({ error: 'consentDate must be a valid YYYY-MM-DD date, or null to clear' });
+    const sent = (key) => Object.hasOwn(body, key);
+    if (!['code', 'initials', 'gradeBand', 'consentDate', 'group', 'note'].some(sent)) {
+      return res.status(400).json({ error: 'nothing to update: send code, initials, gradeBand, consentDate, group or note' });
     }
-    q.setConsent.run(clearing ? '' : body.consentDate, id, req.user.id);
+    // Partial update: start from the stored row, validate every field that was sent, and write
+    // only when all of them pass.
+    const next = {
+      code: row.code, initials: row.initials, gradeBand: row.grade_band,
+      consentDate: row.consent_date, group: row.group_name, note: row.note,
+    };
+    if (sent('code')) {
+      if (!isLabel(body.code)) return res.status(400).json({ error: `code must be a non-empty string up to ${MAX_LEN} chars` });
+      next.code = body.code;
+    }
+    if (sent('initials')) {
+      if (!isLabel(body.initials)) return res.status(400).json({ error: `initials must be a non-empty string up to ${MAX_LEN} chars` });
+      next.initials = body.initials;
+    }
+    if (sent('gradeBand')) {
+      if (!GRADE_BANDS.includes(body.gradeBand)) return res.status(400).json({ error: `gradeBand must be one of ${GRADE_BANDS.join('|')}` });
+      next.gradeBand = body.gradeBand;
+    }
+    if (sent('consentDate')) {
+      // null or '' clears consent (stored as '').
+      const clearing = body.consentDate === null || body.consentDate === '';
+      if (!clearing && !isValidIsoDate(body.consentDate)) {
+        return res.status(400).json({ error: 'consentDate must be a valid YYYY-MM-DD date, or null to clear' });
+      }
+      next.consentDate = clearing ? '' : body.consentDate;
+    }
+    if (sent('group')) {
+      const g = parseGroup(body.group);
+      if (g.error) return res.status(400).json({ error: g.error });
+      next.group = g.value;
+    }
+    if (sent('note')) {
+      const n = parseNote(body.note);
+      if (n.error) return res.status(400).json({ error: n.error });
+      next.note = n.value;
+    }
+    try {
+      q.update.run(next.code, next.initials, next.gradeBand, next.consentDate, next.group, next.note, id, req.user.id);
+    } catch (err) {
+      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'code already in use' });
+      throw err;
+    }
     res.json(toChild(q.get.get(id, req.user.id)));
   });
 

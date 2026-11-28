@@ -35,7 +35,7 @@ test('children', async (t) => {
       { code: body.code, initials: body.initials, gradeBand: body.gradeBand, consentDate: body.consentDate },
       VALID,
     );
-    assert.deepEqual(Object.keys(body).sort(), ['code', 'consentDate', 'createdAt', 'gradeBand', 'id', 'initials']);
+    assert.deepEqual(Object.keys(body).sort(), ['code', 'consentDate', 'createdAt', 'gradeBand', 'group', 'id', 'initials', 'note']);
     childId = body.id;
   });
 
