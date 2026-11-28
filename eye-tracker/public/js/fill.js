@@ -6,21 +6,25 @@
 // Why: webcam gaze error (~150 px) is larger than a normal line pitch (49-64 px); a larger pitch
 // lets the same error confuse fewer lines. The analysis (server/line-metrics.js) also marks a
 // session 참고용 when a line's expected gaze height comes within 0.75 pitch of the top or bottom
-// screen edge (WebGazer pins estimates there), counting the child's gaze offset. So every line
-// centre here stays at least EDGE_PITCH (1) pitch plus edgeSlackPx inside the viewport; read.js
-// passes EDGE_SLACK_PX (100 px, room for a typical gaze offset). A synthetic check showed that a
-// block filling the screen edge to edge is flagged 참고용 for almost any offset, while a block with
-// this margin keeps the larger pitch's accuracy gain (see the bigtext report).
+// screen edge (WebGazer pins estimates there), counting the child's gaze offset. With a ~150 px
+// offset a block filling the screen is almost never reliable, so read.js keeps the text inside a
+// SAFE ZONE (safeMargins): a top margin of max(80 px, 12% of the height) and a bottom margin of
+// max(140 px, 25% of the height); the 다음 / 다 읽었어요 button sits inside the bottom margin. Every
+// line centre also stays at least EDGE_PITCH (1) pitch (+ edgeSlackPx) inside the viewport.
 //
 // API
+//   safeMargins(viewportH) -> { top, bottom } in px (the fill-mode safe zone).
 //   planFill({ measure, viewportW, viewportH, bottomReserve, right, minPx, maxPx, minLH, maxLH,
-//              minPitchPx, edgeSlackPx })
+//              minPitchPx, topMarginPx, bottomMarginPx, edgeSlackPx, minViewportW })
 //     measure(fontPx, lineHeight) -> word boxes [{x, y, w, h, line}] of the WHOLE passage laid out
 //       in one column at that size (word-spacing included), in reading order with 0-based `line`
 //       (layout.js groupLines). x is in viewport coordinates, y relative to the text element's top.
 //     viewportW/viewportH: window.innerWidth/innerHeight. bottomReserve: px at the bottom kept free
 //       for the 다음 / 다 읽었어요 button (word boxes stay above it). right: largest allowed x + w.
 //     minPx: smallest font allowed (FLOOR_PX by grade band); maxPx (96), minLH (1.6), maxLH (2.6).
+//     topMarginPx / bottomMarginPx (default 0): word boxes stay at least this far from the top /
+//       bottom edge (read.js passes safeMargins). edgeSlackPx (default 0): extra line-centre margin.
+//     minViewportW (default 0): narrower viewports are refused ('too-narrow'; read.js: MIN_VIEWPORT_W).
 //     minPitchPx (default 0): smallest line pitch (fontPx x lineHeight) accepted. A passage that fits
 //       on one screen only below this pitch is split into pages instead (read.js asks for
 //       PITCH_GAIN x the passage's own pitch, so fill never separates lines less than before).
@@ -30,7 +34,7 @@
 //     of whole, contiguous lines (balanced: line counts differ by at most one), then the largest
 //     font and line height at which every page fits. Font is maximised first, then line height.
 //     Every page of a multi-page plan holds at least MIN_LINES_PER_PAGE (4) lines.
-//   or { ok: false, reason: 'word-too-wide' | 'too-small' } when a word is wider than the screen or
+//   or { ok: false, reason: 'too-narrow' | 'word-too-wide' | 'too-small' } when a word is wider than the screen or
 //     not even MIN_LINES_PER_PAGE lines per page fit at minPx (read.js then shows the existing
 //     "화면이 작아…" message).
 //   Deterministic: the same measure gives the same plan.
@@ -42,11 +46,27 @@
   const LH_STEP = 0.05;
   const WORD_SPACING_EM = 0.5;
   const EDGE_PITCH = 1;
-  const EDGE_SLACK_PX = 100;
+  // Safe zone: a hypothesis from the 154 px accuracy check (error smallest at the top, largest,
+  // up to 350 px, at the bottom-left); tune with the 정확도 점검 results.
+  const SAFE_TOP_RATIO = 0.12;
+  const SAFE_TOP_MIN_PX = 80;
+  const SAFE_BOTTOM_RATIO = 0.25;
+  const SAFE_BOTTOM_MIN_PX = 140;
+  // Narrower screens (phones in portrait) wrap Korean text into ragged 1-3 word lines with little
+  // horizontal sweep: in the synthetic check (seeds 7000-7099) 390x844 was reliable in only 0-69%
+  // of sessions even without a gaze offset, while 600x960 and wider reached 92-100%.
+  const MIN_VIEWPORT_W = 600;
   const MAX_PAGES = 50;
   const FLOOR_PX = { elementary: 24, middle: 24, high: 20 };
   const PITCH_GAIN = 1.25;
   const MIN_LINES_PER_PAGE = 4;
+
+  function safeMargins(viewportH) {
+    return {
+      top: Math.round(Math.max(SAFE_TOP_MIN_PX, SAFE_TOP_RATIO * viewportH)),
+      bottom: Math.round(Math.max(SAFE_BOTTOM_MIN_PX, SAFE_BOTTOM_RATIO * viewportH)),
+    };
+  }
 
   function balancedPages(nLines, nPages) {
     const out = [];
@@ -89,12 +109,13 @@
     if (nPages > 1 && Math.floor(lines.length / nPages) < MIN_LINES_PER_PAGE) return { ok: false, reason: 'too-small' };
     const margin = EDGE_PITCH * fontPx * lineHeight + o.edgeSlackPx;
     const H = o.viewportH;
+    const bottomFree = Math.max(o.bottomReserve, o.bottomMarginPx);
     const ranges = balancedPages(lines.length, nPages);
     // For each page rendered alone its first line sits where line 0 sits: shift = centre[a] - centre[0].
     const bounds = ranges.map(([a, b]) => {
       const shift = lines[a].centre - lines[0].centre;
-      const lo = Math.max(margin - (lines[a].centre - shift), -(lines[a].top - shift));
-      const hi = Math.min(H - margin - (lines[b - 1].centre - shift), H - o.bottomReserve - (lines[b - 1].bottom - shift));
+      const lo = Math.max(margin - (lines[a].centre - shift), o.topMarginPx - (lines[a].top - shift));
+      const hi = Math.min(H - margin - (lines[b - 1].centre - shift), H - bottomFree - (lines[b - 1].bottom - shift));
       return { lo, hi };
     });
     // One `top` for all pages: centred for the fullest page, then checked on every page.
@@ -131,8 +152,9 @@
 
   function planFill(opts) {
     const o = {
-      maxPx: MAX_FONT_PX, minLH: MIN_LH, maxLH: MAX_LH, bottomReserve: 0, right: opts.viewportW, minPitchPx: 0, edgeSlackPx: 0, ...opts,
+      maxPx: MAX_FONT_PX, minLH: MIN_LH, maxLH: MAX_LH, bottomReserve: 0, right: opts.viewportW, minPitchPx: 0, edgeSlackPx: 0, topMarginPx: 0, bottomMarginPx: 0, minViewportW: 0, ...opts,
     };
+    if (!(o.viewportW >= o.minViewportW)) return { ok: false, reason: 'too-narrow' };
     // Smallest line height (on the LH_STEP grid) giving at least minPitchPx at this font.
     const lhFor = (px) => Math.max(o.minLH, Math.ceil((o.minPitchPx / px - 1e-9) / LH_STEP) * LH_STEP);
     const minPx = Math.min(o.minPx, o.maxPx);
@@ -156,7 +178,15 @@
     return { ok: false, reason: 'too-small' };
   }
 
-  const exported = { planFill, balancedPages, FILL: { MAX_FONT_PX, MIN_LH, MAX_LH, WORD_SPACING_EM, EDGE_PITCH, EDGE_SLACK_PX, MAX_PAGES, FLOOR_PX, PITCH_GAIN, MIN_LINES_PER_PAGE } };
+  const exported = {
+    planFill,
+    balancedPages,
+    safeMargins,
+    FILL: {
+      MAX_FONT_PX, MIN_LH, MAX_LH, WORD_SPACING_EM, EDGE_PITCH, MAX_PAGES, FLOOR_PX, PITCH_GAIN, MIN_LINES_PER_PAGE,
+      SAFE_TOP_RATIO, SAFE_TOP_MIN_PX, SAFE_BOTTOM_RATIO, SAFE_BOTTOM_MIN_PX, MIN_VIEWPORT_W,
+    },
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) root.ReadingApp = Object.assign(root.ReadingApp || {}, exported);
 })(typeof window !== 'undefined' ? window : undefined);

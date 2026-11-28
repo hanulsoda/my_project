@@ -77,7 +77,7 @@ body.reading { background: #fff; overflow: hidden; }
 #passage-wrap.measuring { visibility: hidden; }
 #passage { margin: 0 auto; max-width: 1400px; word-break: keep-all; overflow-wrap: normal; text-align: left; }
 #done-bar { position: fixed; right: 24px; bottom: 12px; }
-#done-bar button { font-size: 1.1rem; padding: 12px 22px; min-height: 48px; min-width: 96px; }
+#done-bar button { font-size: 1.1rem; padding: 12px 22px; min-height: 48px; min-width: 96px; touch-action: manipulation; }
 #passage-wrap.fill { padding: 0; }
 #passage-wrap.fill #passage { position: absolute; margin: 0; max-width: none; }
 #passage .w.gaze-hit { background: #ffd43b; color: #000; border-radius: 6px; }

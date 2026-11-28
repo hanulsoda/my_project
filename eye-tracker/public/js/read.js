@@ -6,11 +6,13 @@
 (function () {
   const {
     api, h, GRADE_LABEL, layoutPassage, fitFontPx, makeMeasure, planFill, FILL, runBallCalibration, startCapture,
-    startPractice, PRACTICE_TEXT, CALIBRATION_SECONDS,
+    startPractice, PRACTICE_TEXT, CALIBRATION_SECONDS, safeMargins, watchGeometry, geometryOf,
   } = window.ReadingApp;
   const $ = (id) => document.getElementById(id);
   const SCREENS = ['s-loading', 's-error', 's-consent', 's-setup', 's-ready', 's-sending', 's-fail', 's-finish'];
   const DONE_BAR_PX = 64; // keep the passage clear of the "다음"/"다 읽었어요" button (fixed, bottom-right)
+  const TAP_GUARD_MS = 500; // clicks this soon after a screen/page change are ignored (double tap)
+  const DONE_MIN_SHOWN_MS = 1000; // 다 읽었어요 only works once the last page has been shown this long
 
   let child = null;
   let passages = [];
@@ -25,6 +27,8 @@
   let pageIdx = 0;
   let pageWords = []; // word boxes of the pages shown so far (fill mode)
   let practice = null;
+  let geometry = null; // watchGeometry() from planning to the end of the measurement
+  let shownAt = 0; // when the current screen/page was shown (performance.now)
 
   function show(id) {
     for (const s of SCREENS) $(s).hidden = s !== id;
@@ -41,6 +45,7 @@
     const wasOn = cameraOn;
     cameraOn = false;
     if (practice) { practice.stop(); practice = null; }
+    if (geometry) { geometry.stop(); geometry = null; }
     if (wasOn) { try { window.webgazer.end(); } catch { /* already stopped */ } }
     // Always release, even when the start failed: WebGazer can hold a stream it never attached
     // to a <video>, which would leave the camera light on.
@@ -109,7 +114,9 @@
       right: window.innerWidth - sideMargin(),
       minPx: FILL.FLOOR_PX[child.gradeBand] || FILL.FLOOR_PX.elementary,
       minPitchPx: FILL.PITCH_GAIN * Number(passage.fontPx) * Number(passage.lineHeight),
-      edgeSlackPx: FILL.EDGE_SLACK_PX,
+      topMarginPx: safeMargins(window.innerHeight).top,
+      bottomMarginPx: safeMargins(window.innerHeight).bottom,
+      minViewportW: FILL.MIN_VIEWPORT_W,
     });
   }
 
@@ -135,8 +142,29 @@
     setButtons(n === plan.pages.length - 1 ? 'done' : 'next');
   }
 
+  // Shows one of the bottom buttons and gives it the keyboard focus (Enter/Space work).
   function setButtons(which) {
     for (const id of ['begin', 'next', 'done']) $(id).hidden = id !== which;
+    shownAt = performance.now();
+    focusPrimary();
+  }
+
+  function focusPrimary() {
+    const btn = ['begin', 'next', 'done'].map($).find((b) => !b.hidden);
+    if (btn) btn.focus({ preventScroll: true });
+  }
+
+  const tooSoon = (ms = TAP_GUARD_MS) => performance.now() - shownAt < ms;
+
+  // The layout, the calibration and the gaze are only valid for the geometry the passage was
+  // planned for: any change (even one undone) ends the measurement without upload.
+  function geometryBroken() {
+    return !geometry || geometry.changed();
+  }
+
+  function abortChangedScreen() {
+    stopCamera();
+    showError('화면이 바뀌었어요', '측정 중에 화면 크기나 방향이 바뀌어 이 기록은 쓸 수 없습니다. 처음부터 다시 시작해 주세요.');
   }
 
   async function startCamera() {
@@ -163,6 +191,8 @@
     if (!passage) return setupError('지문을 선택해 주세요.');
     fillMode = document.querySelector('input[name="size"]:checked').value === 'fill';
     practiceOn = $('practice').checked;
+    if (geometry) geometry.stop();
+    geometry = watchGeometry(window); // baseline: the geometry the passage is planned for
     plan = fillMode ? planText(passage.text) : null;
     if (fillMode ? !plan.ok : !renderPassage()) {
       show('s-setup');
@@ -208,35 +238,43 @@
   }
 
   function onBegin() {
-    if (practice) { practice.stop(); practice = null; }
+    if (!practice || tooSoon()) return;
+    practice.stop();
+    practice = null;
     beginReading();
   }
 
   function beginReading() {
+    if (geometryBroken()) return abortChangedScreen();
+    screenAtStart = geometryOf(window); // before the layout: the layout must be for this geometry
     pageWords = [];
     // Laid out while displayed (hidden boxes measure 0x0), then revealed.
     $('passage-wrap').hidden = false;
     $('passage-wrap').classList.add('measuring');
     if (fillMode) showPage(0);
-    else { renderPassage(); setButtons('done'); }
+    else {
+      if (!renderPassage()) return abortChangedScreen();
+      setButtons('done');
+    }
     $('passage-wrap').classList.remove('measuring');
-    screenAtStart = { w: window.innerWidth, h: window.innerHeight };
+    focusPrimary(); // could not take focus while the page was hidden for layout
     capture = startCapture(window.webgazer, undefined, { paged: fillMode });
   }
 
   function onNext() {
-    if (!plan || !capture || pageIdx >= plan.pages.length - 1) return;
+    if (!plan || !capture || pageIdx >= plan.pages.length - 1 || tooSoon()) return;
+    if (geometryBroken()) { capture.stop(); return abortChangedScreen(); }
     capture.setPage(pageIdx + 1);
     showPage(pageIdx + 1);
   }
 
   async function onDone() {
+    if (!capture || tooSoon(DONE_MIN_SHOWN_MS)) return;
     const samples = capture.stop();
-    const screen = { w: window.innerWidth, h: window.innerHeight };
-    if (screen.w !== screenAtStart.w || screen.h !== screenAtStart.h) {
-      stopCamera();
-      return showError('화면 크기가 바뀌었습니다', '측정 중에 창 크기가 바뀌어 기록을 쓸 수 없습니다. 처음부터 다시 측정해 주세요.');
-    }
+    capture = null;
+    const now = geometryOf(window);
+    const screen = { w: now.w, h: now.h };
+    if (geometryBroken() || screen.w !== screenAtStart.w || screen.h !== screenAtStart.h) return abortChangedScreen();
     const words = fillMode ? pageWords : layoutPassage($('passage'), passage.text);
     payload = { passageId: passage.id, screen, words, samples };
     await upload();

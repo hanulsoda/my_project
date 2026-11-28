@@ -2,7 +2,7 @@
 // public/js/fill.js: big text that fills the screen, split into pages when needed.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { planFill, balancedPages, FILL } = require('../public/js/fill.js');
+const { planFill, balancedPages, safeMargins, FILL } = require('../public/js/fill.js');
 const { groupLines } = require('../public/js/layout.js');
 const passages = require('../data/passages.json');
 
@@ -35,16 +35,16 @@ function viewport(W, H) {
   return { viewportW: W, viewportH: H, bottomReserve: 72, right: W - side, left: side };
 }
 
-function plan(text, W, H, minPx, minPitchPx = 0, edgeSlackPx = 0) {
+function plan(text, W, H, minPx, minPitchPx = 0, extra = {}) {
   const vp = viewport(W, H);
   const fm = fakeMeasure(text, vp);
-  const p = planFill({ measure: fm.measure, ...vp, minPx, minPitchPx, edgeSlackPx });
+  const p = planFill({ measure: fm.measure, ...vp, minPx, minPitchPx, ...extra });
   return { p, fm, vp };
 }
 
 // Every page laid out alone (as read.js does) must lie inside the viewport, above the button, with
 // every line centre at least one pitch from the top and bottom edges.
-function checkPages(p, fm, vp, slack = 0) {
+function checkPages(p, fm, vp, zone = null) {
   const boxes = fm.measure(p.fontPx, p.lineHeight);
   const pitch = p.fontPx * p.lineHeight;
   let next = 0;
@@ -63,13 +63,21 @@ function checkPages(p, fm, vp, slack = 0) {
       assert.ok(b.x >= 0 && b.x + b.w <= vp.viewportW, 'inside horizontally');
       assert.ok(y >= 0 && y + b.h <= vp.viewportH - vp.bottomReserve + 1e-6, `inside vertically (${y})`);
       const c = y + b.h / 2;
-      assert.ok(c >= pitch + slack - 1e-6 && c <= vp.viewportH - pitch - slack + 1e-6, "line centre a pitch (+ slack) inside the screen");
+      assert.ok(c >= pitch - 1e-6 && c <= vp.viewportH - pitch + 1e-6, 'line centre a pitch inside the screen');
+      if (zone) assert.ok(y >= zone.top - 1e-6 && y + b.h <= vp.viewportH - zone.bottom + 1e-6, `inside the safe zone (${y})`);
     }
   }
   assert.equal(next, fm.words.length, 'every word exactly once');
   const sizes = p.pages.map((pg) => pg.endLine - pg.firstLine);
   assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, `balanced pages ${sizes}`);
   if (p.pages.length > 1) assert.ok(Math.min(...sizes) >= FILL.MIN_LINES_PER_PAGE, `at least 4 lines per page ${sizes}`);
+}
+
+// The parameters read.js passes in fill mode.
+function realPlan(ps, band, W, H) {
+  const sm = safeMargins(H);
+  return plan(ps.text, W, H, FILL.FLOOR_PX[band], FILL.PITCH_GAIN * ps.fontPx * ps.lineHeight,
+    { topMarginPx: sm.top, bottomMarginPx: sm.bottom, minViewportW: FILL.MIN_VIEWPORT_W });
 }
 
 const shortest = (band) => passages[band].reduce((a, b) => (b.text.length < a.text.length ? b : a));
@@ -120,17 +128,17 @@ test('long text: several pages, all inside the viewport, every word once, no pag
   }
 });
 
-test('every real passage on every target viewport gives a valid plan with the larger pitch read.js asks for', () => {
+test('every real passage on every target viewport: larger pitch, text inside the safe zone', () => {
   for (const band of Object.keys(passages)) {
     for (const ps of passages[band]) {
       const oldPitch = ps.fontPx * ps.lineHeight;
-      for (const [W, H] of [[1280, 720], [1024, 768], [768, 1024], [820, 1180], [390, 844]]) {
-        const { p, fm, vp } = plan(ps.text, W, H, FILL.FLOOR_PX[band], FILL.PITCH_GAIN * oldPitch, FILL.EDGE_SLACK_PX);
+      for (const [W, H] of [[1280, 720], [1024, 768], [768, 1024], [820, 1180], [600, 960]]) {
+        const { p, fm, vp } = realPlan(ps, band, W, H);
         assert.equal(p.ok, true, `${ps.id} ${W}x${H}`);
         assert.ok(p.fontPx >= FILL.FLOOR_PX[band]);
         assert.ok(p.fontPx * p.lineHeight >= FILL.PITCH_GAIN * oldPitch - 1e-6, `${ps.id} ${W}x${H}: pitch`);
-        assert.ok(p.pages.length <= 6, `${ps.id} ${W}x${H}: ${p.pages.length} pages`);
-        checkPages(p, fm, vp, FILL.EDGE_SLACK_PX);
+        assert.ok(p.pages.length <= 10, `${ps.id} ${W}x${H}: ${p.pages.length} pages`);
+        checkPages(p, fm, vp, safeMargins(H));
       }
     }
   }
@@ -148,7 +156,24 @@ test('minPitchPx: a passage that fits one screen only with tight lines gets page
   assert.deepEqual(plan(ps.text, 1280, 720, 24, 96 * 2.6 + 1).p, { ok: false, reason: 'too-small' }, 'unreachable pitch is refused');
 });
 
-test('tiny portrait viewport 320x480 still gives pages; an impossible word or screen is refused', () => {
+test('safeMargins: max(80 px, 12%) on top, max(140 px, 25%) at the bottom', () => {
+  assert.deepEqual(safeMargins(720), { top: 86, bottom: 180 });
+  assert.deepEqual(safeMargins(480), { top: 80, bottom: 140 });
+  assert.deepEqual(safeMargins(1180), { top: 142, bottom: 295 });
+});
+
+test('phones in portrait (390x844, 320x480) are refused in fill mode with the real settings (화면이 작아…)', () => {
+  for (const band of Object.keys(passages)) {
+    for (const ps of passages[band]) {
+      for (const [W, H] of [[390, 844], [320, 480], [599, 960]]) {
+        assert.deepEqual(realPlan(ps, band, W, H).p, { ok: false, reason: 'too-narrow' }, `${ps.id} ${W}x${H}`);
+      }
+      assert.equal(realPlan(ps, band, 600, 960).p.ok, true, `${ps.id} 600x960`);
+    }
+  }
+});
+
+test('without the safe zone and pitch rule a 320x480 screen still gets pages; impossible words or screens are refused', () => {
   const ps = longest('elementary');
   const { p, fm, vp } = plan(ps.text, 320, 480, FILL.FLOOR_PX.elementary);
   assert.equal(p.ok, true);
