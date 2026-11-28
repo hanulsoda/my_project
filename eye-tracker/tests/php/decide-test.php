@@ -33,8 +33,25 @@ check('director + student refused by scope', isset(reading_go_decide(['admin_log
 foreach (['123', '01234', '0123/', '../1', ['0123']] as $bad) {
     check('bad ?student= ' . json_encode($bad), isset(reading_go_decide(['admin_logged_in' => true], ['student' => $bad], $yes)['error']));
 }
+// F4: a trailing newline is not a valid id anywhere (PCRE "$" would accept it).
+check('session student_id with newline -> error', isset(reading_go_decide(['student_logged_in' => true, 'student_id' => "0123\n"], [], null)['error']));
+check('?student= with newline -> error', isset(reading_go_decide(['admin_logged_in' => true], ['student' => "0123\n"], $yes)['error']));
+// F5: only an absent/null or exactly 0 admin_teacher_id is the director; anything malformed is refused.
+foreach ([[null, 'director'], [0, 'director'], ['0', 'director'], [12, 'teacher'], ['12', 'teacher']] as [$tid, $want]) {
+    $sess = ['admin_logged_in' => true];
+    if ($tid !== null) $sess['admin_teacher_id'] = $tid;
+    check('admin_teacher_id ' . json_encode($tid) . " -> $want", (reading_go_decide($sess, [], null)['role'] ?? null) === $want);
+}
+foreach (['abc', -3, '-3', '', ' 12', '12 ', "12\n", '00', '012', '1.5', 1.5, true, false, [1], '99999999999'] as $tid) {
+    check('admin_teacher_id ' . json_encode($tid) . ' -> refused', isset(reading_go_decide(['admin_logged_in' => true, 'admin_teacher_id' => $tid], [], null)['error']));
+}
+// S5: a scope check that throws is a refusal, never a token.
+$boom = static function (string $id): bool { throw new RuntimeException('db down'); };
+check('throwing scope check (teacher) -> error', isset(reading_go_decide(['admin_logged_in' => true, 'admin_teacher_id' => 12], ['student' => '0123'], $boom)['error']));
+check('throwing scope check (director) -> error', isset(reading_go_decide(['admin_logged_in' => true], ['student' => '0123'], $boom)['error']));
+
 $secret = str_repeat('s', 40);
-foreach ([['teacher', '0', ''], ['teacher', 'abc', ''], ['student', '0123', ''], ['student', '0123', '0456'], ['parent', '1', ''], ['director', '원장', '']] as [$r, $u, $s]) {
+foreach ([['teacher', "12\n", ''], ['student', "0123\n", "0123\n"], ['director', "admin\n", ''], ['teacher', '12', "0123\n"], ['teacher', '0', ''], ['teacher', 'abc', ''], ['student', '0123', ''], ['student', '0123', '0456'], ['parent', '1', ''], ['director', '원장', '']] as [$r, $u, $s]) {
     $threw = false;
     try { reading_sso_token($r, $u, $s, $secret, 1000); } catch (InvalidArgumentException) { $threw = true; }
     check("token refused for $r/$u/$s", $threw);

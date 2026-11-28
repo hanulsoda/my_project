@@ -55,10 +55,15 @@ function reading_secret(): string
 if (is_file(READING_SCOPE_LIB)) {
     require_once READING_SCOPE_LIB;
 }
+// drs_scope()/drs_ok()가 오류를 던지면 토큰을 만들지 않고 거절합니다(reading_go_decide도 다시 감쌈).
 $scopeOk = null;
 if (function_exists('drs_scope') && function_exists('drs_ok')) {
-    $scope = drs_scope();
-    $scopeOk = static fn(string $id): bool => $scope === null || (bool)drs_ok($scope, $id);
+    try {
+        $scope = drs_scope();
+        $scopeOk = static fn(string $id): bool => $scope === null || (bool)drs_ok($scope, $id);
+    } catch (Throwable) {
+        reading_fail('지금은 학생 정보를 확인할 수 없어요. 잠시 뒤 다시 시도해 주세요.', 503);
+    }
 }
 
 $decision = reading_go_decide($_SESSION, $_GET, $scopeOk);

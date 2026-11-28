@@ -10,6 +10,8 @@ declare(strict_types=1);
 
 const READING_TOKEN_TTL = 300;          // 5분. 읽기 서버는 330초보다 먼 exp를 거절합니다.
 const READING_MIN_SECRET_LEN = 32;
+// 모든 정규식은 \z(문자열 끝)로 끝납니다. PCRE의 $는 끝의 줄바꿈("0123\n")도 받아 주기 때문입니다.
+const READING_ID4_RE = '/^[0-9]{4}\z/';
 
 function reading_b64url(string $raw): string
 {
@@ -24,12 +26,12 @@ function reading_sso_token(string $role, string $uid, string $sid, string $secre
         throw new RuntimeException('reading secret missing or shorter than 32 characters');
     }
     $ok = match ($role) {
-        'director' => preg_match('/^[A-Za-z0-9_-]{1,32}$/', $uid) === 1,
-        'teacher' => preg_match('/^[1-9][0-9]{0,9}$/', $uid) === 1,
-        'student' => preg_match('/^[0-9]{4}$/', $uid) === 1 && $sid === $uid,
+        'director' => preg_match('/^[A-Za-z0-9_-]{1,32}\z/', $uid) === 1,
+        'teacher' => preg_match('/^[1-9][0-9]{0,9}\z/', $uid) === 1,
+        'student' => preg_match(READING_ID4_RE, $uid) === 1 && $sid === $uid,
         default => false,
     };
-    if (!$ok || ($sid !== '' && preg_match('/^[0-9]{4}$/', $sid) !== 1)) {
+    if (!$ok || ($sid !== '' && preg_match(READING_ID4_RE, $sid) !== 1)) {
         throw new InvalidArgumentException('bad role, uid or sid for the reading token');
     }
     $payload = [
@@ -65,32 +67,49 @@ function reading_go_decide(array $session, array $query, ?callable $scopeOk): ar
     }
 
     if ($isStudent) {
-        $sid = (string)($session['student_id'] ?? '');
-        if (preg_match('/^[0-9]{1,4}$/', $sid) === 1) {
+        $raw = $session['student_id'] ?? '';
+        $sid = is_int($raw) || is_string($raw) ? (string)$raw : '';
+        if (preg_match('/^[0-9]{1,4}\z/', $sid) === 1) {
             $sid = str_pad($sid, 4, '0', STR_PAD_LEFT);  // 다힘 학생 번호는 4자리("0123")
         }
-        if (preg_match('/^[0-9]{4}$/', $sid) !== 1) {
+        if (preg_match(READING_ID4_RE, $sid) !== 1) {
             return ['error' => '학생 번호를 확인할 수 없어요. 다시 로그인해 주세요.'];
         }
         return ['role' => 'student', 'uid' => $sid, 'sid' => $sid, 'next' => ''];
     }
 
-    $teacherId = (int)($session['admin_teacher_id'] ?? 0);
-    $role = $teacherId > 0 ? 'teacher' : 'director';
-    $uid = $teacherId > 0 ? (string)$teacherId : 'admin';
+    // 원장은 admin_teacher_id가 없거나(null) 정확히 0/'0'일 때만. 선생님은 1 이상의 정수(또는 그런 숫자 문자열).
+    // 그 밖의 값(음수, 'abc', '', 소수, 배열, true...)은 가장 넓은 권한(원장)으로 떨어지지 않게 거절합니다.
+    $tid = $session['admin_teacher_id'] ?? null;
+    if ($tid === null || $tid === 0 || $tid === '0') {
+        $role = 'director';
+        $uid = 'admin';
+    } elseif ((is_int($tid) && $tid > 0 && $tid <= 9999999999)
+        || (is_string($tid) && preg_match('/^[1-9][0-9]{0,9}\z/', $tid) === 1)) {
+        $role = 'teacher';
+        $uid = (string)$tid;
+    } else {
+        return ['error' => '선생님 정보를 확인할 수 없어요. 다시 로그인해 주세요.'];
+    }
 
     $sid = '';
     if (isset($query['student'])) {
         $raw = $query['student'];
-        if (!is_string($raw) || preg_match('/^[0-9]{4}$/', $raw) !== 1) {
+        if (!is_string($raw) || preg_match(READING_ID4_RE, $raw) !== 1) {
             return ['error' => '학생 번호가 올바르지 않아요.'];
+        }
+        // 맡은 반 확인이 예외를 던지면 통과가 아니라 거절입니다.
+        try {
+            $inScope = $scopeOk === null ? null : ($scopeOk($raw) === true);
+        } catch (Throwable) {
+            return ['error' => '지금은 학생 정보를 확인할 수 없어요. 잠시 뒤 다시 시도해 주세요.'];
         }
         if ($role === 'teacher') {
             // 선생님은 맡은 반 학생만. 확인할 방법이 없으면 막습니다.
-            if ($scopeOk === null || $scopeOk($raw) !== true) {
+            if ($inScope !== true) {
                 return ['error' => '맡은 반 학생만 측정할 수 있어요.'];
             }
-        } elseif ($scopeOk !== null && $scopeOk($raw) !== true) {
+        } elseif ($inScope === false) {
             return ['error' => '이 학생을 찾을 수 없어요.'];
         }
         $sid = $raw;
