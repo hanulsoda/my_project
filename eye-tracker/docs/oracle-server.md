@@ -1,0 +1,68 @@
+# Oracle 서버 확인 기록 (읽기 시선 추적 배포용)
+
+작성: 2026-11-28 · 이 문서는 사용자가 보여 준 화면과 터미널 결과만 근거로 합니다. 추측은 "확인 안 됨"으로 따로 적었습니다.
+앞으로 서버 작업은 이 문서와 어긋나면 안 됩니다. 어긋나는 내용이 생기면 먼저 이 문서를 고칩니다.
+
+## 1. 확인된 사실
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 서버 이름 | `dahim-tokyo-a1` (Oracle Cloud, 리전 Japan East / Tokyo, 상태 Running) | 사용자 Oracle 콘솔 화면 |
+| 퍼블릭 IP | `129.203.151.34` (내부 IP `10.0.0.17`) | 콘솔 화면 |
+| 구성 | VM.Standard.A1.Flex, 2 OCPU, 메모리 12GB (ARM) | 콘솔 화면, `uname -m` = `aarch64` |
+| 운영체제 | Ubuntu 24.04.5 LTS | 서버에서 `cat /etc/os-release` |
+| 접속 계정 | **`ubuntu`** (`opc`는 거부됨: "Please login as the user ubuntu") | 접속 시도 결과 |
+| 접속 키 | 사용자 PC의 `C:\Users\mouse\.ssh\dahim_oci_tokyo` (이름만 기록, 내용은 어디에도 붙이지 않음) | 접속 성공 |
+| 접속 명령 | `ssh -i "$HOME\.ssh\dahim_oci_tokyo" ubuntu@129.203.151.34` | 사용자 PowerShell에서 성공 |
+| Docker | 29.10.0 설치됨 | 서버 출력 |
+| 디스크 / 메모리 | `/` 96GB 중 23GB 사용(74GB 여유), 메모리 약 9.8GB 사용 가능 | `df`, `free` |
+| 80/443 포트 | **이미 도커 컨테이너 `dahim-nginx`가 사용 중** | `ss`, `docker ps` |
+
+### 서버에서 이미 돌고 있는 시스템 (`/opt/dahim`, 도커 compose 프로젝트 `dahim`)
+- 컨테이너: `dahim-nginx`(nginx:1.27-alpine, 80/443 공개), `dahim-php`, `dahim-python-api`, `dahim-attendance`, `dahim-trainer`, `dahim-redis`, `dahim-db`(MariaDB 10.11)
+- 모두 같은 도커 네트워크 `dahim_dahim_net`에 있음. nginx만 외부 포트를 공개하고 나머지는 내부 포트만 가짐.
+- 실행 기간: nginx 4일, attendance 2일, trainer 3일 (운영 중인 서비스로 취급한다).
+
+### nginx와 인증서 (사용자 터미널 출력, 2026-11-28)
+- 서버 폴더 `/opt/dahim`: `docker-compose.yml`, `nginx/default.conf`, `certbot/`(`conf`, `www`), `web/`, `php/`, `python_api/`, `attendance/`, `trainer/`, `db_data/`, `backups/`, 운영 스크립트(`backup_db.sh`, `enable_ssl.sh`, `health_watchdog.sh` 등)가 있다.
+- `dahim-nginx`는 설정 파일 **한 개**(`/opt/dahim/nginx/default.conf` → 컨테이너의 `/etc/nginx/conf.d/default.conf`)만 직접 연결해서 쓴다. 인증서 폴더는 `/opt/dahim/certbot/conf` → `/etc/letsencrypt`, 인증 확인용 폴더는 `/opt/dahim/certbot/www` → `/var/www/certbot`.
+- 설정에 이미 있는 서버 이름은 **`app.dahim.kr`** (80번 블록과 443 블록, 인증서 `/etc/letsencrypt/live/app.dahim.kr/`). 출력은 처음 60줄까지만 확인했으므로 다른 이름이 더 있는지는 확인 안 됨.
+- 서버 호스트의 `/etc/letsencrypt`는 없고 `certbot`이 서버에 설치되어 있지 않다. 인증서는 `/opt/dahim/certbot`을 통해 도커 쪽에서 관리하는 것으로 보이지만, 발급·갱신 방식(`enable_ssl.sh`, compose의 certbot 서비스)은 아직 읽지 않았다.
+- 사용자가 말한 "메뉴의 부주소"는 이 서버에서 확인된 이름으로는 `app.dahim.kr`일 가능성이 높다(확정 아님).
+
+### 도메인 관련
+- `dahim.kr`은 Hostinger(`156.67.211.48`)를 가리킴(서버에서 이름 조회로 확인). 이 서버는 Oracle 서버와 **다른 서버**입니다.
+- `reading.dahim.kr`은 2026-11-28 현재 어디에도 연결되어 있지 않음(이름 조회 결과 없음).
+- 코드 저장소들에서 확인되는 부주소는 `z840.dahim.kr`(음성 합성/인식 호출) 하나뿐입니다. 이것이 Oracle 서버와 연결된 것인지는 확인 안 됨.
+
+## 2. 확인 안 됨 (추측으로 진행하지 않는다)
+- 인증서 발급·갱신 방식(`/opt/dahim/enable_ssl.sh`, compose의 certbot 서비스 내용을 아직 읽지 않음). `reading.dahim.kr`용 인증서를 같은 방식으로 발급할 수 있는지
+- `default.conf`의 80번 블록에 인증 확인(`/.well-known/acme-challenge/`) 경로가 있는지, 서버 이름이 `app.dahim.kr` 말고 더 있는지(처음 60줄만 확인)
+- 어떤 부주소가 이미 이 서버로 연결되어 있는지(`app.dahim.kr` 외)
+- Oracle 보안 목록(Security List)에 80/443 수신 규칙이 어떻게 되어 있는지 (이미 80/443으로 서비스 중이면 열려 있을 가능성이 크지만 직접 보지 않았음)
+- ARM(aarch64)에서 이 프로그램의 도커 이미지 빌드가 되는지(이 프로젝트는 ARM에서 빌드해 본 적 없음)
+- 실제 웹캠으로 본 시선 정확도
+
+## 3. 결정한 방침
+1. **기존 `/opt/dahim` 시스템과 그 컨테이너는 수정하지 않는다.** 단, `reading.dahim.kr`을 받기 위한 nginx 설정 추가는 필요하며, 이것만이 기존 시스템에 가하는 변경이다. 변경 전에 해당 파일을 백업하고, 사용자 확인 뒤에 한다.
+2. nginx는 설정 파일 하나를 직접 연결해 쓰므로 `sed -i`처럼 파일을 새로 만드는 방식으로 고치면 컨테이너가 옛 파일을 보게 된다. 변경은 파일 내용을 덮어쓰는 방식(`cat`/`tee`)으로 하고, 변경 전 백업 → `docker exec dahim-nginx nginx -t` 통과 → 사용자 확인 → `nginx -s reload` 순서를 지킨다.
+3. 이 프로그램(eye-tracker)은 **별도 compose 프로젝트**(별도 폴더)로 올리고, 기존 `dahim_dahim_net`에 붙여서 `dahim-nginx`가 `reading.dahim.kr` 요청을 넘기게 한다.
+4. 이 서버에서는 **우리 묶음의 Caddy를 쓰지 않는다.** 80/443은 이미 `dahim-nginx`가 사용 중이라 같이 띄우면 충돌한다.
+5. 접속 비밀키, 비밀번호, `.env`의 관리자 비밀번호는 채팅이나 저장소에 올리지 않는다.
+
+## 4. 현재 상태 (거짓 없이)
+- 서버에는 **아무것도 설치하거나 변경하지 않았다.** 지금까지는 읽기 전용 명령만 실행했다.
+- 코드는 GitHub `hanulsoda/my_project`의 `ccr-d047b660-c42kqg` 브랜치와 PR #2(초안)에 있다. "서버에 올렸다"고 한 것은 GitHub를 뜻했고 Oracle 서버가 아니다.
+- 저장소의 `docs/deploy.md`는 **이 서버와 맞지 않는 가정**을 담고 있다: Oracle Linux/`opc` 계정, 서버 안에 Caddy를 함께 띄우는 구조. 실제는 Ubuntu 24.04/`ubuntu` 계정, 기존 nginx 사용. 이 서버용 절차는 nginx 설정을 확인한 뒤 새로 쓴다.
+- Hostinger DNS의 `reading` A 레코드는 아직 연결 여부가 확인되지 않았다. 만들 값은 `reading` → `129.203.151.34`.
+
+## 5. 다음 단계 (순서)
+1. [사용자] 서버에서 인증서 방식(`enable_ssl.sh`, compose의 certbot 부분)과 `default.conf`의 80/443 블록을 읽기 전용 명령으로 확인해 결과를 알려준다. (nginx 설정 위치는 확인 완료)
+2. [Claude] 그 결과에 맞춰 이 서버용 compose 파일(Caddy 없음, `dahim_dahim_net` 연결), nginx에 추가할 `reading.dahim.kr` 설정, 인증서 방법, 설치·되돌리기 순서를 작성한다. 이 문서를 먼저 갱신한다.
+3. [사용자] Hostinger에서 A 레코드 `reading` → `129.203.151.34`를 추가하고, `dig +short reading.dahim.kr`로 확인한다.
+4. [사용자 확인 후 진행] 서버에 코드를 내려받아 컨테이너를 빌드·기동하고, nginx 설정을 추가한다(변경 전 백업).
+5. [사용자] 실제 아이/기기로 정확도 점검 페이지를 돌려 품질 기준(0.6)을 정한다.
+
+## 6. 하지 않는 것
+- 확인하지 않은 값을 사실처럼 쓰지 않는다.
+- 운영 중인 컨테이너(`dahim-*`)를 중지·재시작·삭제하지 않는다. nginx 설정을 다시 읽게 하는 일(reload)은 설정 검사(`nginx -t`) 통과 뒤에 사용자 확인을 받고 한다.
