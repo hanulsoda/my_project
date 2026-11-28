@@ -286,7 +286,7 @@
       await api.post(`/api/children/${child.id}/sessions`, payload);
     } catch (err) {
       if (err.status === 403) { stopCamera(); return show('s-consent'); }
-      $('fail-text').textContent = `${err.message} 같은 기록으로 다시 저장해 볼 수 있습니다.`;
+      $('fail-text').textContent = err.message; // the fixed explanation is in read.html
       return show('s-fail');
     }
     payload = null;
@@ -307,7 +307,8 @@
     } catch (err) {
       return showError('불러오지 못했습니다', err.message);
     }
-    $('child-line').textContent = `${child.code} · ${child.initials} · ${GRADE_LABEL[child.gradeBand] || ''} · 동의일 ${child.consentDate}`;
+    $('child-code').textContent = child.code;
+    $('child-line').textContent = `이니셜 ${child.initials} · ${GRADE_LABEL[child.gradeBand] || ''} · 동의일 ${child.consentDate}`;
     fillPassageSelect();
     for (const r of document.querySelectorAll('input[name="kind"]')) r.addEventListener('change', fillPassageSelect);
     $('start').addEventListener('click', onStart);
