@@ -75,7 +75,12 @@ test('line metrics, multi-page', async (t) => {
       assert.deepEqual(m.lineDwellMs, [...per[0].lineDwellMs, ...per[1].lineDwellMs]);
       assert.equal(m.wordsRead, per[0].wordsRead + per[1].wordsRead);
       assert.equal(m.regressions, per[0].regressions + per[1].regressions);
-      assert.ok(Math.abs(m.durationSec - (per[0].durationSec + per[1].durationSec)) < 1e-9);
+      // reading time is wall-clock from the first to the last counted fixation, page turn included
+      const dbg = computeLineMetrics(samples, words, SCREEN, { debug: true });
+      const counted = dbg.debug.fixations.filter((f) => f.line !== null && dbg.debug.passes[f.pass].counted);
+      const wall = (Math.max(...counted.map((f) => f.tEnd)) - Math.min(...counted.map((f) => f.tStart))) / 1000;
+      assert.ok(Math.abs(m.durationSec - wall) < 1e-9, `${m.durationSec} vs ${wall}`);
+      assert.ok(m.durationSec > per[0].durationSec + per[1].durationSec + 0.5, 'includes the ~0.6 s page turn');
       assert.ok(Math.abs(m.wpm - (m.wordsRead / m.durationSec) * 60) < 1e-9);
       assert.equal(m.reliable, per[0].reliable && per[1].reliable);
       if (m.reliable) reliable++;
@@ -192,6 +197,27 @@ test('upload with pages', async (t) => {
       const r = await upload(b);
       assert.equal(r.status, 400, name);
       assert.match((await r.json()).error, /page/, name);
+    }
+  });
+
+  await t.test('word boxes outside the screen by more than 4 px are rejected (impossible geometry)', async () => {
+    const at = (k, over) => body({ words: words.map((w, j) => (j === k ? { ...w, ...over } : w)) });
+    for (const [name, b] of Object.entries({
+      'below the screen': at(70, { y: SCREEN.h - 10, h: 32 }),
+      'right of the screen': at(3, { x: SCREEN.w - 50, w: 60 }),
+      'above the screen': at(0, { y: -6 }),
+      'left of the screen': at(0, { x: -5 }),
+    })) {
+      const r = await upload(b);
+      assert.equal(r.status, 400, name);
+      assert.match((await r.json()).error, /outside the screen/, name);
+    }
+    for (const [name, b] of Object.entries({
+      'rounding at the edge (4 px) is fine': at(0, { x: -4, y: -4 }),
+      'touching the bottom right is fine': at(3, { x: SCREEN.w - 60, w: 64, y: SCREEN.h - 32, h: 36 }),
+    })) {
+      const r = await upload(b);
+      assert.equal(r.status, 201, name);
     }
   });
 

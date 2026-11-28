@@ -7,6 +7,7 @@ const { NOT_FOUND } = require('./children');
 
 const MAX_WORDS = 2000;
 const MAX_SAMPLES = 100000;
+const EDGE_TOLERANCE_PX = 4;
 const UPLOAD_LIMIT = '10mb';
 const MAX_NOTE_LEN = 500;
 
@@ -42,6 +43,12 @@ function validateUpload(body) {
       return { error: `words[${k}] must have finite numeric i, line, x, y, w, h` };
     }
     if (w.i !== k) return { error: `words[${k}].i must equal ${k}` };
+    // Gaze is in viewport coordinates: a word box off the screen cannot have been read there
+    // (e.g. a layout made for a larger window). Small rounding at the edge is tolerated.
+    if (w.x < -EDGE_TOLERANCE_PX || w.y < -EDGE_TOLERANCE_PX
+      || w.x + w.w > screen.w + EDGE_TOLERANCE_PX || w.y + w.h > screen.h + EDGE_TOLERANCE_PX) {
+      return { error: `words[${k}] lies outside the screen` };
+    }
     const clean = { i: w.i, line: w.line, x: w.x, y: w.y, w: w.w, h: w.h };
     if (w.page !== undefined) {
       if (!isPage(w.page)) return { error: `words[${k}].page must be an integer 0..${MAX_PAGE}` };

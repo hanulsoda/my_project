@@ -1006,19 +1006,31 @@ function combinePages(pages, words, screen, opts) {
     .sort((a, b) => a - b);
   const indexOfId = new Map(ids.map((id, k) => [id, k]));
   const per = pages.map((pg) => {
-    const m = computeOnePage(pg.samples, pg.words, screen, opts);
+    const m = computeOnePage(pg.samples, pg.words, screen, { ...opts, debug: true });
+    // first/last fixation that counts as reading (same rule as the single-page durationSec)
+    let tFirst = Infinity;
+    let tLast = -Infinity;
+    for (const f of m.debug.fixations) {
+      if (f.line === null || f.pass === undefined || !m.debug.passes[f.pass].counted) continue;
+      tFirst = Math.min(tFirst, f.tStart);
+      tLast = Math.max(tLast, f.tEnd);
+    }
+    if (!(opts && opts.debug)) delete m.debug;
     const pageIds = [...new Set(pg.words.filter((w) => w && isNum(w.line) && [w.x, w.y, w.w, w.h].every(sane)).map((w) => w.line))]
       .sort((a, b) => a - b);
-    return { m, n: pg.samples.length, toGlobal: pageIds.map((id) => indexOfId.get(id)) };
+    return { m, n: pg.samples.length, tFirst, tLast, toGlobal: pageIds.map((id) => indexOfId.get(id)) };
   });
 
   let weight = 0;
   let quality = 0;
   let drift = 0;
-  for (const { m, n, toGlobal } of per) {
+  let tFirst = Infinity;
+  let tLast = -Infinity;
+  for (const { m, n, toGlobal, tFirst: a, tLast: b } of per) {
+    tFirst = Math.min(tFirst, a);
+    tLast = Math.max(tLast, b);
     m.lineDwellMs.forEach((d, l) => { if (toGlobal[l] !== undefined) metrics.lineDwellMs[toGlobal[l]] += d; });
     metrics.wordsRead += m.wordsRead;
-    metrics.durationSec += m.durationSec;
     metrics.regressions += m.regressions;
     metrics.skippedLines += m.skippedLines;
     metrics.linesRead += m.linesRead;
@@ -1030,7 +1042,9 @@ function combinePages(pages, words, screen, opts) {
   metrics.reliable = per.every((e) => e.m.reliable);
   metrics.quality = weight > 0 ? Math.min(1, Math.max(0, finite(quality / weight))) : 0;
   metrics.driftPx = weight > 0 ? finite(drift / weight) : 0;
-  metrics.durationSec = finite(metrics.durationSec);
+  // Reading time is wall-clock from the first to the last counted fixation over all pages, so the
+  // page turns count as reading time (as the return sweeps do on a single page).
+  metrics.durationSec = isNum(tFirst) && isNum(tLast) && tLast > tFirst ? finite((tLast - tFirst) / 1000) : 0;
   metrics.wpm = metrics.durationSec > 0 ? finite((metrics.wordsRead / metrics.durationSec) * 60) : 0;
   metrics.lineDwellMs = metrics.lineDwellMs.map(finite);
   metrics.longDwellLines = longDwell(metrics.lineDwellMs, layout);
