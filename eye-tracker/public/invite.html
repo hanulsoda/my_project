@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>초대 수락 - 읽기 시선 기록</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+  <div class="card" style="max-width:420px;margin:48px auto">
+    <h1>선생님 계정 만들기</h1>
+    <form id="accept" class="row" style="flex-direction:column;align-items:stretch">
+      <label>비밀번호 (8자 이상) <input id="password" type="password" minlength="8" maxlength="256" autocomplete="new-password" required></label>
+      <label>비밀번호 확인 <input id="password2" type="password" minlength="8" maxlength="256" autocomplete="new-password" required></label>
+      <button type="submit">계정 만들기</button>
+    </form>
+    <p id="msg" class="error" role="alert" hidden></p>
+    <p id="done" hidden><span class="ok">계정이 만들어졌습니다.</span> <a href="/index.html">로그인하러 가기</a></p>
+  </div>
+</main>
+<script src="/js/dom.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/invite.js"></script>
+</body>
+</html>

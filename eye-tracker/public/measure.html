@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>정확도 점검 - 읽기 시선 기록</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+  <section id="s-loading"><p>불러오는 중…</p></section>
+
+  <section id="s-setup" hidden>
+    <div class="card">
+      <h1>시선 정확도 점검</h1>
+      <p>선생님용 점검 페이지입니다. 기기에서 시선 좌표가 화면의 어디까지 맞는지 재서 평균 오차를 보여 줍니다. 결과는 이 화면에만 표시되고 서버로 보내지 않습니다. 진단이 아니라 측정 환경을 확인하는 용도입니다.</p>
+      <div class="row">
+        <label class="grow">기기 메모 (예: iPad 10th gen, Safari)
+          <input id="device-note" type="text" maxlength="120" autocomplete="off">
+        </label>
+      </div>
+      <p class="muted">각도(도)까지 보려면 아래 두 칸을 모두 입력하세요. 비워 두면 각도는 계산하지 않습니다.</p>
+      <div class="row">
+        <label>화면 대각선 (인치)
+          <input id="diagonal" type="number" min="1" max="100" step="0.1" inputmode="decimal">
+        </label>
+        <label>눈에서 화면까지 거리 (cm)
+          <input id="distance" type="number" min="10" max="300" step="1" inputmode="decimal">
+        </label>
+      </div>
+      <ul class="muted">
+        <li>측정할 때와 같은 자세, 같은 거치대, 같은 조명에서 해 주세요. 브라우저 창은 화면 가득 키우는 것이 좋습니다.</li>
+        <li>카메라 영상은 이 기기에서만 사용되고 어디로도 보내지 않습니다.</li>
+      </ul>
+      <p id="setup-error" class="error" role="alert" hidden></p>
+      <div class="row">
+        <button id="start" type="button">카메라 켜고 시작</button>
+        <a class="btn secondary" href="/children.html">아이 목록으로</a>
+      </div>
+    </div>
+  </section>
+
+
+  <section id="s-result" hidden>
+    <div class="card">
+      <h1>점검 결과</h1>
+      <div id="summary" class="metric-grid"></div>
+      <p id="summary-note" class="muted"></p>
+      <h2>지점별 오차</h2>
+      <table id="per-target"></table>
+      <h2>복사할 결과</h2>
+      <textarea id="result-text" readonly rows="14" style="width:100%"></textarea>
+      <div class="row">
+        <button id="copy" type="button">결과 복사</button>
+        <button id="again" type="button" class="secondary">다시 점검</button>
+        <a class="btn secondary" href="/children.html">아이 목록으로</a>
+        <span id="copy-msg" class="muted" role="status"></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-error" hidden>
+    <div class="card">
+      <h1 id="error-title">문제가 생겼습니다</h1>
+      <p id="error-text"></p>
+      <button id="error-back" type="button">처음으로</button>
+    </div>
+  </section>
+</main>
+
+<!-- Centered on its own, like read.html: the WebGazer camera preview sits in the top-left corner and must not cover the button. -->
+<section id="s-ready" class="screen" hidden>
+  <div class="card">
+    <h1>준비됐나요?</h1>
+    <p>얼굴이 카메라에 잘 보이는지 확인하세요. 먼저 공을 눈으로 따라가는 보정을 하고, 이어서 화면의 점 9개를 하나씩 봅니다. 점이 나타나면 점의 한가운데를 계속 바라보세요.</p>
+    <button id="calibrate" type="button">보정 시작</button>
+  </div>
+</section>
+
+<script src="/vendor/webgazer.js"></script>
+<script src="/js/dom.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/calibrate.js"></script>
+<script src="/js/capture.js"></script>
+<script src="/js/measure-math.js"></script>
+<script src="/js/measure.js"></script>
+</body>
+</html>

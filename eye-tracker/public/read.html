@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>읽기 측정</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="reading">
+<section id="s-loading" class="screen"><p>불러오는 중…</p></section>
+
+<section id="s-error" class="screen" hidden>
+  <div class="card">
+    <h1 id="error-title">문제가 생겼습니다</h1>
+    <p id="error-text"></p>
+    <a class="btn secondary" href="/children.html">아이 목록으로</a>
+  </div>
+</section>
+
+<section id="s-consent" class="screen" hidden>
+  <div class="card">
+    <h1>측정을 시작할 수 없습니다</h1>
+    <p>이 아이는 보호자 동의일이 기록되어 있지 않습니다. 보호자 종이 동의를 받은 뒤, 아이 목록에서 동의일을 입력하면 측정할 수 있습니다.</p>
+    <a class="btn" href="/children.html">아이 목록으로</a>
+  </div>
+</section>
+
+<section id="s-setup" class="screen" hidden>
+  <div class="card">
+    <h1>읽기 측정</h1>
+    <p id="child-line" class="muted"></p>
+    <fieldset id="kind-choice" style="border:1px solid var(--line);border-radius:8px;margin:0 0 12px">
+      <legend>지문 종류</legend>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="radio" name="kind" value="reference" checked> 기준 지문 (추이 비교용)</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="radio" name="kind" value="new"> 새 지문</label>
+    </fieldset>
+    <label>지문 <select id="passage-select"></select></label>
+    <ul class="muted">
+      <li>카메라 영상은 이 기기에서만 사용되고 어디로도 보내지 않습니다. 서버에는 시선 좌표와 단어 위치만 저장됩니다.</li>
+      <li>아이 얼굴이 화면 가운데에 오도록 앉히고, 측정 중 머리를 크게 움직이지 않게 안내해 주세요.</li>
+    </ul>
+    <p id="setup-error" class="error" role="alert" hidden></p>
+    <div class="row">
+      <button id="start" type="button">카메라 켜고 시작</button>
+      <a class="btn secondary" href="/children.html">아이 목록으로</a>
+    </div>
+  </div>
+</section>
+
+<section id="s-ready" class="screen" hidden>
+  <div class="card">
+    <h1>준비됐나요?</h1>
+    <p>화면 위쪽에 아이의 얼굴이 잘 보이는지 확인하세요. 이제 화면에 공이 나타나면 눈으로 따라가도록 알려 주세요.</p>
+    <button id="calibrate" type="button">공 따라가기 시작</button>
+  </div>
+</section>
+
+<section id="s-sending" class="screen" hidden><p>기록을 저장하는 중…</p></section>
+
+<section id="s-fail" class="screen" hidden>
+  <div class="card">
+    <h1>저장하지 못했습니다</h1>
+    <p id="fail-text"></p>
+    <button id="retry" type="button">다시 저장</button>
+  </div>
+</section>
+
+<section id="s-finish" class="screen" hidden>
+  <h1>참 잘했어요!</h1>
+  <p style="font-size:1.4rem">다 읽었어요. 카메라는 꺼졌습니다. 선생님께 알려 주세요.</p>
+</section>
+
+<div id="passage-wrap" class="measuring" hidden>
+  <div id="passage"></div>
+  <div id="done-bar"><button id="done" type="button">다 읽었어요</button></div>
+</div>
+
+<script src="/vendor/webgazer.js"></script>
+<script src="/js/dom.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/calibrate.js"></script>
+<script src="/js/capture.js"></script>
+<script src="/js/read.js"></script>
+</body>
+</html>

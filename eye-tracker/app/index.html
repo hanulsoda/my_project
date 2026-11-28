@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eye Tracker</title>
+<style>
+  body{margin:0;font-family:system-ui,sans-serif;background:#111;color:#eee}
+  #bar{position:fixed;top:0;left:0;right:0;padding:8px 12px;background:#000a;z-index:5;display:flex;gap:8px;align-items:center}
+  button{padding:6px 12px;cursor:pointer}
+  #dot{position:fixed;width:20px;height:20px;margin:-10px;border-radius:50%;background:#f33a;pointer-events:none;z-index:4;display:none}
+  .cal{position:fixed;width:28px;height:28px;margin:-14px;border-radius:50%;background:#2a6;border:2px solid #fff;cursor:pointer;z-index:6;display:none}
+  .cal.done{background:#555}
+  #msg{margin-left:auto;font-size:13px}
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="start">시작</button>
+  <button id="calib">보정(9점)</button>
+  <button id="stop">중지</button>
+  <span id="msg">시작을 누르고 카메라를 허용하세요. 영상은 이 브라우저 밖으로 나가지 않습니다.</span>
+</div>
+<div id="dot"></div>
+<script src="webgazer.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

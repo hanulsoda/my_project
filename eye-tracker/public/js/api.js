@@ -1,0 +1,46 @@
+'use strict';
+// JSON fetch wrapper for the teacher API. Cookies (sid) travel automatically (same origin).
+(function (root) {
+  class ApiError extends Error {
+    constructor(status, message) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  // opts.noRedirect: a 401 is an ordinary error (used by the login form itself).
+  async function request(method, path, body, opts = {}) {
+    const init = { method, headers: {} };
+    if (body !== undefined) {
+      init.headers['content-type'] = 'application/json';
+      init.body = JSON.stringify(body);
+    }
+    let res;
+    try {
+      res = await fetch(path, init);
+    } catch {
+      throw new ApiError(0, '서버에 연결할 수 없습니다.');
+    }
+    if (res.status === 401 && !opts.noRedirect) {
+      location.href = '/index.html';
+      throw new ApiError(401, 'login required');
+    }
+    if (res.status === 204) return null;
+    let data = null;
+    try { data = await res.json(); } catch { /* empty or non-JSON body */ }
+    if (!res.ok) throw new ApiError(res.status, (data && data.error) || `요청 실패 (${res.status})`);
+    return data;
+  }
+
+  const api = {
+    get: (path, opts) => request('GET', path, undefined, opts),
+    post: (path, body, opts) => request('POST', path, body ?? {}, opts),
+    patch: (path, body, opts) => request('PATCH', path, body, opts),
+    del: (path, opts) => request('DELETE', path, undefined, opts),
+  };
+
+  const GRADE_LABEL = { elementary: '초등', middle: '중등', high: '고등' };
+  const exported = { api, ApiError, GRADE_LABEL };
+  if (typeof module !== 'undefined' && module.exports) module.exports = exported;
+  if (root) root.ReadingApp = Object.assign(root.ReadingApp || {}, exported);
+})(typeof window !== 'undefined' ? window : undefined);

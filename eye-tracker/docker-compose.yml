@@ -1,0 +1,33 @@
+# One command to run everything:  docker compose up -d
+# Needs a .env next to this file (copy .env.example) and DNS for reading.dahim.kr pointing here.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    # Reachable only from the caddy container on the compose network; never published to the host.
+    expose:
+      - "3000"
+    volumes:
+      # SQLite lives here (DB_PATH=/app/data/db/app.db). Mounted below /app/data so the image's
+      # data/passages.json is not hidden by the volume.
+      - app-data:/app/data/db
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # certificates and the ACME account; keep it or Let's Encrypt limits can hit
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

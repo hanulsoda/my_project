@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>아이 목록 - 읽기 시선 기록</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+  <div class="row spread" style="margin-bottom:12px">
+    <h1 style="margin:0">아이 목록</h1>
+    <div class="row">
+      <span id="who" class="muted"></span>
+      <a class="btn secondary" href="/measure.html">정확도 점검</a>
+      <button id="logout" type="button" class="secondary">로그아웃</button>
+    </div>
+  </div>
+  <p id="msg" class="error" role="alert" hidden></p>
+
+  <section id="admin-card" class="card" hidden>
+    <h2>선생님 초대 (관리자)</h2>
+    <form id="invite-form" class="row">
+      <label class="grow">초대할 이메일 <input id="invite-email" type="email" required></label>
+      <button type="submit">초대 링크 만들기</button>
+    </form>
+    <div id="invite-result" hidden>
+      <p class="muted">아래 링크를 선생님께 전달하세요. 7일 안에 한 번만 사용할 수 있습니다.</p>
+      <div class="row">
+        <input id="invite-link" class="link-input" readonly>
+        <button id="invite-copy" type="button" class="secondary">복사</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>아이 추가</h2>
+    <form id="add-form" class="row">
+      <label>코드 <input id="add-code" maxlength="32" required></label>
+      <label>이니셜 <input id="add-initials" maxlength="32" required></label>
+      <label>학년대
+        <select id="add-band">
+          <option value="elementary">초등</option>
+          <option value="middle">중등</option>
+          <option value="high">고등</option>
+        </select>
+      </label>
+      <label>보호자 동의일 (선택) <input id="add-consent" type="date"></label>
+      <button type="submit">추가</button>
+    </form>
+    <p class="muted">이름 대신 코드와 이니셜만 저장합니다. 보호자 종이 동의를 받은 날짜가 있어야 측정할 수 있습니다.</p>
+  </section>
+
+  <section class="card">
+    <ul id="children" class="plain"></ul>
+    <p id="empty" class="muted" hidden>아직 등록된 아이가 없습니다.</p>
+  </section>
+</main>
+<script src="/js/dom.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/charts.js"></script>
+<script src="/js/metrics-view.js"></script>
+<script src="/js/children.js"></script>
+</body>
+</html>
