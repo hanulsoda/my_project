@@ -142,10 +142,15 @@
 
     // The chart sits in its own holder so a reanalysis can redraw it from the server's trend.
     const chartBox = h('div', {}, trendChart(trend));
+    // Two reanalyses close together can answer out of order: only the latest request redraws.
+    let trendTicket = 0;
     async function refreshTrend() {
+      const ticket = ++trendTicket;
       try {
-        chartBox.replaceChildren(trendChart(await api.get(`/api/children/${child.id}/trend`)));
-      } catch (err) { fail(err); }
+        const fresh = await api.get(`/api/children/${child.id}/trend`);
+        if (ticket !== trendTicket) return;
+        chartBox.replaceChildren(trendChart(fresh));
+      } catch (err) { if (ticket === trendTicket) fail(err); }
     }
     const rows = sessions.slice().reverse().map((s) => sessionRow(s, refreshTrend));
 

@@ -280,7 +280,11 @@ test('teacher session list has a "다시 분석" button that calls the reanalyze
   const handler = src.slice(src.indexOf('/reanalyze`'));
   assert.match(handler.slice(0, 600), /onReanalyzed\(\)/);
   assert.match(src, /sessionRow\(s, refreshTrend\)/);
-  assert.match(src, /async function refreshTrend[\s\S]{0,300}\/trend`/);
+  assert.match(src, /async function refreshTrend[\s\S]{0,400}\/trend`/);
+  // two reanalyses close together: only the latest trend response may redraw the chart
+  const fn = src.slice(src.indexOf('async function refreshTrend'), src.indexOf('async function refreshTrend') + 500);
+  assert.match(fn, /const ticket = \+\+trendTicket/);
+  assert.match(fn, /if \(ticket !== trendTicket\) return/);
 });
 
 test('public/js never writes HTML strings (XSS-proof by construction)', () => {
