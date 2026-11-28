@@ -2,10 +2,16 @@
 const express = require('express');
 const { GRADE_BANDS, listPassages } = require('../passages');
 const { audit } = require('../audit');
+const { toCsv } = require('../csv');
+const { isReferenceOnly } = require('../metrics');
 
 const MAX_LEN = 32;
 const MAX_NOTE_LEN = 500;
 const NOT_FOUND = { error: 'not found' };
+const EXPORT_HEADER = [
+  'code', 'initials', 'gradeBand', 'group', 'consentDate', 'sessionCount', 'lastSessionAt',
+  'lastWpm', 'lastLinesRead', 'lastTotalLines', 'lastReliable',
+];
 
 function isValidIsoDate(s) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
@@ -60,6 +66,16 @@ function createChildrenRouter({ db, now }) {
       `INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at, group_name, note)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
+    // One row per child with the figures the export needs; only metrics_json is read from the
+    // sessions (never samples or words), and everything is scoped by children.teacher_id.
+    exportRows: db.prepare(
+      `SELECT c.code, c.initials, c.grade_band, c.group_name, c.consent_date,
+              (SELECT COUNT(*) FROM read_sessions s WHERE s.child_id = c.id) AS session_count,
+              (SELECT MAX(s.started_at) FROM read_sessions s WHERE s.child_id = c.id) AS last_at,
+              (SELECT s.metrics_json FROM read_sessions s WHERE s.child_id = c.id AND s.kind = 'reference'
+               ORDER BY s.started_at DESC, s.id DESC LIMIT 1) AS ref_metrics
+       FROM children c WHERE c.teacher_id = ? ORDER BY c.id`,
+    ),
     update: db.prepare(
       `UPDATE children SET code = ?, initials = ?, grade_band = ?, consent_date = ?, group_name = ?, note = ?
        WHERE id = ? AND teacher_id = ?`,
@@ -75,6 +91,31 @@ function createChildrenRouter({ db, now }) {
     if (group === undefined) return res.json(q.list.all(req.user.id).map(toChild));
     if (typeof group !== 'string') return res.status(400).json({ error: 'group must be a single string' });
     res.json(q.listGroup.all(req.user.id, group).map(toChild));
+  });
+
+  // Registered before '/:id'. Figures come from the latest reference session and are blank when it
+  // is 참고용 (the same rule as the UI); lastSessionAt and sessionCount cover every session.
+  router.get('/export.csv', (req, res) => {
+    const rows = q.exportRows.all(req.user.id).map((r) => {
+      const m = r.ref_metrics === null ? null : JSON.parse(r.ref_metrics);
+      const reliable = m === null ? null : !isReferenceOnly(m);
+      const figure = (v) => (reliable && Number.isFinite(v) ? v : null);
+      return [
+        r.code, r.initials, r.grade_band, r.group_name, r.consent_date, r.session_count,
+        r.last_at === null ? null : new Date(r.last_at).toISOString(),
+        m === null ? null : figure(Number.isFinite(m.wpm) ? Math.round(m.wpm) : null),
+        m === null ? null : figure(m.linesRead),
+        m === null ? null : figure(m.totalLines),
+        reliable,
+      ];
+    });
+    const day = new Date(now()).toISOString().slice(0, 10).replaceAll('-', '');
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="children-${day}.csv"`,
+      'Cache-Control': 'no-store',
+    });
+    res.send(toCsv([EXPORT_HEADER, ...rows]));
   });
 
   router.get('/:id', (req, res) => {
