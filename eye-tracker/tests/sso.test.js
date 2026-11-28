@@ -175,7 +175,7 @@ test('/sso: refusals', async (t) => {
 test('/sso: student entry', async (t) => {
   const srv = await startTestServer();
   t.after(srv.close);
-  const teacher = await srv.ssoAs('teacher', '12');
+  const teacher = await srv.ssoAs('teacher', '12', '0123'); // launched from the student's page
   const made = await fetch(`${srv.url}/api/children`, {
     method: 'POST', headers: { 'content-type': 'application/json', cookie: teacher },
     body: JSON.stringify({ code: 'S-0123', initials: 'KJ', gradeBand: 'elementary', consentDate: '2026-03-01', externalStudentId: '0123' }),
@@ -226,7 +226,7 @@ test('no token or secret in any response, header, log line or DB dump', async (t
     seen.push(JSON.stringify([...res.headers]));
     seen.push(await res.text());
   };
-  const teacher = await srv.ssoEnter({ role: 'teacher', uid: '5' });
+  const teacher = await srv.ssoEnter({ role: 'teacher', uid: '5', sid: '0042' });
   tokens.push(teacher.token);
   await record(teacher.res);
   await fetch(`${srv.url}/api/children`, {

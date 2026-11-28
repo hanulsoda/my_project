@@ -20,6 +20,8 @@ const STUDENT_ID_RE = /^\d{4,12}$/; // academy student numbers are zero-padded (
 const KEYS = ['exp', 'n', 'role', 'sid', 'uid', 'v'];
 
 const fail = (reason) => ({ ok: false, reason });
+// The instant (ms) a token stops verifying; its nonce must be kept at least until then.
+const nonceExpiryMs = (exp) => (exp + SKEW_SEC) * 1000;
 const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 function checkPayload(p) {
@@ -57,9 +59,11 @@ function verifyEntryToken(token, { secret, nowMs }) {
   }
   const bad = checkPayload(payload);
   if (bad) return fail(bad);
-  const nowSec = Math.floor(nowMs / 1000);
-  if (payload.exp > nowSec + MAX_FUTURE_SEC) return fail('future');
-  if (nowSec > payload.exp + SKEW_SEC) return fail('expired');
+  // In milliseconds throughout. Valid while nowMs < (exp + SKEW) * 1000; the nonce row is kept
+  // until exactly that instant (routes/sso.js), so a token can never outlive its nonce.
+  if (!Number.isFinite(nowMs)) return fail('clock');
+  if (payload.exp * 1000 > nowMs + MAX_FUTURE_SEC * 1000) return fail('future');
+  if (nowMs >= nonceExpiryMs(payload.exp)) return fail('expired');
   return { ok: true, payload };
 }
 
@@ -77,5 +81,5 @@ function safeNext(next, { role, sid, childId }) {
 }
 
 module.exports = {
-  verifyEntryToken, safeNext, MAX_TOKEN_LEN, MAX_FUTURE_SEC, SKEW_SEC, MIN_SECRET_LEN, STUDENT_ID_RE,
+  verifyEntryToken, safeNext, nonceExpiryMs, MAX_TOKEN_LEN, MAX_FUTURE_SEC, SKEW_SEC, MIN_SECRET_LEN, STUDENT_ID_RE,
 };

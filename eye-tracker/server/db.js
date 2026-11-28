@@ -116,6 +116,9 @@ function migrate(db) {
   addColumn('users', 'external_id', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_external_id ON users(external_id) WHERE external_id IS NOT NULL');
   addColumn('children', 'external_student_id', 'TEXT');
+  // The academy student number a staff session was launched for (signed token sid), or NULL.
+  // It is the only proof a teacher has to link a child to that student (routes/children.js).
+  addColumn('auth_sessions', 'launch_sid', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS children_external_student_id ON children(external_student_id) WHERE external_student_id IS NOT NULL');
 
   // One child code per teacher, ignoring case and surrounding spaces. If rows already collide

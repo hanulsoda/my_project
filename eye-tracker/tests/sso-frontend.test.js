@@ -44,6 +44,8 @@ test('children page: academy student registration form and logout to the academy
   const js = read('js/children.js');
   assert.match(js, /location\.href = '\/academy'/);
   assert.match(js, /externalStudentId: studentId/);
+  assert.match(js, /me\.launchStudentId/, 'a teacher registers only the signed launch student number');
+  assert.match(html, /id="link-note"/);
   assert.doesNotMatch(js, /innerHTML/);
 });
 

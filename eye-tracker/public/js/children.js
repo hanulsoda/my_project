@@ -9,9 +9,12 @@
   let children = [];
   let openChildId = null;
   // ?student=0123: opened from the academy's student page ("측정" button). Shows that student's
-  // child, or the form to register them. Only digits are accepted (same rule as the server).
+  // child, or the form to register them. A teacher may register only the student number its
+  // session was launched for (me.launchStudentId, from the signed token), which then wins over
+  // the address bar; the director may use the address bar's number. Digits only, as on the server.
   const studentParam = new URLSearchParams(location.search).get('student');
-  const studentId = /^\d{4,12}$/.test(studentParam || '') ? studentParam : null;
+  let studentId = /^\d{4,12}$/.test(studentParam || '') ? studentParam : null;
+  let canLink = false;
 
   function showMsg(text) {
     $('msg').textContent = text || '';
@@ -226,7 +229,8 @@
       if (shown.length === 1 && openChildId === null) openChildId = shown[0].id;
       $('student-card').hidden = false;
       $('student-line').textContent = `다힘 학생 번호 ${studentId}`;
-      $('link-form').hidden = shown.length > 0;
+      $('link-form').hidden = shown.length > 0 || !canLink;
+      $('link-note').hidden = shown.length > 0 || canLink;
       $('link-student').value = studentId;
       if (!$('link-code').value) $('link-code').value = studentId;
     }
@@ -311,6 +315,8 @@
     try { me = await api.get('/api/me'); } catch { return; } // 401 already redirected to the front page
     if (me.role === 'student') { location.replace(`/read.html?child=${me.child.id}`); return; }
     $('who').textContent = me.role === 'admin' ? '원장' : '선생님';
+    if (me.role !== 'admin' && me.launchStudentId) studentId = me.launchStudentId;
+    canLink = studentId !== null && (me.role === 'admin' || me.launchStudentId === studentId);
     // Invites are a legacy password flow (ALLOW_PASSWORD_LOGIN=1 only).
     $('admin-card').hidden = !(me.role === 'admin' && me.passwordLogin);
     await load();

@@ -21,7 +21,8 @@ const UPLOAD = { passageId: 'el-ref-sparrow', screen: { w: 1280, h: 720 }, words
 test('student session: the route matrix', async (t) => {
   const srv = await startTestServer();
   t.after(srv.close);
-  const teacher = await srv.ssoAs('teacher', '12');
+  // The director links the three students (a teacher may link only its launch student number).
+  const teacher = await srv.ssoAs('director', 'admin');
   const mk = async (body) => (await call(srv, 'POST', '/api/children', teacher, body)).json();
   const own = await mk({ code: 'S1', initials: 'KJ', gradeBand: 'elementary', consentDate: '2026-03-01', externalStudentId: '0123' });
   const other = await mk({ code: 'S2', initials: 'LS', gradeBand: 'elementary', consentDate: '2026-03-01', externalStudentId: '0456' });

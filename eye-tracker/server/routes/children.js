@@ -9,6 +9,9 @@ const MAX_LEN = 32;
 const MAX_NOTE_LEN = 500;
 const NOT_FOUND = { error: 'not found' };
 const DUPLICATE_STUDENT = { error: '이미 등록된 학생입니다' };
+// What a teacher gets for any student number they may not link: not launched for it, or already
+// linked elsewhere. One answer for both, so it never tells whether a number is registered.
+const LINK_REFUSED = { error: '이 학생 번호로는 등록할 수 없습니다. 다힘 사이트의 학생 화면에서 "측정"으로 들어와 주세요.' };
 const EXPORT_HEADER = [
   'code', 'initials', 'gradeBand', 'group', 'consentDate', 'sessionCount', 'lastSessionAt',
   'lastWpm', 'lastLinesRead', 'lastTotalLines', 'lastReliable',
@@ -59,6 +62,10 @@ function parseExternalStudentId(v) {
 // teacher only the children they own. Every query takes (userId, isDirector) for
 // "(teacher_id = ? OR ? = 1)"; this is the one place that decides it.
 const scopeOf = (req) => [req.user.id, req.user.role === 'admin' ? 1 : 0];
+
+// May this caller link `value` to a child? The director: any number. A teacher: only the student
+// number their current session was launched for by a signed academy token (auth_sessions.launch_sid).
+const mayLinkStudent = (req, value) => req.user.role === 'admin' || (req.user.launchSid !== null && req.user.launchSid === value);
 
 // A director writing to a child another account owns leaves an audit row naming the owner.
 function auditCrossWrite(db, now, req, ownerId, action, target) {
@@ -118,7 +125,13 @@ function createChildrenRouter({ db, now }) {
     remove: db.prepare('DELETE FROM children WHERE id = ? AND (teacher_id = ? OR ? = 1)'),
   };
   // Constraint errors: the student number (unique across all children) or the per-teacher code.
-  const conflict = (err) => (String(err.message).includes('external_student_id') ? DUPLICATE_STUDENT : { error: 'code already in use' });
+  // A number linked to another child: the director is told so; a teacher gets the generic refusal.
+  const linkTaken = (req, res) => (req.user.role === 'admin'
+    ? res.status(409).json(DUPLICATE_STUDENT)
+    : res.status(403).json(LINK_REFUSED));
+  const conflict = (req, res, err) => (String(err.message).includes('external_student_id')
+    ? linkTaken(req, res)
+    : res.status(409).json({ error: 'code already in use' }));
 
   const parseId = (raw) => (/^\d{1,15}$/.test(raw) ? Number(raw) : null);
   const router = express.Router();
@@ -178,7 +191,10 @@ function createChildrenRouter({ db, now }) {
     if (group.error) return res.status(400).json({ error: group.error });
     if (note.error) return res.status(400).json({ error: note.error });
     if (student.error) return res.status(400).json({ error: student.error });
-    if (student.value !== null && q.studentTaken.get(student.value, 0)) return res.status(409).json(DUPLICATE_STUDENT);
+    if (student.value !== null) {
+      if (!mayLinkStudent(req, student.value)) return res.status(403).json(LINK_REFUSED);
+      if (q.studentTaken.get(student.value, 0)) return linkTaken(req, res);
+    }
 
     try {
       const { lastInsertRowid } = q.insert.run(
@@ -186,7 +202,7 @@ function createChildrenRouter({ db, now }) {
       );
       res.status(201).json(toChild(q.byId.get(lastInsertRowid), req));
     } catch (err) {
-      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json(conflict(err));
+      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return conflict(req, res, err);
       throw err;
     }
   });
@@ -242,7 +258,11 @@ function createChildrenRouter({ db, now }) {
     if (sent('externalStudentId')) {
       const e = parseExternalStudentId(body.externalStudentId);
       if (e.error) return res.status(400).json({ error: e.error });
-      if (e.value !== null && q.studentTaken.get(e.value, id)) return res.status(409).json(DUPLICATE_STUDENT);
+      // Clearing, or keeping the value the child already has, needs no proof.
+      if (e.value !== null && e.value !== row.external_student_id) {
+        if (!mayLinkStudent(req, e.value)) return res.status(403).json(LINK_REFUSED);
+        if (q.studentTaken.get(e.value, id)) return linkTaken(req, res);
+      }
       next.externalStudentId = e.value;
     }
     // Reassigning the owner is the director's alone, and is always audited.
@@ -259,7 +279,7 @@ function createChildrenRouter({ db, now }) {
         next.externalStudentId, next.teacherId, id, ...scopeOf(req),
       );
     } catch (err) {
-      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json(conflict(err));
+      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return conflict(req, res, err);
       throw err;
     }
     if (next.teacherId !== row.teacher_id) {

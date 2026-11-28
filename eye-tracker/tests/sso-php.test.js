@@ -52,7 +52,8 @@ test('PHP-signed tokens: tampering, expiry and the wrong secret fail', async (t)
     assert.equal(verify(`${b64}.${flipped}`).ok, false);
   });
   await t.test('expired: 361 s after it was made (exp + 60 s skew is the limit)', () => {
-    assert.equal(verify(token, NOW_MS + 360 * 1000).ok, true, 'still inside the skew');
+    assert.equal(verify(token, NOW_MS + 360 * 1000 - 1).ok, true, 'still inside the skew');
+    assert.equal(verify(token, NOW_MS + 360 * 1000).ok, false, 'exp + 60 s is already out');
     assert.equal(verify(token, NOW_MS + 361 * 1000).ok, false);
   });
   await t.test('made too far ahead of the verifier\'s clock', () => {

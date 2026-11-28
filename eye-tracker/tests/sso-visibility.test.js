@@ -115,8 +115,10 @@ test('director sees all, teacher only own', async (t) => {
 test('children: externalStudentId', async (t) => {
   const srv = await startTestServer();
   t.after(srv.close);
-  const tA = await srv.ssoAs('teacher', '1');
-  const tB = await srv.ssoAs('teacher', '2');
+  // Both teachers were launched for student 0123 (signed sid); only a launch allows a link.
+  const tA = await srv.ssoAs('teacher', '1', '0123');
+  const tB = await srv.ssoAs('teacher', '2', '0123');
+  const director = await srv.ssoAs('director', 'admin');
   const post = (cookie, body) => call(srv, 'POST', '/api/children', cookie, body);
   const base = { initials: 'KJ', gradeBand: 'elementary' };
 
@@ -129,14 +131,16 @@ test('children: externalStudentId', async (t) => {
     assert.equal((await (await post(tA, { ...base, code: 'E2' })).json()).externalStudentId, null);
   });
 
-  await t.test('duplicate across ALL children (any teacher): 409 "이미 등록된 학생입니다"', async () => {
-    const res = await post(tB, { ...base, code: 'E3', externalStudentId: '0123' });
+  await t.test('duplicate across ALL children: the director gets 409 "이미 등록된 학생입니다", a teacher the generic 403', async () => {
+    const res = await post(director, { ...base, code: 'E3', externalStudentId: '0123' });
     assert.equal(res.status, 409);
     assert.deepEqual(await res.json(), { error: '이미 등록된 학생입니다' });
+    const asTeacher = await post(tB, { ...base, code: 'E3', externalStudentId: '0123' });
+    assert.equal(asTeacher.status, 403, 'no "already registered" oracle for teachers');
+    assert.doesNotMatch(JSON.stringify(await asTeacher.json()), /이미 등록/);
     const other = await (await post(tB, { ...base, code: 'E4' })).json();
     const patch = await call(srv, 'PATCH', `/api/children/${other.id}`, tB, { externalStudentId: '0123' });
-    assert.equal(patch.status, 409);
-    assert.deepEqual(await patch.json(), { error: '이미 등록된 학생입니다' });
+    assert.equal(patch.status, 403);
   });
 
   await t.test('validation: a string up to 32 chars; null or blank clears', async () => {

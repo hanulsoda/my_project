@@ -175,6 +175,7 @@ test('SSO migration on an OLD-schema database: columns added as NULL, unique whe
     assert.equal(db.prepare('SELECT external_id FROM users').get().external_id, null);
     assert.equal(db.prepare('SELECT external_student_id FROM children').get().external_student_id, null);
     assert.equal(db.prepare('SELECT user_id FROM auth_sessions WHERE token = ?').get('old-session').user_id, 1, 'existing logins survive');
+    assert.equal(db.prepare('SELECT launch_sid FROM auth_sessions WHERE token = ?').get('old-session').launch_sid, null, 'no launch for old logins');
 
     // Several NULLs are fine; a repeated value is not.
     const addUser = db.prepare("INSERT INTO users (email, pw_hash, role, created_at, external_id) VALUES (?, '!sso', 'teacher', 1, ?)");

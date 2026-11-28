@@ -63,10 +63,10 @@ function createAuth({ db, now = Date.now, config = {} }) {
   const inviteLimiter = createLoginLimiter({ now }); // keyed by sha256(token)
   const q = {
     userByEmail: db.prepare('SELECT id, email, pw_hash, role, disabled_at FROM users WHERE email = ?'),
-    insertSession: db.prepare('INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
+    insertSession: db.prepare('INSERT INTO auth_sessions (token, user_id, expires_at, launch_sid) VALUES (?, ?, ?, ?)'),
     deleteSession: db.prepare('DELETE FROM auth_sessions WHERE token = ?'),
     sessionUser: db.prepare(
-      `SELECT u.id, u.email, u.role, u.disabled_at, s.expires_at FROM auth_sessions s
+      `SELECT u.id, u.email, u.role, u.disabled_at, s.expires_at, s.launch_sid FROM auth_sessions s
        JOIN users u ON u.id = s.user_id WHERE s.token = ?`),
     insertInvite: db.prepare(
       `INSERT INTO invites (id, token, email, expires_at)
@@ -97,7 +97,7 @@ function createAuth({ db, now = Date.now, config = {} }) {
       q.deleteSession.run(sid);
       return null;
     }
-    return { id: row.id, email: row.email, role: row.role };
+    return { id: row.id, email: row.email, role: row.role, launchSid: row.launch_sid ?? null };
   }
 
   // A student session (from the academy's student menu). Never a users row: it only names the one
@@ -161,9 +161,10 @@ function createAuth({ db, now = Date.now, config = {} }) {
     q.deleteStudentSession.run(sha256Hex(sid));
   }
 
-  function startUserSession(res, userId) {
+  // launchSid: the signed token's sid (never a request value), or '' / null for none.
+  function startUserSession(res, userId, launchSid = null) {
     const token = crypto.randomBytes(32).toString('hex');
-    q.insertSession.run(token, userId, now() + SSO_SESSION_TTL_MS);
+    q.insertSession.run(token, userId, now() + SSO_SESSION_TTL_MS, launchSid || null);
     q.touchLogin.run(now(), userId);
     setSidCookie(res, token, SSO_SESSION_TTL_MS / 1000);
   }
@@ -201,7 +202,7 @@ function createAuth({ db, now = Date.now, config = {} }) {
       loginLimiter.clear(email);
 
       const token = crypto.randomBytes(32).toString('hex');
-      q.insertSession.run(token, user.id, now() + SESSION_TTL_MS);
+      q.insertSession.run(token, user.id, now() + SESSION_TTL_MS, null);
       q.touchLogin.run(now(), user.id);
       setSidCookie(res, token, SESSION_TTL_MS / 1000);
       res.json({ id: user.id, email: user.email, role: user.role });
@@ -212,7 +213,11 @@ function createAuth({ db, now = Date.now, config = {} }) {
   // A student gets their own child's labels only (what the reading page shows), never scores.
   router.get('/api/me', (req, res) => {
     const user = authenticate(req);
-    if (user) return res.json({ email: user.email, role: user.role, passwordLogin: allowPasswordLogin });
+    if (user) {
+      return res.json({
+        email: user.email, role: user.role, passwordLogin: allowPasswordLogin, launchStudentId: user.launchSid,
+      });
+    }
     const student = authenticateStudent(req);
     if (!student) return res.status(401).json({ error: 'login required' });
     res.json({

@@ -5,7 +5,7 @@
 // Every refusal is the same friendly page with no detail. The token is never logged, stored or
 // echoed: only its nonce is kept (sso_nonces), until exp + skew, to make each token single-use.
 const express = require('express');
-const { verifyEntryToken, safeNext, SKEW_SEC } = require('../sso-token');
+const { verifyEntryToken, safeNext, nonceExpiryMs } = require('../sso-token');
 const { sendNotice } = require('../sso-page');
 const { audit } = require('../audit');
 
@@ -15,7 +15,8 @@ const ROLE_OF = { director: 'admin', teacher: 'teacher' };
 function createSsoRouter({ db, now, config, auth }) {
   const academyUrl = config.academyUrl ?? null;
   const q = {
-    purgeNonces: db.prepare('DELETE FROM sso_nonces WHERE expires_at <= ?'),
+    // Strictly before now: a row is removed only once no token with that nonce can verify.
+    purgeNonces: db.prepare('DELETE FROM sso_nonces WHERE expires_at < ?'),
     useNonce: db.prepare('INSERT OR IGNORE INTO sso_nonces (nonce, expires_at) VALUES (?, ?)'),
     userByExternal: db.prepare('SELECT id, role, disabled_at FROM users WHERE external_id = ?'),
     insertUser: db.prepare(
@@ -35,7 +36,7 @@ function createSsoRouter({ db, now, config, auth }) {
   // Single use: the nonce is recorded inside one transaction with the purge of expired ones.
   const consumeNonce = db.transaction((nonce, exp) => {
     q.purgeNonces.run(now());
-    return q.useNonce.run(nonce, (exp + SKEW_SEC) * 1000).changes === 1;
+    return q.useNonce.run(nonce, nonceExpiryMs(exp)).changes === 1;
   });
 
   const router = express.Router();
@@ -68,7 +69,7 @@ function createSsoRouter({ db, now, config, auth }) {
     // A disabled account is refused exactly like a password login would be.
     if (!user || user.disabled_at !== null) return refuse();
     auth.endSession(req);
-    auth.startUserSession(res, user.id);
+    auth.startUserSession(res, user.id, p.sid); // p.sid is signed: the only proof for linking that student
     res.redirect(302, safeNext(req.query.next, { role: p.role, sid: p.sid }));
   });
 

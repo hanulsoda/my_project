@@ -226,7 +226,8 @@ test('GET /api/me', async (t) => {
       const body = await res.json();
       assert.equal(body.role, role);
       assert.match(body.email, new RegExp(`^${role}-\\d+@example\\.test$`));
-      assert.deepEqual(Object.keys(body).sort(), ['email', 'passwordLogin', 'role']);
+      assert.deepEqual(Object.keys(body).sort(), ['email', 'launchStudentId', 'passwordLogin', 'role']);
+      assert.equal(body.launchStudentId, null, 'no academy launch for a password login');
       assert.equal(body.passwordLogin, true, 'the test harness turns the break-glass flag on');
     }
   });

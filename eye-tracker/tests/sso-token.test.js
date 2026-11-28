@@ -22,9 +22,12 @@ test('verifyEntryToken: valid tokens', async (t) => {
     }
   });
 
-  await t.test('clock window: exp up to 330 s ahead and up to 60 s behind is accepted', () => {
+  await t.test('clock window: exp up to 330 s ahead, and until (exp + 60 s) exclusive, in ms', () => {
     assert.equal(verify(signToken(makePayload({ exp: NOW_S + 330 }, NOW))).ok, true);
-    assert.equal(verify(signToken(makePayload({ exp: NOW_S - 60 }, NOW))).ok, true);
+    const p = makePayload({ exp: NOW_S - 60 }, NOW);
+    assert.equal(verify(signToken(p), NOW - 1).ok, true, 'one ms before exp + 60 s');
+    assert.equal(verify(signToken(p), NOW).ok, false, 'at exactly exp + 60 s');
+    assert.equal(verify(signToken(makePayload({ exp: NOW_S + 330 }, NOW)), NOW - 1).ok, false, '330 s + 1 ms ahead');
   });
 });
 

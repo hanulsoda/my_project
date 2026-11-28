@@ -30,6 +30,14 @@ function decodedPath(p) {
   try { return decodeURIComponent(p); } catch { return null; }
 }
 
+// The file the static server would resolve: decoded, "." / ".." / repeated slashes collapsed
+// (send() does the same), so "//login.html", "/./login.html" or "/x/../login.html" all match.
+function resolvedPath(p) {
+  const decoded = decodedPath(p);
+  if (decoded === null || decoded.includes('\0')) return null;
+  return path.posix.normalize(`/${decoded}`).replace(/\/{2,}/g, '/');
+}
+
 function normalizeConfig(config) {
   const secret = typeof config.ssoSecret === 'string' ? config.ssoSecret.trim() : '';
   return {
@@ -52,9 +60,9 @@ function createApp({ db, now = Date.now, config = loadConfig(process.env) }) {
 
   if (!cfg.allowPasswordLogin) {
     app.use((req, res, next) => {
-      const decoded = decodedPath(req.path);
-      if (decoded === null) return res.status(400).json({ error: 'bad path' });
-      if (LEGACY_PATHS.some((re) => re.test(req.path) || re.test(decoded))) return res.status(404).json(NOT_FOUND);
+      const resolved = resolvedPath(req.path);
+      if (resolved === null) return res.status(400).json({ error: 'bad path' });
+      if (LEGACY_PATHS.some((re) => re.test(req.path) || re.test(resolved))) return res.status(404).json(NOT_FOUND);
       next();
     });
   }
@@ -97,7 +105,7 @@ function createApp({ db, now = Date.now, config = loadConfig(process.env) }) {
   // A student who opens a staff page (children.html, measure.html, ...) goes back to their own
   // measurement. The pages hold no data anyway; this keeps the student out of staff screens.
   app.use((req, res, next) => {
-    const page = decodedPath(req.path) ?? req.path;
+    const page = resolvedPath(req.path) ?? req.path;
     if (req.method !== 'GET' || !/\.html$/i.test(page) || STUDENT_PAGES.test(page)) return next();
     const student = auth.authenticateStudent(req);
     if (!student) return next();
