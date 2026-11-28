@@ -1,0 +1,29 @@
+/* Design tokens from the Figma foundation (Light + High contrast). Names match the Figma variables. */
+:root {
+  --gray-0: #fff; --gray-50: #f6f7f9; --gray-100: #eef1f5; --gray-150: #e8ecf4; --gray-200: #d9dee7;
+  --gray-400: #8a94a6; --gray-450: #7a8396; --gray-500: #687186; --gray-600: #5b6577; --gray-800: #3a4152; --gray-900: #1d2433;
+  --surface: #fff; --surface-sunken: #f6f7f9; --surface-raised: #fff; --surface-muted: #e8ecf4;
+  --text: #1d2433; --text-muted: #5b6577; --text-disabled: #8a94a6;
+  --border: #d9dee7; --border-strong: #7a8396;
+  --primary: #2456c9; --primary-hover: #1c46a8; --primary-pressed: #163a8c; --primary-subtle: #eaf0fc; --on-primary: #fff;
+  --success: #1e7a46; --success-subtle: #e7f5ec;
+  --warning: #6b4a00; --warning-border: #e9c76a; --warning-subtle: #fff4d6;
+  --danger: #b3261e; --danger-hover: #8c1d17; --danger-subtle: #fdecea;
+  --info: #163a8c; --info-subtle: #eaf0fc;
+  --focus-ring: #c2410c; --calibration-target: #e8590c;
+  --reading-bg: #fbfaf6; --reading-text: #1d2433; --reading-highlight: #ffe58a; --reading-dim: #687186;
+  --space-0: 0; --space-2: 2px; --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px; --space-20: 20px;
+  --space-24: 24px; --space-32: 32px; --space-40: 40px; --space-48: 48px; --space-64: 64px; --space-80: 80px;
+  --radius-none: 0; --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px; --radius-full: 999px;
+  --elev-1: 0 1px 2px rgba(29, 36, 51, .06), 0 1px 3px rgba(29, 36, 51, .08);
+  --elev-2: 0 4px 12px rgba(29, 36, 51, .10), 0 2px 4px rgba(29, 36, 51, .06);
+  --elev-3: 0 16px 40px rgba(29, 36, 51, .18), 0 4px 12px rgba(29, 36, 51, .08);
+}
+@media (prefers-contrast: more) {
+  :root {
+    --surface-sunken: #fff; --surface-muted: #eef1f5; --text: #000; --text-muted: #3a4152; --text-disabled: #5b6577;
+    --border: #1d2433; --border-strong: #1d2433; --primary: #0b2a6e; --primary-hover: #163a8c; --primary-pressed: #000;
+    --success: #165c35; --warning-border: #6b4a00; --danger: #8c1d17; --info: #0b2a6e; --focus-ring: #000;
+    --calibration-target: #c2410c; --reading-bg: #fff; --reading-text: #000; --reading-dim: #3a4152;
+  }
+}
