@@ -85,7 +85,11 @@ test('director sees all, teacher only own', async (t) => {
 
   await t.test('reassigning the owner: director only, validated, audited', async () => {
     assert.equal((await call(srv, 'PATCH', `/api/children/${b1.id}`, tB, { teacherId: aId })).status, 403, 'a teacher cannot give a child away');
-    for (const bad of [999999, '2', null, 1.5]) {
+    const off = await srv.ssoAs('teacher', '3');
+    const offId = idOf('teacher:3');
+    assert.equal((await call(srv, 'POST', `/api/admin/teachers/${offId}/disable`, director)).status, 200);
+    assert.ok(off);
+    for (const bad of [999999, '2', null, 1.5, offId]) {
       assert.equal((await call(srv, 'PATCH', `/api/children/${b1.id}`, director, { teacherId: bad })).status, 400, String(bad));
     }
     const res = await call(srv, 'PATCH', `/api/children/${b1.id}`, director, { teacherId: aId });

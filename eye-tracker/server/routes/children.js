@@ -95,7 +95,7 @@ function createChildrenRouter({ db, now }) {
     get: db.prepare('SELECT * FROM children WHERE id = ? AND (teacher_id = ? OR ? = 1)'),
     byId: db.prepare('SELECT * FROM children WHERE id = ?'),
     studentTaken: db.prepare('SELECT 1 FROM children WHERE external_student_id = ? AND id != ?'),
-    owner: db.prepare("SELECT id FROM users WHERE id = ? AND role IN ('admin', 'teacher')"),
+    owner: db.prepare("SELECT id FROM users WHERE id = ? AND role IN ('admin', 'teacher') AND disabled_at IS NULL"),
     insert: db.prepare(
       `INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at, group_name, note, external_student_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -249,7 +249,7 @@ function createChildrenRouter({ db, now }) {
     if (sent('teacherId')) {
       if (req.user.role !== 'admin') return res.status(403).json({ error: 'only the director can change the owner' });
       if (!Number.isSafeInteger(body.teacherId) || !q.owner.get(body.teacherId)) {
-        return res.status(400).json({ error: 'teacherId must be the id of an existing account' });
+        return res.status(400).json({ error: 'teacherId must be the id of an existing, active account' });
       }
       next.teacherId = body.teacherId;
     }
