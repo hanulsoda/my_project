@@ -1,0 +1,30 @@
+# For a server that ALREADY runs a reverse proxy (nginx in docker) on a shared network.
+# No Caddy here: the existing proxy owns ports 80/443 and sends reading.dahim.kr to this container.
+#
+#   cd eye-tracker/deploy/oracle-shared-nginx && docker compose up -d --build
+#
+# Needs eye-tracker/.env (copy .env.example). The container publishes no host port.
+name: dahim-reading
+
+services:
+  reading:
+    build: ../..
+    container_name: dahim-reading
+    restart: unless-stopped
+    env_file: ../../.env
+    expose:
+      - "3000"
+    volumes:
+      # SQLite lives here (DB_PATH=/app/data/db/app.db); mounted below /app/data so the
+      # image's data/passages.json is not hidden by the volume.
+      - reading-data:/app/data/db
+    networks:
+      - proxy_net
+
+volumes:
+  reading-data:
+
+networks:
+  proxy_net:
+    external: true
+    name: dahim_dahim_net

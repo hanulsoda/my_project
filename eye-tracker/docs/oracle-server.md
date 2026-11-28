@@ -28,6 +28,9 @@
 - `dahim-nginx`는 설정 파일 **한 개**(`/opt/dahim/nginx/default.conf` → 컨테이너의 `/etc/nginx/conf.d/default.conf`)만 직접 연결해서 쓴다. 인증서 폴더는 `/opt/dahim/certbot/conf` → `/etc/letsencrypt`, 인증 확인용 폴더는 `/opt/dahim/certbot/www` → `/var/www/certbot`.
 - 설정에 이미 있는 서버 이름은 **`app.dahim.kr`** (80번 블록과 443 블록, 인증서 `/etc/letsencrypt/live/app.dahim.kr/`). 출력은 처음 60줄까지만 확인했으므로 다른 이름이 더 있는지는 확인 안 됨.
 - 서버 호스트의 `/etc/letsencrypt`는 없고 `certbot`이 서버에 설치되어 있지 않다. 인증서는 `/opt/dahim/certbot`을 통해 도커 쪽에서 관리하는 것으로 보이지만, 발급·갱신 방식(`enable_ssl.sh`, compose의 certbot 서비스)은 아직 읽지 않았다.
+- 인증서는 `docker run certbot/certbot certonly --webroot`(웹루트 `/opt/dahim/certbot/www`, 설정 `/opt/dahim/certbot/conf`)로 발급하고, 주간 cron(`certbot renew`)이 갱신한다(`/opt/dahim/enable_ssl.sh` 내용으로 확인). 이메일 `admin@dahim.kr`.
+- **`enable_ssl.sh`를 다시 실행하면 안 된다.** 이 스크립트는 `default.conf`를 처음의 짧은 설정으로 덮어쓰고, 지금 파일에는 그 뒤에 추가된 설정이 있다.
+- 80번 포트의 첫 서버 블록(`app.dahim.kr`)이 인증 확인 경로(`/.well-known/acme-challenge/`)를 `/var/www/certbot`에서 처리하고 나머지는 https로 보낸다. 다른 이름의 80번 요청도 이 블록이 받는다.
 - 사용자가 말한 "메뉴의 부주소"는 이 서버에서 확인된 이름으로는 `app.dahim.kr`일 가능성이 높다(확정 아님).
 
 ### 도메인 관련
@@ -36,8 +39,8 @@
 - 코드 저장소들에서 확인되는 부주소는 `z840.dahim.kr`(음성 합성/인식 호출) 하나뿐입니다. 이것이 Oracle 서버와 연결된 것인지는 확인 안 됨.
 
 ## 2. 확인 안 됨 (추측으로 진행하지 않는다)
-- 인증서 발급·갱신 방식(`/opt/dahim/enable_ssl.sh`, compose의 certbot 서비스 내용을 아직 읽지 않음). `reading.dahim.kr`용 인증서를 같은 방식으로 발급할 수 있는지
-- `default.conf`의 80번 블록에 인증 확인(`/.well-known/acme-challenge/`) 경로가 있는지, 서버 이름이 `app.dahim.kr` 말고 더 있는지(처음 60줄만 확인)
+- `reading.dahim.kr` 인증서가 실제로 발급되는지(DNS 연결 전이라 시도하지 않음)
+- `default.conf`에 서버 이름이 `app.dahim.kr` 말고 더 있는지(처음 60줄만 확인), 80번 블록 앞쪽에 다른 `listen 80` 블록이 있는지
 - 어떤 부주소가 이미 이 서버로 연결되어 있는지(`app.dahim.kr` 외)
 - Oracle 보안 목록(Security List)에 80/443 수신 규칙이 어떻게 되어 있는지 (이미 80/443으로 서비스 중이면 열려 있을 가능성이 크지만 직접 보지 않았음)
 - ARM(aarch64)에서 이 프로그램의 도커 이미지 빌드가 되는지(이 프로젝트는 ARM에서 빌드해 본 적 없음)
@@ -57,8 +60,8 @@
 - Hostinger DNS의 `reading` A 레코드는 아직 연결 여부가 확인되지 않았다. 만들 값은 `reading` → `129.203.151.34`.
 
 ## 5. 다음 단계 (순서)
-1. [사용자] 서버에서 인증서 방식(`enable_ssl.sh`, compose의 certbot 부분)과 `default.conf`의 80/443 블록을 읽기 전용 명령으로 확인해 결과를 알려준다. (nginx 설정 위치는 확인 완료)
-2. [Claude] 그 결과에 맞춰 이 서버용 compose 파일(Caddy 없음, `dahim_dahim_net` 연결), nginx에 추가할 `reading.dahim.kr` 설정, 인증서 방법, 설치·되돌리기 순서를 작성한다. 이 문서를 먼저 갱신한다.
+1. (완료) nginx 설정 위치와 인증서 방식 확인.
+2. (완료) 이 서버용 파일 작성: `deploy/oracle-shared-nginx/`(compose, nginx 블록, 절차 README). 서버에서는 실행해 보지 않음.
 3. [사용자] Hostinger에서 A 레코드 `reading` → `129.203.151.34`를 추가하고, `dig +short reading.dahim.kr`로 확인한다.
 4. [사용자 확인 후 진행] 서버에 코드를 내려받아 컨테이너를 빌드·기동하고, nginx 설정을 추가한다(변경 전 백업).
 5. [사용자] 실제 아이/기기로 정확도 점검 페이지를 돌려 품질 기준(0.6)을 정한다.
