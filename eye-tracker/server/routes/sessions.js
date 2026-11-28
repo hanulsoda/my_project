@@ -8,6 +8,7 @@ const { NOT_FOUND } = require('./children');
 const MAX_WORDS = 2000;
 const MAX_SAMPLES = 100000;
 const UPLOAD_LIMIT = '10mb';
+const MAX_NOTE_LEN = 500;
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const isObj = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -64,11 +65,15 @@ function createSessionsRouters({ db, now }) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     listByChild: db.prepare(
-      'SELECT id, passage_id, kind, started_at, metrics_json FROM read_sessions WHERE child_id = ? ORDER BY started_at, id',
+      'SELECT id, passage_id, kind, started_at, metrics_json, note FROM read_sessions WHERE child_id = ? ORDER BY started_at, id',
     ),
     get: db.prepare(
       `SELECT s.* FROM read_sessions s JOIN children c ON c.id = s.child_id
        WHERE s.id = ? AND c.teacher_id = ?`,
+    ),
+    setNote: db.prepare(
+      `UPDATE read_sessions SET note = ?
+       WHERE id = ? AND child_id IN (SELECT id FROM children WHERE teacher_id = ?)`,
     ),
     updateMetrics: db.prepare(
       `UPDATE read_sessions SET metrics_json = ?
@@ -112,6 +117,7 @@ function createSessionsRouters({ db, now }) {
       kind: r.kind,
       startedAt: r.started_at,
       metrics: applyQualityRule(JSON.parse(r.metrics_json)),
+      note: r.note ?? null,
     })));
   });
 
@@ -131,7 +137,25 @@ function createSessionsRouters({ db, now }) {
       words: JSON.parse(r.words_json),
       samples: JSON.parse(r.samples_json),
       metrics: applyQualityRule(JSON.parse(r.metrics_json)),
+      note: r.note ?? null,
     });
+  });
+
+  // Teacher's private note on one session ("오전, 안경 벗고 읽음"). Only the teacher routes return
+  // it; the public parent report builds its payload from a whitelist that does not include it.
+  sessions.patch('/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    const r = id === null ? undefined : q.get.get(id, req.user.id);
+    if (!r) return res.status(404).json(NOT_FOUND);
+    const body = req.body ?? {};
+    if (!Object.hasOwn(body, 'note')) return res.status(400).json({ error: 'note is required (a string, or null to clear)' });
+    const { note } = body;
+    if (note !== null && (typeof note !== 'string' || note.length > MAX_NOTE_LEN)) {
+      return res.status(400).json({ error: `note must be a string up to ${MAX_NOTE_LEN} chars, or null to clear` });
+    }
+    const value = note === null || note.trim() === '' ? null : note;
+    q.setNote.run(value, r.id, req.user.id);
+    res.json({ id: r.id, note: value });
   });
 
   // Recomputes the metrics of a stored session with the current analysis (e.g. rows stored with the

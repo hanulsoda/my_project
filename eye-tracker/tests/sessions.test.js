@@ -228,7 +228,7 @@ test('reading sessions', async (t) => {
     assert.equal(res.status, 200);
     const list = await res.json();
     assert.deepEqual(list.map((s) => s.id), [first.id, second.id, third.id]);
-    for (const s of list) assert.deepEqual(Object.keys(s).sort(), ['id', 'kind', 'metrics', 'passageId', 'startedAt']);
+    for (const s of list) assert.deepEqual(Object.keys(s).sort(), ['id', 'kind', 'metrics', 'note', 'passageId', 'startedAt']);
     assert.ok(list[0].startedAt < list[1].startedAt && list[1].startedAt < list[2].startedAt);
     assert.equal(list[1].kind, 'new');
     assert.equal(list[0].metrics.lineDwellMs.length, 1);
