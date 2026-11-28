@@ -36,6 +36,12 @@
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="radio" name="kind" value="new"> 새 지문</label>
     </fieldset>
     <label>지문 <select id="passage-select"></select></label>
+    <fieldset id="size-choice" style="border:1px solid var(--line);border-radius:8px;margin:12px 0">
+      <legend>글자 크기</legend>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="radio" name="size" value="fill" checked> 꽉 채우기 (권장)</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="radio" name="size" value="base"> 지문 기본 크기</label>
+    </fieldset>
+    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="practice"> 색으로 보기 (연습): 공 따라가기 뒤 연습 글에서 보고 있는 낱말에 색을 칠해 보여 줍니다. 연습은 기록하지 않습니다.</label>
     <ul class="muted">
       <li>카메라 영상은 이 기기에서만 사용되고 어디로도 보내지 않습니다. 서버에는 시선 좌표와 단어 위치만 저장됩니다.</li>
       <li>아이 얼굴이 화면 가운데에 오도록 앉히고, 측정 중 머리를 크게 움직이지 않게 안내해 주세요.</li>
@@ -73,7 +79,11 @@
 
 <div id="passage-wrap" class="measuring" hidden>
   <div id="passage"></div>
-  <div id="done-bar"><button id="done" type="button">다 읽었어요</button></div>
+  <div id="done-bar">
+    <button id="begin" type="button" hidden>이제 시작</button>
+    <button id="next" type="button" hidden>다음</button>
+    <button id="done" type="button">다 읽었어요</button>
+  </div>
 </div>
 
 <script src="/js/camera-guard.js"></script>
@@ -81,6 +91,8 @@
 <script src="/js/dom.js"></script>
 <script src="/js/api.js"></script>
 <script src="/js/layout.js"></script>
+<script src="/js/fill.js"></script>
+<script src="/js/practice.js"></script>
 <script src="/js/calibrate.js"></script>
 <script src="/js/capture.js"></script>
 <script src="/js/read.js"></script>
