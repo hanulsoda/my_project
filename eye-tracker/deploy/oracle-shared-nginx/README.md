@@ -74,3 +74,22 @@ cd /opt/dahim-reading/src/eye-tracker/deploy/oracle-shared-nginx && docker compo
 - 확인: compose 문법, 추가할 nginx 블록의 문법(`nginx:1.27-alpine`, 임시 인증서). 그리고 컨테이너가 없어도 `nginx -t`가 통과하는 것(이름을 변수로 푸는 방식) — 변수 없이 고정 이름을 쓰면 `host not found in upstream`으로 실패하는 것도 같이 확인함.
 - 확인 안 됨: 서버의 ARM(aarch64)에서의 빌드, 서버의 실제 `default.conf`와의 합쳐짐, 인증서 발급, 실제 카메라 동작.
 - 백업: 기존 `backup_db.sh`는 MariaDB용입니다. 이 프로그램의 SQLite는 도커 볼륨 `dahim-reading_reading-data`에 있고, 별도 백업이 필요합니다(`docs/deploy.md`의 백업 절차 참고).
+
+## 운영 (서버에서 한 번씩 실행)
+
+### 데이터 백업 (매일 04:10)
+이 프로그램의 데이터(아이, 측정 기록, 시선 좌표)는 SQLite 파일 하나입니다. 기존 `backup_db.sh`는 MariaDB만 백업하므로 따로 필요합니다.
+```bash
+mkdir -p /opt/dahim-reading/backups
+(crontab -l 2>/dev/null; echo '10 4 * * * /opt/dahim-reading/src/eye-tracker/deploy/oracle-shared-nginx/backup-reading-db.sh >> /opt/dahim-reading/backups/backup.log 2>&1') | crontab -
+# 지금 한 번 실행해서 확인
+/opt/dahim-reading/src/eye-tracker/deploy/oracle-shared-nginx/backup-reading-db.sh && ls -la /opt/dahim-reading/backups
+```
+SQLite 온라인 백업 방식이라 프로그램이 쓰는 중에도 일관된 복사본이 만들어지고(WAL에 있는 내용 포함, 무결성 검사 `ok`일 때만 저장), 최근 14개만 남깁니다. 복원은 컨테이너를 멈춘 뒤 백업 파일을 `dahim-reading_reading-data` 볼륨의 `app.db`로 복사합니다. **복원 절차는 서버에서 시험해 보지 않았습니다.**
+
+### 인증서 갱신 작업의 reload를 restart로 (월요일 03:00 전에)
+`/opt/dahim/enable_ssl.sh`가 등록한 주간 갱신 작업은 끝에 `nginx -s reload`를 실행합니다. 이 서버에서 reload가 한 번 TLS를 끊은 적이 있어서(원인 미확인), 확인된 방식인 컨테이너 재시작으로 바꿉니다.
+```bash
+/opt/dahim-reading/src/eye-tracker/deploy/oracle-shared-nginx/fix-renewal-cron.sh
+```
+실행하기 전 crontab을 `~/crontab.bak_날짜`에 백업하고, 바뀐 줄을 보여 줍니다. 되돌리려면 `crontab ~/crontab.bak_날짜`.
