@@ -1,0 +1,11 @@
+{
+    "php": "8.3.37",
+    "now": 1800000000,
+    "tokens": {
+        "director": "eyJ2IjoxLCJyb2xlIjoiZGlyZWN0b3IiLCJ1aWQiOiJhZG1pbiIsInNpZCI6IiIsImV4cCI6MTgwMDAwMDMwMCwibiI6ImE3NDhjYTkyOTJjNjhjMTFiNTk2YTQ4ZWM4MzYwZjEyIn0.0eed2ea19154e698b49f2aa70e2c406aec04344f9b46b05ff0fcc130bbb357cc",
+        "teacher": "eyJ2IjoxLCJyb2xlIjoidGVhY2hlciIsInVpZCI6IjEyIiwic2lkIjoiIiwiZXhwIjoxODAwMDAwMzAwLCJuIjoiMGNjMjQzMjAzMGI2OTdmYTFmMTFmMjhiOWU3YTU1ZjgifQ.2b48278ab18b9b605e7eed704aa7f156e2857a5350b440d03d8cf4831360aea5",
+        "teacherStudent": "eyJ2IjoxLCJyb2xlIjoidGVhY2hlciIsInVpZCI6IjEyIiwic2lkIjoiMDEyMyIsImV4cCI6MTgwMDAwMDMwMCwibiI6IjU0ODY5YTgxYmM5ZTRjMDY1ZjQxMmI1YjE3MDY2YjIxIn0.a7f863bc28fc208ce3a15bc0a79741bded15b1287088572300707678f55fbc54",
+        "student": "eyJ2IjoxLCJyb2xlIjoic3R1ZGVudCIsInVpZCI6IjAxMjMiLCJzaWQiOiIwMTIzIiwiZXhwIjoxODAwMDAwMzAwLCJuIjoiNzUxOWNhYzE1NTViYjBjNmY4NjlmNTE5M2QxY2Y1YzkifQ.a01dd6300324b06c15613814b11fe6aaeaa730f9016cb68aa89635923b4fda85"
+    },
+    "url": "https://reading.dahim.kr/sso?t=TOKEN&next=%2Fchildren.html"
+}

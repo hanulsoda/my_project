@@ -139,6 +139,10 @@ test('loadConfig: env parsing', () => {
   assert.equal(loadConfig({ SSO_SECRET: `  ${long}\n` }).ssoSecret, long, 'trimmed like the academy side');
   assert.equal(loadConfig({ SSO_SECRET: 'x'.repeat(31) }).ssoSecret, null, 'too short: SSO off');
   assert.equal(loadConfig({ SSO_SECRET: 'x'.repeat(31) }).ssoSecretTooShort, true);
+  const example = require('node:fs').readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8').match(/^SSO_SECRET=(.*)$/m)[1];
+  assert.ok(example.length >= 32);
+  assert.equal(loadConfig({ SSO_SECRET: example }).ssoSecret, null, 'the .env.example placeholder never turns SSO on');
+  assert.equal(loadConfig({ ALLOW_PASSWORD_LOGIN: require('node:fs').readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8').match(/^ALLOW_PASSWORD_LOGIN=(.*)$/m)[1] }).allowPasswordLogin, false, '.env.example keeps the break-glass off');
   assert.equal(loadConfig({ ACADEMY_URL: 'https://dahim.example/' }).academyUrl, 'https://dahim.example/');
   for (const bad of ['javascript:alert(1)', 'ftp://x', 'not a url', 'https://user:pw@x.example/']) {
     assert.equal(loadConfig({ ACADEMY_URL: bad }).academyUrl, null, bad);

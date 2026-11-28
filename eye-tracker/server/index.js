@@ -12,7 +12,7 @@ async function bootstrap(db, config, env, log = console) {
   if (!config.ssoSecret) {
     log.warn(config.ssoSecretTooShort
       ? 'SSO_SECRET is shorter than 32 characters: academy sign-in is OFF (/sso answers 503)'
-      : 'SSO_SECRET is not set: academy sign-in is OFF (/sso answers 503)');
+      : 'SSO_SECRET is not set (or is still the .env.example placeholder): academy sign-in is OFF (/sso answers 503)');
   }
   if (!config.academyUrl) log.warn('ACADEMY_URL is not set or not an http(s) URL: the "다힘 사이트로" links have nowhere to go');
   if (!config.allowPasswordLogin) return false;
