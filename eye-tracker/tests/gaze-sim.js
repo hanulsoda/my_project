@@ -91,7 +91,50 @@ function expectFor(order, nLines) {
   const hi = Math.max(...order);
   let skippedLines = 0;
   for (let l = 1; l < hi; l++) if (!visited.has(l)) skippedLines++;
-  return { completed: hi === nLines - 1, linesRead: visited.size, skippedLines };
+  let regressions = 0;
+  let frontier = -1;
+  for (const l of order) { if (l < frontier) regressions++; frontier = Math.max(frontier, l); }
+  return { completed: hi === nLines - 1, linesRead: visited.size, skippedLines, regressions };
 }
 
-module.exports = { STEP, makeRng, makeNormal, simLayout, planLines, renderPlan, nullTail, expectFor };
+// Layout with per-line extents: an indented first line and/or a centred short last line.
+function simLayout2({ nLines = 8, perLine = 10, left = 100, width = 1000, top = 200, pitch = 64, indent = 0, centredLast = 0 } = {}) {
+  const ww = width / perLine;
+  const words = [];
+  const ext = [];
+  for (let line = 0; line < nLines; line++) {
+    let n = perLine;
+    let x0 = left;
+    if (line === 0 && indent) { n = perLine - Math.round(indent / ww); x0 = left + (perLine - n) * ww; }
+    if (line === nLines - 1 && centredLast) { n = centredLast; x0 = left + (width - n * ww) / 2; }
+    for (let k = 0; k < n; k++) words.push({ i: words.length, line, x: x0 + k * ww, y: top + line * pitch, w: ww, h: 32 });
+    ext.push([x0, x0 + n * ww]);
+  }
+  return { words, nLines, ww, ext, centre: (l) => top + l * pitch + 16 };
+}
+
+// A more natural reader on a simLayout2: variable fixation durations (durMin..durMax ms), word
+// skips (skip2: share of 2-word steps), optional pauses between lines (no gaze, or a dwell at the
+// line end), gaze samples pinned off-screen now and then (pinnedPerLine), and a vertical error
+// per line (lineErr sd).
+function planNatural(L, order, rng, normal, o = {}) {
+  const { sx = 25, sy = 40, durMin = 80, durMax = 400, skip2 = 0, pauseMs = 0, pauseValid = false, pinnedPerLine = 0, pinY = 5000, lineErr = 0 } = o;
+  const plan = [];
+  const err = Array.from({ length: L.nLines }, () => normal() * lineErr);
+  order.forEach((line, idx) => {
+    const [a, b] = L.ext[line];
+    let x = a + L.ww * 0.5;
+    while (x < b - L.ww * 0.3) {
+      plan.push({ line, x: x + normal() * sx, y: L.centre(line) + err[line] + normal() * sy, ms: durMin + Math.floor(rng() * (durMax - durMin)) });
+      if (rng() < pinnedPerLine / 8) plan.push({ line: -1, x, y: pinY, ms: 200 });
+      x += L.ww * (rng() < skip2 ? 2.2 : 1) * (0.8 + 0.5 * rng());
+    }
+    if (idx < order.length - 1 && pauseMs) {
+      if (pauseValid) plan.push({ line, x: b - 20 + normal() * sx, y: L.centre(line) + normal() * sy, ms: pauseMs });
+      else plan.push({ gap: pauseMs });
+    }
+  });
+  return plan;
+}
+
+module.exports = { STEP, makeRng, makeNormal, simLayout, simLayout2, planLines, planNatural, renderPlan, nullTail, expectFor };

@@ -173,11 +173,16 @@ test('reading sessions', async (t) => {
     assert.ok(d.metrics.lineDwellMs[0] > 0);
   });
 
-  // Gaze found for the whole passage, then lost for three times as long: valid ratio ~0.24.
+  // Gaze found on each word for 250 ms, then lost for 750 ms: short dropouts (under a second,
+  // so not a break) leave a valid ratio of 0.25.
   const lowQualitySamples = () => {
-    const read = readAll(WORDS);
-    const lost = Array.from({ length: 3 * read.length }, (_, k) => ({ t: read.length * STEP + k * STEP, x: null, y: null }));
-    return [...read, ...lost];
+    const samples = [];
+    WORDS.forEach((w, k) => {
+      for (let e = 0; e < 1000; e += STEP) {
+        samples.push(e < 250 ? { t: k * 1000 + e, x: w.x + w.w / 2, y: w.y + w.h / 2 } : { t: k * 1000 + e, x: null, y: null });
+      }
+    });
+    return samples;
   };
 
   await t.test('low-quality session: detail hides line-level arrays but keeps the rest', async () => {

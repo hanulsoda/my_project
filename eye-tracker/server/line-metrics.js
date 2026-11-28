@@ -20,7 +20,7 @@
 const { detectFixations } = require('./metrics');
 
 // Minimum quality for "reliable" (otherwise the session is shown as 참고용). Chosen from synthetic
-// data only (a reader with 40 px vertical noise per fixation scores about 0.65); to be tuned from
+// data only (a reader with 40 px vertical noise per fixation scores about 0.95); to be tuned from
 // real sessions, see docs/accuracy-protocol.md.
 const LINE_RELIABLE_MIN = 0.5;
 
@@ -30,7 +30,7 @@ const GAP_SPLIT_MS = 1000; // no gaze for this long: new pass and new offset seg
 const JUMP_SPLIT_PITCH = 2.5; // two fixations in a row this far (in pitches) from the pass: new pass
 const MAIN_PASS_FIXATIONS = 3; // passes with fewer fixations do not take part in the offset fit
 const TAIL_IGNORE_MS = 500; // a pass opening a new line this close to the end is the gaze going to the "done" button
-const INLIER_PITCH = 0.6; // a fixation within this many pitches of its line centre is an inlier (quality)
+const PASS_INLIER_PITCH = 0.5; // a pass whose height is within this many pitches of its line is an inlier (quality)
 const INSIDE_PITCH = 0.75; // corrected heights within this margin of the first/last line are "inside the text block"
 const OFF_TEXT_X = 0.3; // a fixation further than this share of the text width left/right of the text is off it
 const EDGE_PX = 2; // WebGazer clamps predictions to the viewport: samples this close to an edge are pinned
@@ -437,7 +437,7 @@ function pathCost(passes, layout, model, lines) {
 
 // Best "plain" reading of the main passes: start at line 0, then each pass on the same line
 // (a re-read) or the next one, never skipping or going back, never off the text.
-function decodeMonotone(passes, layout, model) {
+function decodeMonotone(passes, layout, model, endAtLast = false) {
   const L = layout.centres.length;
   let prev = new Float64Array(L).fill(Infinity);
   const from = [];
@@ -457,6 +457,10 @@ function decodeMonotone(passes, layout, model) {
   });
   let l = 0;
   for (let k = 1; k < L; k++) if (prev[k] + (k === L - 1 ? 0 : COST_END_EARLY) < prev[l] + (l === L - 1 ? 0 : COST_END_EARLY)) l = k;
+  if (endAtLast) {
+    if (!isNum(prev[L - 1])) return null; // too few passes to reach the last line without skipping
+    l = L - 1;
+  }
   const lines = new Array(passes.length);
   for (let j = passes.length - 1; j >= 0; j--) {
     lines[j] = l;
@@ -465,37 +469,91 @@ function decodeMonotone(passes, layout, model) {
   return lines;
 }
 
-// Is an unusual reading (a skip, going back, a pass off the text) really supported by the data?
-// Compare the best decoding of the main passes with the best plain reading (decodeMonotone, with
-// its own offset and drift). If the plain reading is nearly as good, the anomaly may just be one
-// noisy or systematically misplaced pass, and the line figures cannot be trusted. Judged under a
-// pessimistic noise floor: real gaze has per-line errors the fixation spread inside one pass does
-// not show. Infinity: nothing unusual to test.
+// Refit offset, drift and the per-segment offset changes for a fixed line sequence; returns the
+// sequence's cost (with or without the offset priors).
+function refitFor(mp, layout, start, lines, span, withPrior) {
+  const scored = (m) => pathCost(mp, layout, m, lines) + (withPrior ? priorCost(m, span, layout.pitch) : 0);
+  let model = { ...start, seg: start.seg ? start.seg.slice() : undefined };
+  let cost = scored(model);
+  for (let it = 0; it < REFINE_ITERATIONS; it++) {
+    let next = theilSen(mp, lines, layout, model, span, true);
+    if (!next) break;
+    if (next.seg) {
+      // each later segment's offset change: median residual of its passes
+      const seg = next.seg.slice();
+      for (let k = 1; k < seg.length; k++) {
+        const rs = [];
+        mp.forEach((p, j) => { if (p.seg === k && lines[j] !== null) rs.push(p.m - layout.centres[lines[j]] - next.b0 - next.b1 * p.tau); });
+        if (rs.length) seg[k] = median(rs);
+      }
+      next = { ...next, seg };
+    }
+    const c = scored(next);
+    if (!(c < cost - 1e-9)) break;
+    model = next; cost = c;
+  }
+  return cost;
+}
+
+// Is an unusual reading really supported by the data? Under a pessimistic noise floor (real gaze
+// has per-line errors the fixation spread inside one pass does not show), the best decoding of
+// the main passes must beat each simpler explanation by ANOMALY_MIN:
+//  - a skip, going back or a pass off the text vs. the best plain reading (start at line 0, each
+//    pass on the same or the next line; decodeMonotone), offset priors included as in the fit;
+//  - a re-read of the same line or an early stop vs. reading one line per pass (when there are no
+//    more main passes than lines) and vs. the best plain reading that reaches the last line. These
+//    are compared on the data alone, without the offset priors: an offset that moves by a pitch or
+//    more (drift up, sitting back after a look-away) is otherwise cheaper to explain as "re-read
+//    line 0, everything one line off, stopped early" than as the offset change it is.
+// Returns the smallest margin; Infinity: nothing unusual to test.
 function anomalySupport(passes, layout, best, span) {
   const mainIdx = passes.map((p, j) => j).filter((j) => passes[j].n >= MAIN_PASS_FIXATIONS);
   if (mainIdx.length < 2) return Infinity;
+  const L = layout.centres.length;
   const bestLines = mainIdx.map((j) => best.dec.lines[j]);
-  const anomalous = bestLines.some((l, k) => {
-    if (l === null) return true;
+  let unusual = false;
+  let repeat = false;
+  bestLines.forEach((l, k) => {
+    if (l === null) { unusual = true; return; }
     const d = l - (k === 0 ? -1 : bestLines[k - 1]);
-    return d < 0 || d > 1 || (k === 0 && l !== 0);
+    if (d < 0 || d > 1 || (k === 0 && l !== 0)) unusual = true;
+    if (d === 0) repeat = true;
   });
-  if (!anomalous) return Infinity;
+  const incomplete = bestLines[bestLines.length - 1] !== L - 1;
+  if (!unusual && !repeat && !incomplete) return Infinity;
   const floor = ANOMALY_SIGMA_PITCH * layout.pitch;
   const mp = mainIdx.map((j) => ({ ...passes[j], sigma: Math.max(passes[j].sigma, floor) }));
-  const bestCost = pathCost(mp, layout, best.model, bestLines) + priorCost(best.model, span, layout.pitch);
-  let model = { ...best.model };
-  let lines = decodeMonotone(mp, layout, model);
-  let cost = pathCost(mp, layout, model, lines) + priorCost(model, span, layout.pitch);
-  for (let it = 0; it < REFINE_ITERATIONS; it++) {
-    const next = theilSen(mp, lines, layout, model, span, true);
-    if (!next) break;
-    const nl = decodeMonotone(mp, layout, next);
-    const c = pathCost(mp, layout, next, nl) + priorCost(next, span, layout.pitch);
-    if (!(c < cost - 1e-9)) break;
-    model = next; lines = nl; cost = c;
+  const same = (lines) => lines.every((l, k) => l === bestLines[k]);
+  let margin = Infinity;
+  if (unusual) {
+    const bestCost = pathCost(mp, layout, best.model, bestLines) + priorCost(best.model, span, layout.pitch);
+    let model = { ...best.model };
+    let lines = decodeMonotone(mp, layout, model);
+    let cost = pathCost(mp, layout, model, lines) + priorCost(model, span, layout.pitch);
+    for (let it = 0; it < REFINE_ITERATIONS; it++) {
+      const next = theilSen(mp, lines, layout, model, span, true);
+      if (!next) break;
+      const nl = decodeMonotone(mp, layout, next);
+      const c = pathCost(mp, layout, next, nl) + priorCost(next, span, layout.pitch);
+      if (!(c < cost - 1e-9)) break;
+      model = next; lines = nl; cost = c;
+    }
+    margin = Math.min(margin, cost - bestCost);
   }
-  return cost - bestCost;
+  if (repeat || incomplete) {
+    const bestData = refitFor(mp, layout, best.model, bestLines, span, false);
+    const alts = [];
+    if (mp.length <= L) alts.push(mp.map((p, k) => k));
+    if (incomplete) {
+      const done = decodeMonotone(mp, layout, best.model, true);
+      if (done) alts.push(done);
+    }
+    for (const lines of alts) {
+      if (same(lines)) continue;
+      margin = Math.min(margin, refitFor(mp, layout, best.model, lines, span, false) - bestData);
+    }
+  }
+  return margin;
 }
 
 // Theil-Sen fit of (pass height - assigned line centre - segment change) against time, over the
@@ -666,8 +724,12 @@ function sweepLooksLikeReading(counted, fixations, layout) {
 
 // Every reason this session's line assignment may be wrong (empty: reliable).
 function reliabilityIssues(ctx) {
-  const { metrics, edgeShare, gap, anomaly, counted, fixations, layout, offTextShare, model, screen, passes } = ctx;
+  const { metrics, edgeShare, gap, anomaly, counted, fixations, layout, offTextShare, model, screen, passes, deepest } = ctx;
   const issues = [];
+  // Going back two or more lines (or twice) and then not finishing is also what a sudden posture
+  // change (gaze offset jumping up by a few lines without a gaze gap) looks like; the two cannot
+  // be told apart, so the line figures are not offered.
+  if ((deepest >= 2 || metrics.regressions >= 2) && !metrics.completed) issues.push('regressions-incomplete');
   // Lines whose gaze would land at or past a screen edge cannot be observed (WebGazer pins or
   // drops those estimates), so whether they were read is unknown.
   const margin = EDGE_LINE_PITCH * layout.pitch;
@@ -726,7 +788,22 @@ function computeLineMetrics(samples, words, screen, opts = {}) {
     const edge = s.x <= EDGE_PX || s.x >= screen.w - EDGE_PX || s.y <= EDGE_PX || s.y >= screen.h - EDGE_PX;
     if (edge) { edgeCount++; cleaned.push({ t: s.t, x: null, y: null }); } else cleaned.push({ t: s.t, x: s.x, y: s.y });
   }
-  const validRatio = validCount / list.length;
+  // Lost gaze for GAP_SPLIT_MS or longer is a break (looked away, sat back), not bad tracking:
+  // those samples leave the validity ratio. Short dropouts still count against it.
+  let breakSamples = 0;
+  {
+    let runStart = -1;
+    const lost = (s) => s && typeof s === 'object' && isNum(s.t) && !(isNum(s.x) && isNum(s.y));
+    for (let k = 0; k <= list.length; k++) {
+      if (k < list.length && lost(list[k])) { if (runStart < 0) runStart = k; continue; }
+      if (runStart >= 0) {
+        const tEnd = k < list.length && list[k] && isNum(list[k].t) ? list[k].t : list[k - 1].t;
+        if (tEnd - list[runStart].t >= GAP_SPLIT_MS) breakSamples += k - runStart;
+        runStart = -1;
+      }
+    }
+  }
+  const validRatio = list.length > breakSamples ? validCount / (list.length - breakSamples) : 0;
   const edgeShare = validCount > 0 ? edgeCount / validCount : 0;
   const fixations = detectFixations(cleaned);
   if (fixations.length < MIN_FIXATIONS) return withDebug(metrics, opts);
@@ -782,11 +859,18 @@ function computeLineMetrics(samples, words, screen, opts = {}) {
     }
   });
 
+  // Inliers at pass level: webcam noise per fixation is about a pitch, but a pass (the line read)
+  // is placed by the height of all its fixations; a pass within PASS_INLIER_PITCH of its line
+  // counts with all its fixations that are on the text.
   let inliers = 0;
   let offText = 0;
-  fixations.forEach((f, k) => {
-    if (fixLine[k] === null) { offText++; return; }
-    if (Math.abs(yCorr[k] - layout.centres[fixLine[k]]) <= INLIER_PITCH * pitch) inliers++;
+  const passFits = passes.map((q) => q.line !== null
+    && Math.abs(corrected(model, q) - layout.centres[q.line]) <= PASS_INLIER_PITCH * pitch);
+  passes.forEach((q, j) => {
+    for (const k of q.fix) {
+      if (fixLine[k] === null) offText++;
+      else if (passFits[j]) inliers++;
+    }
   });
   metrics.quality = Math.min(1, Math.max(0, finite(validRatio * (inliers / fixations.length))));
   metrics.driftPx = finite(model.b0);
@@ -796,6 +880,7 @@ function computeLineMetrics(samples, words, screen, opts = {}) {
   const lastLine = layout.lines[L - 1];
   const onLastLineX = (q) => q.fix.every((k) => fixations[k].x <= lastLine.right + 0.1 * layout.width);
   let frontier = -1;
+  let deepest = 0; // largest step back below the frontier, in lines
   const counted = [];
   for (const q of passes) {
     if (q.line === null) continue;
@@ -804,7 +889,7 @@ function computeLineMetrics(samples, words, screen, opts = {}) {
       // heading for the button; a short last line read at the very end still counts
       if (!(q.line === L - 1 && q.line === frontier + 1 && onLastLineX(q))) continue;
     }
-    if (q.line < frontier) metrics.regressions++;
+    if (q.line < frontier) { metrics.regressions++; deepest = Math.max(deepest, frontier - q.line); }
     frontier = Math.max(frontier, q.line);
     counted.push(q);
     q.counted = true;
@@ -849,7 +934,7 @@ function computeLineMetrics(samples, words, screen, opts = {}) {
     metrics.longDwellLines = longDwell(metrics.lineDwellMs, layout);
   }
   const issues = reliabilityIssues({
-    metrics, edgeShare, gap: fit.gap, anomaly, counted, fixations, layout, offTextShare: offText / fixations.length, model, screen, passes,
+    metrics, edgeShare, gap: fit.gap, anomaly, counted, fixations, layout, offTextShare: offText / fixations.length, model, screen, passes, deepest,
   });
   metrics.reliable = issues.length === 0;
 
