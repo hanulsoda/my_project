@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const { applyQualityRule } = require('../metrics');
-const { computeLineMetrics } = require('../line-metrics');
+const { computeLineMetrics, MAX_PAGE } = require('../line-metrics');
 const { getPassage } = require('../passages');
 const { NOT_FOUND } = require('./children');
 
@@ -12,9 +12,13 @@ const MAX_NOTE_LEN = 500;
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const isObj = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isPage = (v) => Number.isInteger(v) && v >= 0 && v <= MAX_PAGE;
 const parseId = (raw) => (/^\d{1,15}$/.test(raw) ? Number(raw) : null);
 
 // Returns {error} for a malformed upload, else the normalised values (only known fields are kept).
+// A passage shown as pages sends `page` (0..MAX_PAGE, default 0) on words and samples: words in
+// page order, every line of a later page after the lines of earlier pages, samples only on pages
+// that have words. `page` is stored only when it was sent.
 function validateUpload(body) {
   if (!isObj(body)) return { error: 'body must be a JSON object' };
   const { passageId, screen, words, samples } = body;
@@ -29,14 +33,28 @@ function validateUpload(body) {
     return { error: `words must be a non-empty array of at most ${MAX_WORDS}` };
   }
   const cleanWords = [];
+  let lastPage = 0;
+  let maxLineBefore = -Infinity; // largest line id on the pages before the current one
+  let maxLineHere = -Infinity;
   for (let k = 0; k < words.length; k++) {
     const w = words[k];
     if (!isObj(w) || !['i', 'line', 'x', 'y', 'w', 'h'].every((f) => isNum(w[f]))) {
       return { error: `words[${k}] must have finite numeric i, line, x, y, w, h` };
     }
     if (w.i !== k) return { error: `words[${k}].i must equal ${k}` };
-    cleanWords.push({ i: w.i, line: w.line, x: w.x, y: w.y, w: w.w, h: w.h });
+    const clean = { i: w.i, line: w.line, x: w.x, y: w.y, w: w.w, h: w.h };
+    if (w.page !== undefined) {
+      if (!isPage(w.page)) return { error: `words[${k}].page must be an integer 0..${MAX_PAGE}` };
+      clean.page = w.page;
+    }
+    const page = clean.page ?? 0;
+    if (page < lastPage) return { error: `words[${k}].page must not go back to an earlier page` };
+    if (page > lastPage) { maxLineBefore = Math.max(maxLineBefore, maxLineHere); maxLineHere = -Infinity; lastPage = page; }
+    if (w.line <= maxLineBefore) return { error: `words[${k}].line must come after the lines of earlier pages (page ${page})` };
+    maxLineHere = Math.max(maxLineHere, w.line);
+    cleanWords.push(clean);
   }
+  const wordPages = new Set(cleanWords.map((w) => w.page ?? 0));
 
   if (!Array.isArray(samples)) return { error: 'samples must be an array' };
   if (samples.length > MAX_SAMPLES) return { status: 413, error: `at most ${MAX_SAMPLES} samples` };
@@ -47,7 +65,13 @@ function validateUpload(body) {
     if (!isObj(s) || !isNum(s.t) || !coord(s.x) || !coord(s.y)) {
       return { error: `samples[${k}] must be {t: number, x: number|null, y: number|null}` };
     }
-    cleanSamples.push({ t: s.t, x: s.x, y: s.y });
+    const clean = { t: s.t, x: s.x, y: s.y };
+    if (s.page !== undefined) {
+      if (!isPage(s.page)) return { error: `samples[${k}].page must be an integer 0..${MAX_PAGE}` };
+      if (!wordPages.has(s.page)) return { error: `samples[${k}].page ${s.page} has no words` };
+      clean.page = s.page;
+    }
+    cleanSamples.push(clean);
   }
   cleanSamples.sort((a, b) => a.t - b.t);
 

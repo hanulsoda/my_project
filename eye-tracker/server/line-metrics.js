@@ -765,7 +765,7 @@ function reliabilityIssues(ctx) {
   return issues;
 }
 
-function computeLineMetrics(samples, words, screen, opts = {}) {
+function computeOnePage(samples, words, screen, opts = {}) {
   const layout = buildLayout(words);
   const L = layout ? layout.lines.length : 0;
   const metrics = emptyLineMetrics(L);
@@ -967,4 +967,90 @@ function withDebug(metrics, opts, extra) {
   return metrics;
 }
 
-module.exports = { computeLineMetrics, LINE_RELIABLE_MIN };
+// ---- multi-page passages -------------------------------------------------------------------
+// A passage too long for one screen is shown as pages. Word boxes carry `page` (0-based) with
+// page-local y and `line` ids that continue across pages; gaze samples carry the page the child
+// was on. Each page is analysed on its own (its own drift fit: the offset can change while the
+// page turns) and the figures are combined in reading order (page, then line). Words without a
+// valid page belong to page 0; a session whose words are all on page 0 takes the single-page
+// path unchanged.
+const MAX_PAGE = 50;
+const pageOf = (o) => (o && Number.isInteger(o.page) && o.page >= 0 && o.page <= MAX_PAGE ? o.page : 0);
+
+function computeLineMetrics(samples, words, screen, opts = {}) {
+  const pages = new Map();
+  if (Array.isArray(words)) {
+    for (const w of words) {
+      const p = pageOf(w);
+      if (!pages.has(p)) pages.set(p, { words: [], samples: [] });
+      pages.get(p).words.push(w);
+    }
+  }
+  if (pages.size <= 1) return computeOnePage(samples, words, screen, opts);
+  if (Array.isArray(samples)) {
+    for (const s of samples) {
+      const pg = pages.get(pageOf(s));
+      if (pg) pg.samples.push(s);
+    }
+  }
+  return combinePages([...pages.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]), words, screen, opts);
+}
+
+function combinePages(pages, words, screen, opts) {
+  const layout = buildLayout(words);
+  const L = layout ? layout.lines.length : 0;
+  const metrics = emptyLineMetrics(L);
+  if (!layout) return withDebug(metrics, opts);
+  // global layout index of every line id
+  const ids = [...new Set(words.filter((w) => w && isNum(w.line) && [w.x, w.y, w.w, w.h].every(sane)).map((w) => w.line))]
+    .sort((a, b) => a - b);
+  const indexOfId = new Map(ids.map((id, k) => [id, k]));
+  const per = pages.map((pg) => {
+    const m = computeOnePage(pg.samples, pg.words, screen, opts);
+    const pageIds = [...new Set(pg.words.filter((w) => w && isNum(w.line) && [w.x, w.y, w.w, w.h].every(sane)).map((w) => w.line))]
+      .sort((a, b) => a - b);
+    return { m, n: pg.samples.length, toGlobal: pageIds.map((id) => indexOfId.get(id)) };
+  });
+
+  let weight = 0;
+  let quality = 0;
+  let drift = 0;
+  for (const { m, n, toGlobal } of per) {
+    m.lineDwellMs.forEach((d, l) => { if (toGlobal[l] !== undefined) metrics.lineDwellMs[toGlobal[l]] += d; });
+    metrics.wordsRead += m.wordsRead;
+    metrics.durationSec += m.durationSec;
+    metrics.regressions += m.regressions;
+    metrics.skippedLines += m.skippedLines;
+    metrics.linesRead += m.linesRead;
+    quality += m.quality * n;
+    drift += m.driftPx * n;
+    weight += n;
+  }
+  metrics.completed = per.every((e) => e.m.completed);
+  metrics.reliable = per.every((e) => e.m.reliable);
+  metrics.quality = weight > 0 ? Math.min(1, Math.max(0, finite(quality / weight))) : 0;
+  metrics.driftPx = weight > 0 ? finite(drift / weight) : 0;
+  metrics.durationSec = finite(metrics.durationSec);
+  metrics.wpm = metrics.durationSec > 0 ? finite((metrics.wordsRead / metrics.durationSec) * 60) : 0;
+  metrics.lineDwellMs = metrics.lineDwellMs.map(finite);
+  metrics.longDwellLines = longDwell(metrics.lineDwellMs, layout);
+  if (opts && opts.debug) {
+    let passBase = 0;
+    const fixations = [];
+    const passes = [];
+    const issues = [];
+    for (const { m, toGlobal } of per) {
+      const d = m.debug;
+      for (const f of d.fixations) {
+        fixations.push({ ...f, line: f.line === null ? null : toGlobal[f.line], pass: f.pass === undefined ? f.pass : f.pass + passBase });
+      }
+      for (const q of d.passes) passes.push({ ...q, line: q.line === null ? null : toGlobal[q.line] });
+      passBase += d.passes.length;
+      for (const i of d.issues) if (!issues.includes(i)) issues.push(i);
+    }
+    metrics.debug = { issues, fixations, passes, pages: per.map((e) => e.m.debug) };
+  }
+  return metrics;
+}
+
+module.exports = { computeLineMetrics, LINE_RELIABLE_MIN, MAX_PAGE };

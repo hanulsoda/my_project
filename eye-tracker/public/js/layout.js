@@ -73,7 +73,23 @@
     return { ok: false, fontPx: floor };
   }
 
-  const exported = { groupLines, layoutPassage, fitFontPx, MIN_FONT_PX };
+  // DOM: a `measure(fontPx, lineHeight)` for fill.js planFill. Lays `text` out once in `el` and
+  // re-reads the word boxes at each size: x in viewport coordinates, y relative to el's top.
+  function makeMeasure(el, text) {
+    layoutPassage(el, text);
+    const spans = [...el.querySelectorAll('span.w')];
+    return (fontPx, lineHeight) => {
+      el.style.fontSize = `${fontPx}px`;
+      el.style.lineHeight = String(lineHeight);
+      const top = el.getBoundingClientRect().top;
+      return groupLines(spans.map((span) => {
+        const r = span.getBoundingClientRect();
+        return { x: r.left, y: r.top - top, w: r.width, h: r.height };
+      }));
+    };
+  }
+
+  const exported = { groupLines, layoutPassage, fitFontPx, makeMeasure, MIN_FONT_PX };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) root.ReadingApp = Object.assign(root.ReadingApp || {}, exported);
 })(typeof window !== 'undefined' ? window : undefined);
