@@ -76,6 +76,10 @@ test('startPractice: face lost for >= 400 ms clears the highlight; a short blink
   assert.ok(!set.has(HIT_CLASS), '430 ms without gaze: cleared');
   clock = 800; listener({ x: 50, y: 20 });
   assert.ok(set.has(HIT_CLASS), 'lights again when the face is back (smoother was reset)');
+  for (let k = 0; k < 11; k++) listener(null);
+  assert.ok(set.has(HIT_CLASS), '11 empty predictions at once: not yet');
+  listener(null);
+  assert.ok(!set.has(HIT_CLASS), '12 empty predictions in a row (~400 ms at 30/s): cleared');
 });
 
 test('paged capture tags every sample with the page shown; unpaged stays {t,x,y}', () => {

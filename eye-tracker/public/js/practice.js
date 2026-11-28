@@ -6,6 +6,7 @@
 (function (root) {
   const SMOOTH_N = 5;
   const LOST_MS = 400;
+  const LOST_SAMPLES = 12; // ~400 ms of WebGazer predictions at ~30 per second
   const HIT_CLASS = 'gaze-hit';
 
   // Moving average of the last n valid points. push({x,y}) -> {x,y} or null (no valid point yet).
@@ -43,12 +44,14 @@
 
   // DOM: spans are the word <span>s laid out by layoutPassage, boxes their boxes (same order).
   // Returns {stop()}, which detaches the listener and clears the highlight.
-  // When the face is lost (no valid gaze for lostMs) the highlight clears instead of freezing.
+  // When the face is lost (no valid gaze for lostMs, or LOST_SAMPLES empty predictions in a row)
+  // the highlight clears instead of freezing on the last word.
   function startPractice(webgazer, spans, boxes, { maxDist = Infinity, lostMs = LOST_MS, now = () => performance.now() } = {}) {
     const smooth = createSmoother();
     let lit = -1;
     let open = true;
     let lastValid = now();
+    let missing = 0;
     const light = (k) => {
       if (k === lit) return;
       if (lit >= 0 && spans[lit]) spans[lit].classList.remove(HIT_CLASS);
@@ -59,9 +62,11 @@
       if (!open) return;
       const valid = data && Number.isFinite(data.x) && Number.isFinite(data.y);
       if (!valid) {
-        if (now() - lastValid >= lostMs) { smooth.reset(); light(-1); }
+        missing++;
+        if (now() - lastValid >= lostMs || missing >= LOST_SAMPLES) { smooth.reset(); light(-1); }
         return;
       }
+      missing = 0;
       lastValid = now();
       const p = smooth.push(data);
       light(p ? nearestWord(boxes, p.x, p.y, maxDist) : -1);
