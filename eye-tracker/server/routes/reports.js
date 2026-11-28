@@ -125,7 +125,7 @@ function createReportsRouters({ db, now }) {
     if (r.revoked_at !== null || now() >= r.expires_at) return res.status(410).json({ error: 'gone' });
     // Built field by field: nothing outside this whitelist (ids, teacher, samples, words) can leak.
     res.json({
-      child: { code: r.code, initials: r.initials, gradeBand: r.grade_band },
+      child: { initials: r.initials, gradeBand: r.grade_band },
       session: { startedAt: r.started_at, metrics: applyQualityRule(JSON.parse(r.metrics_json)) },
       trend: trendFor(r.child_id),
       disclaimer: DISCLAIMER,

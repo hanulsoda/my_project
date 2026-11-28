@@ -38,7 +38,7 @@
     const m = data.session.metrics;
     const startedAt = data.session.startedAt;
     const date = new Date(startedAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
-    $('who').textContent = `${data.child.initials} (${data.child.code}) · ${GRADE[data.child.gradeBand] || ''} · ${date} 측정`;
+    $('who').textContent = `${data.child.initials} · ${GRADE[data.child.gradeBand] || ''} · ${date} 측정`;
     $('disclaimer').textContent = data.disclaimer;
 
     // reportDisplay decides what may be shown: reference-only (reliable === false) sessions get

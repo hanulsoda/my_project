@@ -168,7 +168,7 @@ test('children: group, note and partial updates', async (t) => {
     ).run(c.id).lastInsertRowid;
     const share = await (await call(srv, 'POST', `/api/sessions/${sid}/share`, cookieA, {})).json();
     const text = await (await fetch(`${srv.url}/api/report/${share.token}`)).text();
-    assert.ok(text.includes('RPT-1'), 'the report works');
+    assert.ok(text.includes('"initials"'), 'the report works');
     assert.doesNotMatch(text, /SECRET-CHILD-NOTE|SECRET-GROUP/);
   });
 });

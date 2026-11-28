@@ -136,3 +136,6 @@ label.select-field select {
 #practice-note { display: none; order: -1; flex: 1 1 auto; margin: 0; font-size: 16px; line-height: 1.45; color: var(--text-muted); }
 #practice-note strong { display: block; color: var(--info); }
 #begin:not([hidden]) ~ #practice-note { display: block; }
+
+/* Students (signed in from the academy site) have no child list to go back to. */
+[data-role="student"] .teacher-only { display: none !important; }

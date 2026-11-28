@@ -41,6 +41,7 @@
     } catch (err) {
       if (err.status !== 403 || err.message !== 'student_session') throw err;
       const me = await request('GET', '/api/me', undefined, opts);
+      if (me && me.role === 'student' && typeof document !== 'undefined') document.documentElement.dataset.role = 'student';
       return me && me.role === 'student' && me.child ? [me.child] : [];
     }
   }

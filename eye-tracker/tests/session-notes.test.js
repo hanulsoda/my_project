@@ -87,7 +87,7 @@ test('session notes', async (t) => {
     const res = await fetch(`${srv.url}/api/report/${share.token}`);
     assert.equal(res.status, 200);
     const text = await res.text();
-    assert.ok(text.includes('N-1'), 'the report itself works');
+    assert.ok(text.includes('"initials"'), 'the report itself works');
     assert.doesNotMatch(text, /SECRET-SESSION-NOTE|"note"/);
   });
 

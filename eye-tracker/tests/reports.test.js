@@ -163,7 +163,7 @@ test('trend, share links, parent report', async (t) => {
     const text = await res.text();
     const body = JSON.parse(text);
     assert.equal(body.disclaimer, DISCLAIMER);
-    assert.deepEqual(body.child, { code: 'R-1', initials: 'KJ', gradeBand: 'elementary' });
+    assert.deepEqual(body.child, { initials: 'KJ', gradeBand: 'elementary' });
     assert.equal(body.session.startedAt, srv.db.prepare('SELECT started_at FROM read_sessions WHERE id = ?').get(ref2).started_at);
     assert.equal(body.session.metrics.wordsRead, 5);
     assert.equal(body.trend.length, 3);
