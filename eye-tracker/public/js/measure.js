@@ -25,14 +25,12 @@
   }
 
   function stopCamera() {
-    if (!cameraOn) return;
+    const wasOn = cameraOn;
     cameraOn = false;
-    try { window.webgazer.end(); } catch { /* already stopped */ }
-    for (const v of document.querySelectorAll('video')) {
-      const stream = v.srcObject;
-      if (stream && stream.getTracks) stream.getTracks().forEach((t) => t.stop());
-      v.srcObject = null;
-    }
+    if (wasOn) { try { window.webgazer.end(); } catch { /* already stopped */ } }
+    // Always release, even when the start failed: WebGazer can hold a stream it never attached
+    // to a <video>, which would leave the camera light on.
+    window.ReadingApp.releaseCamera(document);
   }
   window.addEventListener('pagehide', stopCamera);
 
@@ -49,9 +47,7 @@
       await wg.begin();
     } catch (err) {
       stopCamera();
-      throw new Error(err && err.name === 'NotAllowedError'
-        ? '카메라 사용이 허용되지 않았습니다. 주소창의 카메라 아이콘에서 허용해 주세요.'
-        : '카메라를 시작하지 못했습니다. 다른 앱이 카메라를 쓰고 있지 않은지 확인해 주세요.');
+      throw new Error(window.ReadingApp.cameraErrorMessage(err));
     }
     wg.showVideoPreview(true).showPredictionPoints(false);
   }
