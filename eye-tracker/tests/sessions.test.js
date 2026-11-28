@@ -244,9 +244,9 @@ test('reading sessions', async (t) => {
     assert.deepEqual(list.map((s) => s.id), [b.id, a.id]);
   });
 
-  await t.test('another teacher (and admin) get 404 everywhere, with one shared body', async () => {
+  await t.test('another teacher gets 404 everywhere, with one shared body (the director sees all: sso-visibility.test.js)', async () => {
     const bodies = [];
-    for (const cookie of [cookieB, adminCookie]) {
+    for (const cookie of [cookieB]) {
       const attempts = [
         upload(cookie, child, payload()),
         call(srv, 'GET', `/api/children/${child}/sessions`, cookie),
@@ -323,12 +323,12 @@ test('reading sessions', async (t) => {
     assert.equal(JSON.parse(storedMetrics(id)).lineDwellMs.length, 1);
   });
 
-  await t.test('reanalyze: login required; foreign teacher, admin, unknown and bad ids get the shared 404; row unchanged', async () => {
+  await t.test('reanalyze: login required; foreign teacher, unknown and bad ids get the shared 404; row unchanged', async () => {
     const { id } = await (await upload(cookieA, child, payload())).json();
     srv.db.prepare('UPDATE read_sessions SET metrics_json = ? WHERE id = ?').run('{"marker":1}', id);
     assert.equal((await reanalyze(null, id)).status, 401);
     const notFound = await (await call(srv, 'GET', '/api/sessions/999999', cookieA)).json();
-    for (const [cookie, target] of [[cookieB, id], [adminCookie, id], [cookieA, 999999], [cookieA, 'abc']]) {
+    for (const [cookie, target] of [[cookieB, id], [adminCookie, 999999], [cookieA, 999999], [cookieA, 'abc']]) {
       const res = await reanalyze(cookie, target);
       assert.equal(res.status, 404);
       assert.deepEqual(await res.json(), notFound);

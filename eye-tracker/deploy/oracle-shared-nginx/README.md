@@ -26,8 +26,13 @@ sudo mkdir -p /opt/dahim-reading && sudo chown ubuntu:ubuntu /opt/dahim-reading
 git clone --branch ccr-d047b660-c42kqg --depth 1 https://github.com/hanulsoda/my_project.git /opt/dahim-reading/src
 cd /opt/dahim-reading/src/eye-tracker
 cp .env.example .env && chmod 600 .env
-nano .env     # ADMIN_EMAIL, ADMIN_PASSWORD 수정. 비밀번호는 작은따옴표로 감싸고 $ # " 는 피하세요.
+nano .env     # 아래 값들을 수정. 값은 작은따옴표로 감싸고 $ # " 는 피하세요.
 ```
+`.env`에 넣는 값 (자세한 설명은 `docs/sso.md`):
+- `SSO_SECRET`: 다힘 사이트의 `DAHIM_READING_SECRET`과 **똑같은 값**(32자 이상, 예: `openssl rand -hex 32`). 없거나 짧거나 `change-me...` 그대로면 다힘에서 들어오기(`/sso`)가 꺼집니다.
+- `ACADEMY_URL`: 다힘 사이트 주소(예: `https://dahim.kr/`). "다힘 사이트로 가기" 버튼과 로그아웃이 이리로 갑니다.
+- `ALLOW_PASSWORD_LOGIN`: 평소 `0`. 비상시에만 `1`(예전 비밀번호 로그인·초대·재설정이 다시 열림). 끝나면 다시 `0`.
+- `ADMIN_EMAIL`, `ADMIN_PASSWORD`: `ALLOW_PASSWORD_LOGIN=1`일 때, 사용자가 한 명도 없을 때만 첫 관리자를 만듭니다.
 
 ## 2. 컨테이너 빌드와 기동 (아직 nginx는 건드리지 않음)
 ```bash

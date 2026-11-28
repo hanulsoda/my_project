@@ -162,14 +162,14 @@ test('static serving', async (t) => {
   t.after(srv.close);
 
   await t.test('pages and vendored WebGazer are served', async () => {
-    for (const p of ['/read.html', '/children.html', '/report.html', '/invite.html', '/index.html', '/vendor/webgazer.js', '/css/app.css', '/js/layout.js']) {
+    for (const p of ['/read.html', '/children.html', '/report.html', '/invite.html', '/login.html', '/index.html', '/vendor/webgazer.js', '/css/app.css', '/js/layout.js']) {
       const res = await fetch(srv.url + p);
       assert.equal(res.status, 200, p);
       await res.arrayBuffer();
     }
     const root = await fetch(srv.url + '/');
     assert.equal(root.status, 200);
-    assert.match(await root.text(), /<form/);
+    assert.match(await root.text(), /href="\/academy"/, 'the front page sends people to the academy site');
   });
 
   await t.test('face-mesh assets resolve under /vendor/mediapipe', async () => {
@@ -218,7 +218,7 @@ test('GET /api/me', async (t) => {
     assert.equal(res.status, 401);
   });
 
-  await t.test('returns email and role only', async () => {
+  await t.test('returns email, role and the password-login flag only', async () => {
     for (const role of ['teacher', 'admin']) {
       const cookie = await srv.loginAs(role);
       const res = await fetch(srv.url + '/api/me', { headers: { cookie } });
@@ -226,7 +226,9 @@ test('GET /api/me', async (t) => {
       const body = await res.json();
       assert.equal(body.role, role);
       assert.match(body.email, new RegExp(`^${role}-\\d+@example\\.test$`));
-      assert.deepEqual(Object.keys(body).sort(), ['email', 'role']);
+      assert.deepEqual(Object.keys(body).sort(), ['email', 'launchStudentId', 'passwordLogin', 'role']);
+      assert.equal(body.launchStudentId, null, 'no academy launch for a password login');
+      assert.equal(body.passwordLogin, true, 'the test harness turns the break-glass flag on');
     }
   });
 });

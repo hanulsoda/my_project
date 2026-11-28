@@ -32,8 +32,21 @@
     return data;
   }
 
+  // A student signed in from the academy site may not list children (the server answers 403
+  // "student_session"). The reading page asks for the list only to find its own child, which
+  // /api/me carries for a student, so that one call is answered from there.
+  async function getChildren(opts) {
+    try {
+      return await request('GET', '/api/children', undefined, opts);
+    } catch (err) {
+      if (err.status !== 403 || err.message !== 'student_session') throw err;
+      const me = await request('GET', '/api/me', undefined, opts);
+      return me && me.role === 'student' && me.child ? [me.child] : [];
+    }
+  }
+
   const api = {
-    get: (path, opts) => request('GET', path, undefined, opts),
+    get: (path, opts) => (path === '/api/children' ? getChildren(opts) : request('GET', path, undefined, opts)),
     post: (path, body, opts) => request('POST', path, body ?? {}, opts),
     patch: (path, body, opts) => request('PATCH', path, body, opts),
     del: (path, opts) => request('DELETE', path, undefined, opts),

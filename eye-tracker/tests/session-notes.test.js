@@ -68,9 +68,9 @@ test('session notes', async (t) => {
     assert.equal(noteOf(), stored);
   });
 
-  await t.test('tenancy: another teacher, admin, unknown and non-numeric ids get the shared 404 and change nothing', async () => {
+  await t.test('tenancy: another teacher, unknown and non-numeric ids get the shared 404 and change nothing', async () => {
     await patch(cookieA, { note: 'mine' });
-    for (const [cookie, id] of [[cookieB, sid], [adminCookie, sid], [cookieA, 999999], [cookieA, 'abc']]) {
+    for (const [cookie, id] of [[cookieB, sid], [adminCookie, 999999], [cookieA, 999999], [cookieA, 'abc']]) {
       const res = await patch(cookie, { note: 'hijack' }, id);
       assert.equal(res.status, 404);
       assert.equal(await res.text(), NOT_FOUND_BODY);
