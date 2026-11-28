@@ -72,3 +72,12 @@
 ## 6. 하지 않는 것
 - 확인하지 않은 값을 사실처럼 쓰지 않는다.
 - 운영 중인 컨테이너(`dahim-*`)를 중지·재시작·삭제하지 않는다. nginx 설정을 다시 읽게 하는 일(reload)은 설정 검사(`nginx -t`) 통과 뒤에 사용자 확인을 받고 한다.
+
+## 7. 진행 기록 (2026-11-28, 서버 시각 기준)
+- 11:34 `/opt/dahim-reading/src`에 코드 받기, `.env` 생성(권한 600).
+- `docker compose up -d --build`: 처음에는 `data/passages.json` 누락으로 실패(저장소의 `data/` 무시 규칙 때문). 파일을 추가해 다시 빌드해 성공. ARM에서 빌드 통과. 컨테이너 `dahim-reading` healthy, 첫 관리자 계정 생성됨, nginx 컨테이너에서 `http://dahim-reading:3000/api/me` → 401 확인.
+- 인증서 `reading.dahim.kr` 발급 성공(만료 2027-02-26). 기존 주간 갱신 cron(`certbot renew`) 등록 확인.
+- `/opt/dahim/nginx/default.conf` 백업(`default.conf.bak_20261128_1140`) → `reading.nginx.conf` 덧붙임 → `nginx -t` 성공 → reload.
+- **장애:** reload 직후 https가 전부 TLS 협상 중에 끊김. `app.dahim.kr` 포함. 출석 화면(Edge 브라우저)의 5초 주기 요청이 02:41:24에 멈춰 02:44:19에 재개됨(약 3분). 백업으로 되돌려 `nginx -t` 후 reload하자 즉시 복구(TLSv1.3, 인증서 `CN = app.dahim.kr`, 요청 재개).
+- 지금 상태: **`default.conf`는 백업과 같은 원래 내용.** `dahim-reading` 컨테이너와 인증서는 남아 있고, 외부에서는 `reading.dahim.kr`로 접속되지 않음.
+- 원인: **미확인.** 추측으로 다시 적용하지 않는다. 별도 시험 컨테이너(loopback 8443, 운영과 같은 `nginx.conf`·마운트)에서 재현해 확인한 뒤에만 운영에 다시 적용한다.

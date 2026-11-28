@@ -3,6 +3,10 @@
 이 폴더는 서버에 **이미 nginx가 80/443을 쓰고 있을 때** 쓰는 방식입니다. `docs/deploy.md`의 Caddy 구성은 독립 서버용이라 이 서버에는 쓰지 않습니다.
 서버에서 확인된 사실은 `docs/oracle-server.md`를 보세요. 아래 절차는 그 문서와 같은 전제를 씁니다.
 
+> **경고 (2026-11-28): 아래 4번(nginx에 덧붙이고 reload)은 실제 서버에서 https 장애를 일으켜 되돌렸습니다. 원인이 밝혀지기 전에는 4번을 실행하지 마세요.**
+> 증상: reload 직후 `app.dahim.kr`을 포함한 모든 https 접속이 TLS 협상 중에 끊김(서버 안에서 `openssl s_client` 결과 `read 0 bytes`), 출석 화면의 요청이 약 3분(02:41:25~02:44:18 서버 시각) 끊김. 백업으로 되돌리고 reload하자 즉시 복구됨.
+> `nginx -t`는 장애 상태의 설정에서도 통과했으므로, 문법 검사만으로는 안전하다고 볼 수 없습니다. 원인 조사는 운영 nginx가 아니라 별도 시험 컨테이너에서 합니다(`docs/oracle-server.md` 참고).
+
 상태: 이 절차는 **아직 서버에서 실행해 보지 않았습니다.** 확인한 것은 compose 문법(`docker compose config`)과 nginx 설정 문법(`nginx -t`, 아래)뿐입니다.
 
 ## 반드시 지킬 것
@@ -45,7 +49,7 @@ docker run --rm \
 ```
 기존 주간 갱신 작업(cron의 `certbot renew`)이 이 인증서도 함께 갱신합니다.
 
-## 4. nginx에 reading.dahim.kr 연결
+## 4. nginx에 reading.dahim.kr 연결 (⚠ 위 경고 참고: 지금은 실행하지 않음)
 ```bash
 cd /opt/dahim/nginx
 cp default.conf default.conf.bak_$(date +%Y%m%d_%H%M)            # 백업
