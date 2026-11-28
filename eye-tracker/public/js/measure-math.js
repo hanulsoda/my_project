@@ -63,6 +63,31 @@
     };
   }
 
+  // Proposed verdict levels (handoff D4, not yet a product decision): mean error as a share of the
+  // screen diagonal. <= 3% good, <= 5% caution, above that poor. Shown on the page as "참고 기준".
+  const VERDICT_GOOD_MAX = 3;
+  const VERDICT_CAUTION_MAX = 5;
+  function accuracyVerdict(percent) {
+    if (!isNum(percent)) return null;
+    if (percent <= VERDICT_GOOD_MAX) return 'good';
+    if (percent <= VERDICT_CAUTION_MAX) return 'caution';
+    return 'poor';
+  }
+  // One target row is marked "기준 초과" above the good level.
+  const overThreshold = (percent) => isNum(percent) && percent > VERDICT_GOOD_MAX;
+
+  const POSITION_NAMES = [
+    ['왼쪽 위', '위 가운데', '오른쪽 위'],
+    ['왼쪽 가운데', '가운데', '오른쪽 가운데'],
+    ['왼쪽 아래', '아래 가운데', '오른쪽 아래'],
+  ];
+  const targetName = (t) => (POSITION_NAMES[t.row] && POSITION_NAMES[t.row][t.col]) || '';
+
+  // Step screen: every target is 'done', 'current' or 'upcoming' while target `current` is shown.
+  function targetStates(current, count) {
+    return Array.from({ length: count }, (_, i) => (i < current ? 'done' : i === current ? 'current' : 'upcoming'));
+  }
+
   const fmt = (v, d = 1) => v.toFixed(d);
 
   // Plain text for copy/paste. Degrees are printed only when they were computed.
@@ -91,7 +116,10 @@
     return out.join('\n');
   }
 
-  const exported = { targetPositions, targetError, percentOfDiagonal, degreesFromPx, summarize, formatResult };
+  const exported = {
+    targetPositions, targetError, percentOfDiagonal, degreesFromPx, summarize, formatResult,
+    accuracyVerdict, overThreshold, targetName, targetStates, VERDICT_GOOD_MAX, VERDICT_CAUTION_MAX,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) root.ReadingApp = Object.assign(root.ReadingApp || {}, exported);
 })(typeof window !== 'undefined' ? window : undefined);

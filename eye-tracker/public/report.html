@@ -8,59 +8,123 @@
 <title>읽기 리포트</title>
 <link rel="stylesheet" href="/css/tokens.css">
 <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/report.css">
 <style>
-@page { size: A4; margin: 14mm; }
-@media print {
-  .no-print, button { display: none !important; }
-  html, body { background: #fff; font-size: 10pt; }
-  main { max-width: none; padding: 0; }
-  h1 { font-size: 16pt; }
-  h2 { font-size: 11pt; }
-  .card { border: 1px solid #999; border-radius: 0; margin: 0 0 5mm; padding: 3mm; break-inside: avoid; page-break-inside: avoid; }
-  .metric-grid { grid-template-columns: repeat(3, 1fr); gap: 2mm; }
-  .metric { padding: 2mm; }
-  .metric .v { font-size: 14pt; }
-  .chart { max-width: 120mm; max-height: 48mm; }
-  a { color: inherit; text-decoration: none; }
-}
+/* A4, 48px (12.7mm) margins as in the design; the rest of the print layout is in report.css. */
+@page { size: A4; margin: 12.7mm; }
+@media print { .no-print { display: none !important; } }
 </style>
 </head>
-<body>
+<body class="report-page">
+<header class="topbar no-print">
+  <span class="topbar-mark" aria-hidden="true"></span>
+  <span class="topbar-brand">다힘국어논술학원</span>
+  <span class="topbar-product">읽기 보고서</span>
+</header>
+
 <main class="report">
-  <p id="status" role="status">불러오는 중…</p>
+  <p id="status" role="status" class="report-status">불러오는 중…</p>
 
-  <div id="content" hidden>
-    <section class="card">
-      <div class="row spread">
-        <div>
-          <h1>읽기 리포트</h1>
-          <p id="who" class="muted"></p>
-        </div>
-        <div class="row">
-          <span id="ref-badge" class="badge warn" hidden>참고용</span>
-          <button id="print" type="button" class="no-print">인쇄 / PDF로 저장</button>
-        </div>
+  <div id="content" class="report-stack" hidden>
+    <section class="card report-head">
+      <div class="report-head-main">
+        <h1>읽기 리포트</h1>
+        <p id="who" class="report-who"></p>
       </div>
-      <p id="ref-note" class="muted" hidden>이번 측정은 시선이 어느 줄에 있었는지 확실하지 않아 참고용으로만 보여 드립니다. 읽기 속도, 끝까지 읽었는지, 되돌아간 횟수, 건너뛴 줄 같은 줄 단위 결과는 표시하지 않습니다.</p>
-      <p id="disclaimer" class="disclaimer">선별 지표이며 진단이 아닙니다.</p>
+      <div class="report-head-side">
+        <div class="report-badges">
+          <span id="ok-badge" class="badge ok dot" hidden>신뢰</span>
+          <span id="ref-badge" class="badge warn dot" hidden>참고용</span>
+        </div>
+        <span class="print-only report-head-brand">다힘국어논술학원</span>
+      </div>
+      <button id="print" type="button" class="secondary lg no-print">인쇄 / PDF로 저장</button>
     </section>
 
-    <section class="card">
-      <h2>이번 측정</h2>
-      <p id="fail-banner" class="banner" role="alert" hidden></p>
-      <div id="metrics" class="metric-grid"></div>
+    <div class="banner info report-banner">
+      <span class="banner-icon" aria-hidden="true">i</span>
+      <div>
+        <p id="disclaimer" class="banner-title">선별 지표이며 진단이 아닙니다.</p>
+        <p class="banner-body">읽기 연습을 돕는 참고 자료이며, 읽기 능력을 판단하거나 진단하지 않습니다.</p>
+      </div>
+    </div>
+
+    <p id="fail-banner" class="banner danger" role="alert" hidden></p>
+
+    <div id="ref-banner" class="banner report-banner" hidden>
+      <span class="banner-icon" aria-hidden="true">!</span>
+      <div>
+        <p class="banner-title">이번 측정은 참고용입니다</p>
+        <p id="ref-note" class="banner-body">시선이 어느 줄에 있었는지 확실하지 않아 읽기 속도와 건너뛴 줄 같은 줄 단위 결과를 표시하지 않습니다.</p>
+      </div>
+    </div>
+
+    <section id="retry-card" class="card report-card" hidden>
+      <h2>다시 측정해 보세요</h2>
+      <p class="report-text">같은 조건에서 한 번 더 읽으면 더 믿을 수 있는 결과를 볼 수 있습니다. 담당 선생님께 다시 측정을 요청해 주세요.</p>
+      <ul class="dot-list">
+        <li>밝은 곳에서, 얼굴 앞쪽에 불빛이 있게 앉습니다.</li>
+        <li>기기를 거치대에 세우고 눈에서 30–50cm 떨어뜨립니다.</li>
+        <li>읽는 동안 머리를 크게 움직이지 않도록 합니다.</li>
+      </ul>
     </section>
 
-    <section class="card">
-      <h2>기준 지문 읽기 속도 추이</h2>
-      <p class="muted">같은 기준 지문을 읽은 기록만 비교합니다. 속이 빈 점은 참고용 기록입니다.</p>
-      <div id="trend"></div>
+    <section id="glance" class="card report-card" hidden>
+      <h2 class="no-print">한눈에 보기</h2>
+      <p id="glance-text" class="report-lead"></p>
     </section>
+
+    <section id="measure-sec" hidden>
+      <h2 class="report-section-title no-print">이번 측정</h2>
+      <div id="tiles" class="tile-grid"></div>
+    </section>
+
+    <div class="report-pair">
+      <section id="lines-card" class="card report-card" hidden>
+        <h2>오래 머문 줄</h2>
+        <p id="lines-text" class="report-text"></p>
+        <ol id="line-map" class="line-map" aria-hidden="true"></ol>
+        <p class="report-caption">노란 배경, 굵은 테두리, 굵은 번호로 표시한 줄이 오래 머문 줄입니다. 어려운 줄이라는 뜻이 아니라 시선이 더 오래 머문 위치를 알려 드리는 것입니다.</p>
+      </section>
+
+      <section class="card report-card trend-card">
+        <h2>기준 지문 읽기 속도 추이</h2>
+        <p class="report-sub">같은 기준 지문을 읽은 기록만 비교합니다. 단위는 분당 읽은 어절 수입니다.</p>
+        <div id="trend"></div>
+        <div class="trend-legend">
+          <span><span class="legend-dot" aria-hidden="true"></span>신뢰 측정 (수치 표시)</span>
+          <span><span class="legend-dot hollow" aria-hidden="true"></span>참고용 (수치 표시 안 함)</span>
+        </div>
+        <p id="trend-text" class="report-text-sm"></p>
+      </section>
+    </div>
+
+    <section id="suggest" class="suggest-box" hidden>
+      <h2>다음 읽기 연습 제안</h2>
+      <ul class="dot-list">
+        <li>소리를 내지 않고 눈으로만 읽는 연습을 하루 5분씩 해 보세요.</li>
+        <li>손가락이나 자로 읽는 줄을 짚어 가며 읽으면 줄을 놓치는 일을 줄이는 데 도움이 됩니다.</li>
+        <li>다 읽은 뒤 내용을 한 문장으로 말해 보며 이해한 내용을 함께 확인해 보세요.</li>
+      </ul>
+      <p class="report-caption">일반적인 읽기 연습 제안이며 진단이나 처방이 아닙니다.</p>
+    </section>
+
+    <footer class="report-footer">
+      <strong>다힘국어논술학원</strong>
+      <span>이 페이지에는 이니셜과 읽기 기록만 담겨 있으며 카메라 영상은 저장되지 않습니다.</span>
+    </footer>
   </div>
 
-  <div id="error" class="card" hidden>
-    <h1 id="error-title"></h1>
-    <p id="error-text" class="muted"></p>
+  <div id="error" class="report-empty" hidden>
+    <div class="empty-card">
+      <span class="empty-illustration" aria-hidden="true"></span>
+      <h1 id="error-title"></h1>
+      <p id="error-text"></p>
+    </div>
+    <footer class="report-footer centered">
+      <strong>다힘국어논술학원</strong>
+      <span>이 페이지에는 아이의 개인 정보가 표시되지 않습니다.</span>
+    </footer>
   </div>
 </main>
 <script src="/js/dom.js"></script>

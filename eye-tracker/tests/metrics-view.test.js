@@ -170,3 +170,73 @@ test('report.js and children.js route their figures through the view helpers', (
     assert.match(read(page), /<script src="\/js\/metrics-view\.js"><\/script>/, `${page} loads metrics-view.js`);
   }
 });
+
+const { reportTiles, glanceSentence, lineMap, longDwellSentence } = require('../public/js/metrics-view.js');
+const { reportTrend, previousReliableWpm, trendSentence } = require('../public/js/charts.js');
+
+test('reportTiles: reliable line metrics -> five tiles with units; previous WPM or "첫 번째 측정"', () => {
+  const tiles = reportTiles(lineOk, 91.6);
+  assert.deepEqual(tiles.map((t) => t.area), ['wpm', 'done', 'lines', 'reg', 'skip']);
+  assert.equal(tiles[0].value, 99);
+  assert.equal(tiles[0].unit, '어절/분');
+  assert.equal(tiles[0].caption, '지난 측정 92');
+  assert.equal(tiles[1].value, '아니요');
+  assert.equal(tiles[2].value, '6 / 8');
+  assert.equal(tiles[3].value, 2);
+  assert.equal(tiles[4].value, 1);
+  assert.equal(reportTiles(lineOk, null)[0].caption, '첫 번째 측정');
+});
+
+test('reportTiles: never for 참고용, failed or legacy word-level sessions', () => {
+  assert.equal(reportTiles(lineLow, 90), null);
+  assert.equal(reportTiles({ ...lineOk, quality: 0 }, 90), null);
+  assert.equal(reportTiles(word, 90), null);
+});
+
+test('glanceSentence / longDwellSentence / lineMap', () => {
+  const done = { ...lineOk, completed: true, linesRead: 8 };
+  assert.equal(glanceSentence(done, false), '이번에는 전체 8줄을 끝까지 읽었고, 1분에 약 99어절을 읽었습니다. 앞 줄로 되돌아간 횟수는 2번, 건너뛴 줄은 1줄이었습니다.');
+  assert.match(glanceSentence(lineOk, true), /^첫 번째 측정에서 전체 8줄 중 6줄을 읽었고, .*다음 측정부터/);
+  assert.equal(longDwellSentence(lineOk), '시선이 다른 줄보다 오래 머문 줄은 2번째, 5번째 줄입니다.');
+  assert.match(longDwellSentence({ ...lineOk, longDwellLines: [] }), /없었습니다/);
+  const map = lineMap(lineOk);
+  assert.equal(map.length, 8);
+  assert.deepEqual(map.filter((r) => r.long).map((r) => r.line), [2, 5]);
+  assert.deepEqual(lineMap({ ...word }), [], 'no line count -> no map');
+});
+
+test('reportTrend: the current 참고용 session is not plotted; a reliable one stays', () => {
+  const trend = [pt(1, 98, 0.8, { reliable: true }), pt(2, 300, 0.3, { reliable: false }), pt(3, 400, 0.3, { reliable: false })];
+  assert.deepEqual(reportTrend(trend, { startedAt: 3000, referenceOnly: true }).map((p) => p.startedAt), [1000, 2000],
+    'earlier 참고용 records stay as hollow points; only the current one is dropped');
+  assert.equal(reportTrend(trend, { startedAt: 3000, referenceOnly: false }).length, 3);
+});
+
+test('previousReliableWpm: latest earlier reliable record, skipping 참고용 ones and the current session', () => {
+  const trend = [pt(1, 98, 0.8, { reliable: true }), pt(2, 104, 0.8, { reliable: true }), pt(3, 300, 0.3, { reliable: false }), pt(4, 128, 0.8, { reliable: true })];
+  assert.equal(previousReliableWpm(trend, 4000), 104);
+  assert.equal(previousReliableWpm(trend, 1000), null);
+});
+
+test('trendSentence: text alternative for each report state', () => {
+  const r = (k, w) => pt(k, w, 0.8, { reliable: true });
+  assert.equal(trendSentence([r(1, 98), r(2, 104), pt(3, 9, 0.2, { reliable: false }), r(4, 117), r(5, 128)], { referenceOnly: false }),
+    '기록 5회 중 4회가 신뢰 측정입니다. 분당 읽은 어절 수는 98에서 128로 늘었습니다.');
+  assert.match(trendSentence([r(1, 120), r(2, 90)], { referenceOnly: false }), /120에서 90으로 줄었습니다/);
+  assert.match(trendSentence([r(1, 90), r(2, 90)], { referenceOnly: false }), /처음과 같은 90입니다/);
+  assert.match(trendSentence([r(1, 96)], { referenceOnly: false }), /점 하나만/);
+  assert.equal(trendSentence([r(1, 98), r(2, 104), r(3, 117)], { referenceOnly: true }),
+    '이번 측정은 참고용이라 추이에 넣지 않았습니다. 이전 신뢰 측정 3건만 표시합니다.');
+  assert.match(trendSentence([], { referenceOnly: true }), /기록이 없습니다/);
+});
+
+test('report page: new layout keeps the parent-safety rules', () => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'public', f), 'utf8');
+  const html = read('report.html');
+  assert.match(html, /href="\/css\/report\.css"/);
+  assert.match(html, /선별 지표이며 진단이 아닙니다/);
+  const js = read('js/report.js');
+  assert.match(js, /reportTrend\(data\.trend, \{ startedAt, referenceOnly: ref \}\)/, 'the current 참고용 session is dropped from the trend');
+  assert.match(js, /const tiles = ref \? null/, '참고용 never builds stat tiles');
+  assert.doesNotMatch(js, /\.name\b|passage|textContent\s*=\s*data\.session\.metrics/, 'no names, no passage text');
+});

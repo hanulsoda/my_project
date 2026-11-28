@@ -112,3 +112,23 @@ body.reading { background: #fff; overflow: hidden; }
 .measure-dot { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%; background: #e8590c; border: 6px solid #fff; box-shadow: 0 0 0 2px #e8590c; }
 #per-target { border-collapse: collapse; margin: 0 0 12px; }
 #per-target th, #per-target td { border-bottom: 1px solid var(--line); padding: 4px 12px; text-align: left; }
+
+/* Shared foundation pieces used by the report and accuracy pages (Top bar, Badge with dot, Stat tile, dot list). */
+.topbar { display: flex; align-items: center; gap: var(--space-8); height: 64px; padding: 0 var(--space-24); background: var(--surface); border-bottom: 1px solid var(--border); }
+.topbar-mark { width: 28px; height: 28px; border-radius: var(--radius-md); background: var(--primary); flex: none; }
+.topbar-brand { font-size: 18px; line-height: 1.6; color: var(--text); white-space: nowrap; }
+.topbar-product { font-size: 14px; line-height: 1.5; color: var(--text-muted); white-space: nowrap; }
+.badge.dot { display: inline-flex; align-items: center; gap: var(--space-4); height: 26px; padding: 0 var(--space-8); font-size: 14px; line-height: 1.5; }
+.badge.dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge.ok.dot { border: 1px solid var(--success); }
+
+.dot-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-8); }
+.dot-list li { position: relative; padding-left: 14px; font-size: 16px; line-height: 1.6; }
+.dot-list li::before { content: ""; position: absolute; left: 0; top: 0.65em; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+
+.stat-tile { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; padding: var(--space-20); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.stat-label { font-size: 14px; line-height: 1.5; color: var(--text-muted); }
+.stat-value { display: flex; align-items: baseline; gap: var(--space-4); white-space: nowrap; }
+.stat-number { font-size: 40px; font-weight: 700; line-height: 1.2; color: var(--text); }
+.stat-unit { font-size: 16px; line-height: 1.6; color: var(--text-muted); }
+.stat-caption { font-size: 12px; line-height: 1.5; color: var(--text-muted); }

@@ -8,65 +8,168 @@
 <title>정확도 점검 - 읽기 시선 기록</title>
 <link rel="stylesheet" href="/css/tokens.css">
 <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/measure.css">
 </head>
-<body>
-<main>
+<body class="measure-page">
+<header id="topbar" class="topbar">
+  <span class="topbar-mark" aria-hidden="true"></span>
+  <span class="topbar-brand">다힘국어논술학원</span>
+  <span class="topbar-product">읽기 측정</span>
+  <span id="who" class="topbar-user"></span>
+</header>
+
+<main class="measure">
   <section id="s-loading"><p>불러오는 중…</p></section>
 
   <section id="s-setup" hidden>
-    <div class="card">
+    <div class="card setup-card">
       <h1>시선 정확도 점검</h1>
-      <p>선생님용 점검 페이지입니다. 기기에서 시선 좌표가 화면의 어디까지 맞는지 재서 평균 오차를 보여 줍니다. 결과는 이 화면에만 표시되고 서버로 보내지 않습니다. 진단이 아니라 측정 환경을 확인하는 용도입니다.</p>
-      <div class="row">
-        <label class="grow">기기 메모 (예: iPad 10th gen, Safari)
-          <input id="device-note" type="text" maxlength="120" autocomplete="off">
-        </label>
+      <p class="lead">선생님용 점검 페이지입니다. 기기에서 시선 좌표가 화면의 어디까지 맞는지 재서 평균 오차를 보여 줍니다. 결과는 이 화면에만 표시되고 서버로 보내지 않습니다. 진단이 아니라 측정 환경을 확인하는 용도입니다.</p>
+      <div class="field">
+        <label for="device-note">기기 메모</label>
+        <input id="device-note" type="text" maxlength="120" autocomplete="off" aria-describedby="device-help">
+        <p id="device-help" class="helper">예: iPad 10세대, Safari (선택, 최대 120자)</p>
       </div>
-      <p class="muted">각도(도)까지 보려면 아래 두 칸을 모두 입력하세요. 비워 두면 각도는 계산하지 않습니다.</p>
-      <div class="row">
-        <label>화면 대각선 (인치)
-          <input id="diagonal" type="number" min="1" max="100" step="0.1" inputmode="decimal">
-        </label>
-        <label>눈에서 화면까지 거리 (cm)
-          <input id="distance" type="number" min="10" max="300" step="1" inputmode="decimal">
-        </label>
+      <p class="note">각도(도)까지 보려면 아래 두 칸을 모두 입력하세요. 비워 두면 각도는 계산하지 않습니다.</p>
+      <div class="field-row">
+        <div class="field">
+          <label for="diagonal">화면 대각선 (인치)</label>
+          <input id="diagonal" type="number" min="1" max="100" step="0.1" inputmode="decimal" aria-describedby="diagonal-help">
+          <p id="diagonal-help" class="helper">1–100 사이 숫자</p>
+        </div>
+        <div class="field">
+          <label for="distance">눈에서 화면까지 거리 (cm)</label>
+          <input id="distance" type="number" min="10" max="300" step="1" inputmode="decimal" aria-describedby="distance-help">
+          <p id="distance-help" class="helper">10–300 사이 숫자</p>
+        </div>
       </div>
-      <ul class="muted">
+      <ul class="dot-list small">
         <li>측정할 때와 같은 자세, 같은 거치대, 같은 조명에서 해 주세요. 브라우저 창은 화면 가득 키우는 것이 좋습니다.</li>
         <li>카메라 영상은 이 기기에서만 사용되고 어디로도 보내지 않습니다.</li>
       </ul>
       <p id="setup-error" class="error" role="alert" hidden></p>
-      <div class="row">
-        <button id="start" type="button">카메라 켜고 시작</button>
-        <a class="btn secondary" href="/children.html">아이 목록으로</a>
+      <div class="actions">
+        <button id="start" type="button" class="lg">카메라 켜고 시작</button>
+        <a class="btn secondary lg" href="/children.html">아이 목록으로</a>
       </div>
     </div>
+
+    <section id="help" class="help" aria-labelledby="help-title">
+      <h2 id="help-title" class="help-title">도움말</h2>
+      <p class="help-sub">측정을 시작하기 전에 한 번 읽어 보세요. 처음 쓰는 선생님은 1번부터 차례로 보시면 됩니다.</p>
+      <div class="help-grid">
+        <div class="help-col">
+          <section class="card help-card">
+            <h3>1. 태블릿 놓는 방법</h3>
+            <figure class="placement">
+              <svg viewBox="0 0 700 170" role="img" aria-label="옆에서 본 배치: 조명은 얼굴 앞쪽, 눈에서 화면까지 30–50cm, 태블릿은 거치대에 세웁니다">
+                <text x="18" y="26" class="ph-label">조명 (얼굴 앞쪽)</text>
+                <circle cx="54" cy="52" r="14" class="ph-lamp"/>
+                <line x1="72" y1="62" x2="110" y2="84" class="ph-arrow"/>
+                <polyline points="98,84 112,85 106,73" class="ph-arrow"/>
+                <circle cx="150" cy="98" r="31" class="ph-face"/>
+                <text x="150" y="152" text-anchor="middle" class="ph-label">아이 얼굴</text>
+                <line x1="194" y1="98" x2="518" y2="98" class="ph-dim"/>
+                <line x1="194" y1="86" x2="194" y2="110" class="ph-dim"/>
+                <line x1="518" y1="86" x2="518" y2="110" class="ph-dim"/>
+                <text x="356" y="84" text-anchor="middle" class="ph-strong">눈에서 화면까지 30–50cm</text>
+                <rect x="518" y="44" width="14" height="110" rx="4" class="ph-tablet"/>
+                <polygon points="525,154 500,178 550,178" class="ph-stand"/>
+                <text x="525" y="34" text-anchor="middle" class="ph-label">거치대에 세운 태블릿</text>
+              </svg>
+            </figure>
+            <ol class="steps">
+              <li><strong>거치대에 태블릿을 세웁니다.</strong><span>눈높이에 화면 가운데가 오도록 높이를 맞춥니다.</span></li>
+              <li><strong>눈에서 화면까지 30–50cm 거리를 둡니다.</strong><span>너무 가깝거나 멀면 시선 위치가 흔들릴 수 있습니다.</span></li>
+              <li><strong>불빛이 얼굴 앞쪽에 오게 합니다.</strong><span>창문이나 조명을 등지면 얼굴이 어두워져 측정이 어려워집니다.</span></li>
+              <li><strong>측정하는 동안 머리를 크게 움직이지 않도록 안내합니다.</strong></li>
+            </ol>
+          </section>
+          <section class="card help-card">
+            <h3>2. 측정 전에 확인할 것</h3>
+            <ul class="dot-list">
+              <li>종이 동의서를 받고 동의일을 입력했는지 확인합니다. 동의 없음 배지가 보이면 측정 버튼을 사용할 수 없습니다.</li>
+              <li>아이는 아이 코드와 이니셜로만 등록합니다. 이름은 입력하지 않습니다.</li>
+              <li>추이를 비교하려면 같은 기준 지문, 같은 자세와 거치대, 같은 조명에서 측정합니다.</li>
+            </ul>
+          </section>
+          <section class="card help-card">
+            <h3>5. 문제가 생기면</h3>
+            <dl class="faq">
+              <dt>카메라가 켜지지 않아요</dt>
+              <dd>브라우저 주소창 옆 카메라 권한을 허용으로 바꾸고 페이지를 새로 고칩니다.</dd>
+              <dt>정확도 점검 결과가 쓰기 어려움으로 나와요</dt>
+              <dd>거치대 위치, 조명, 거리를 바꾼 뒤 정확도 점검을 다시 해 봅니다. 같은 기기와 자세로 측정해야 결과를 비교할 수 있습니다.</dd>
+              <dt>측정 결과가 계속 참고용으로 나와요</dt>
+              <dd>아이의 얼굴이 화면 가운데 카메라 미리보기 안에 보이는지 확인하고 다시 측정합니다.</dd>
+            </dl>
+          </section>
+        </div>
+        <div class="help-col">
+          <section class="card help-card">
+            <h3>3. 참고용이란?</h3>
+            <p class="ref-intro"><span class="badge warn dot">참고용</span><strong>시선이 어느 줄에 있었는지 확실하지 않은 측정입니다.</strong></p>
+            <div class="ref-tile">
+              <div class="ref-tile-head">분당 읽은 어절 수 <span class="badge warn dot">참고용</span></div>
+              <div class="ref-tile-value" aria-label="수치 없음">—</div>
+              <div class="helper">측정 상태가 고르지 않아 수치를 표시하지 않습니다</div>
+            </div>
+            <ul class="dot-list">
+              <li>읽기 속도나 줄 같은 수치는 보여 주지 않고 다시 측정해 보라고만 안내합니다.</li>
+              <li>학부모 리포트의 추이 그래프에서는 빈 점으로 표시됩니다.</li>
+              <li>조명이 어둡거나 거리가 맞지 않거나 고개를 많이 움직이면 자주 생깁니다.</li>
+            </ul>
+          </section>
+          <section class="card help-card">
+            <h3>4. 개인정보와 보관</h3>
+            <div class="fact"><strong>카메라 영상은 기기 밖으로 나가지 않습니다.</strong><span>영상은 이 기기에서 시선을 계산하는 데만 쓰이고 저장하거나 전송하지 않습니다.</span></div>
+            <div class="fact"><strong>저장되는 것은 시선 좌표와 단어 위치뿐입니다.</strong><span>얼굴 사진, 영상, 음성은 저장하지 않습니다.</span></div>
+            <div class="fact"><strong>아이를 삭제하면 모든 기록이 함께 삭제됩니다.</strong><span>측정 기록과 학부모 리포트 링크도 함께 사라지며 되돌릴 수 없습니다.</span></div>
+            <div class="fact"><strong>학부모 리포트에는 이니셜만 표시됩니다.</strong><span>선생님 이름은 나오지 않고, 링크는 기간이 지나면 만료되며 언제든 폐기할 수 있습니다.</span></div>
+          </section>
+        </div>
+      </div>
+    </section>
   </section>
 
-
   <section id="s-result" hidden>
-    <div class="card">
+    <div class="result-head">
       <h1>점검 결과</h1>
-      <div id="summary" class="metric-grid"></div>
-      <p id="summary-note" class="muted"></p>
-      <h2>지점별 오차</h2>
-      <table id="per-target"></table>
-      <h2>복사할 결과</h2>
-      <textarea id="result-text" readonly rows="14" style="width:100%"></textarea>
-      <div class="row">
-        <button id="copy" type="button">결과 복사</button>
-        <button id="again" type="button" class="secondary">다시 점검</button>
-        <a class="btn secondary" href="/children.html">아이 목록으로</a>
-        <span id="copy-msg" class="muted" role="status"></span>
-      </div>
+      <p id="result-sub" class="lead muted-text"></p>
+    </div>
+    <div id="summary" class="summary-tiles"></div>
+    <p id="summary-note" class="banner" hidden></p>
+    <div class="result-body">
+      <section class="card result-card">
+        <h2>지점별 오차</h2>
+        <div class="table-wrap">
+          <table id="per-target"></table>
+        </div>
+      </section>
+      <section class="card result-card verdict-card">
+        <h2>줄 단위로 쓸 수 있는 수준인가요?</h2>
+        <p class="note">결과는 아래 세 단계 중 한 곳에 표시됩니다. 색뿐 아니라 모양과 글자로도 구분합니다.</p>
+        <ol id="verdicts" class="verdicts"></ol>
+        <p class="helper">위 기준은 제안값이며 현장 측정 결과를 보고 조정할 수 있습니다. 이 점검은 진단이 아니라 측정 환경 확인용입니다.</p>
+      </section>
+    </div>
+    <details id="copy-details" class="copy-details">
+      <summary>복사할 결과 보기</summary>
+      <textarea id="result-text" readonly rows="14"></textarea>
+    </details>
+    <div class="actions">
+      <button id="copy" type="button" class="lg">결과 복사</button>
+      <button id="again" type="button" class="secondary lg">다시 점검</button>
+      <a class="btn ghost lg" href="/children.html">아이 목록으로</a>
+      <span id="copy-msg" class="copy-msg" role="status"></span>
     </div>
   </section>
 
   <section id="s-error" hidden>
-    <div class="card">
+    <div class="card setup-card">
       <h1 id="error-title">문제가 생겼습니다</h1>
       <p id="error-text"></p>
-      <button id="error-back" type="button">처음으로</button>
+      <div class="actions"><button id="error-back" type="button" class="lg">처음으로</button></div>
     </div>
   </section>
 </main>
@@ -76,7 +179,7 @@
   <div class="card">
     <h1>준비됐나요?</h1>
     <p>얼굴이 카메라에 잘 보이는지 확인하세요. 먼저 공을 눈으로 따라가는 보정을 하고, 이어서 화면의 점 9개를 하나씩 봅니다. 점이 나타나면 점의 한가운데를 계속 바라보세요.</p>
-    <button id="calibrate" type="button">보정 시작</button>
+    <button id="calibrate" type="button" class="lg">보정 시작</button>
   </div>
 </section>
 

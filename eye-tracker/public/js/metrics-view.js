@@ -82,7 +82,48 @@
     return { badge: false, text: parts.filter(Boolean).join(' · ') };
   }
 
-  const exported = { reportDisplay, sessionSummary };
+  // Parent report (design D4): stat tiles for a reliable line-level session. `previousWpm` is the
+  // latest earlier reliable WPM (null: this is the first record). Each tile has an `area` so the
+  // page can lay them out differently on a phone and on A4. Null when the session has no tiles of
+  // this kind (참고용, failed, legacy word-level).
+  function reportTiles(m, previousWpm) {
+    if (!isLineFormat(m) || isReferenceOnly(m) || isFailed(m)) return null;
+    const wpm = Math.round(m.wpm);
+    return [
+      { area: 'wpm', label: '분당 읽은 어절 수', value: wpm, unit: '어절/분',
+        caption: previousWpm === null || previousWpm === undefined ? '첫 번째 측정' : `지난 측정 ${Math.round(previousWpm)}` },
+      { area: 'done', label: '끝까지 읽음', value: m.completed ? '예' : '아니요',
+        caption: m.completed ? '마지막 줄까지 읽음' : '마지막 줄까지 읽지 않음' },
+      { area: 'lines', label: '읽은 줄 수 / 전체 줄 수', value: `${m.linesRead} / ${m.totalLines}`, unit: '줄',
+        caption: m.linesRead >= m.totalLines ? '모든 줄에 시선이 닿았습니다' : `${m.totalLines - m.linesRead}줄에는 시선이 닿지 않았습니다` },
+      { area: 'reg', label: '앞 줄로 되돌아간 횟수', value: m.regressions, unit: '회', caption: '앞 줄을 다시 본 횟수' },
+      { area: 'skip', label: '건너뛴 줄 수', value: m.skippedLines, unit: '줄', caption: '시선이 닿지 않은 줄' },
+    ];
+  }
+
+  // "한눈에 보기" sentence for the same sessions as reportTiles.
+  function glanceSentence(m, isFirst) {
+    const read = m.completed ? `전체 ${m.totalLines}줄을 끝까지 읽었고` : `전체 ${m.totalLines}줄 중 ${m.linesRead}줄을 읽었고`;
+    const speed = `1분에 약 ${Math.round(m.wpm)}어절을 읽었습니다.`;
+    if (isFirst) return `첫 번째 측정에서 ${read}, ${speed} 다음 측정부터 변화를 비교해 볼 수 있습니다.`;
+    return `이번에는 ${read}, ${speed} 앞 줄로 되돌아간 횟수는 ${m.regressions}번, 건너뛴 줄은 ${m.skippedLines}줄이었습니다.`;
+  }
+
+  // Line map rows (1-based numbers; `long` marks a long-dwell line). Empty when unknown.
+  function lineMap(m) {
+    const n = Number.isInteger(m.totalLines) ? m.totalLines : 0;
+    const long = new Set(m.longDwellLines || []);
+    return Array.from({ length: n }, (_, l) => ({ line: l + 1, long: long.has(l) }));
+  }
+
+  function longDwellSentence(m) {
+    const lines = (m.longDwellLines || []).map((l) => `${l + 1}번째`);
+    return lines.length
+      ? `시선이 다른 줄보다 오래 머문 줄은 ${lines.join(', ')} 줄입니다.`
+      : '다른 줄보다 특별히 오래 머문 줄은 없었습니다.';
+  }
+
+  const exported = { reportDisplay, sessionSummary, reportTiles, glanceSentence, lineMap, longDwellSentence };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) root.ReadingApp = Object.assign(root.ReadingApp || {}, exported);
 })(typeof window !== 'undefined' ? window : undefined);

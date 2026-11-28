@@ -151,3 +151,36 @@ test('measure.html and measure.js: stay on the origin and keep the same page rul
   // The only request is GET /api/me through api.js; nothing is uploaded.
   assert.doesNotMatch(src, /api\.(post|patch|del)|fetch\(|sendBeacon|XMLHttpRequest|WebSocket|\.innerHTML|toDataURL|captureStream|MediaRecorder|drawImage/);
 });
+
+test('accuracyVerdict: proposed levels <=3% good, <=5% caution, above poor; no data -> null', () => {
+  assert.equal(M.accuracyVerdict(0), 'good');
+  assert.equal(M.accuracyVerdict(3), 'good', '3% is inclusive');
+  assert.equal(M.accuracyVerdict(3.01), 'caution');
+  assert.equal(M.accuracyVerdict(5), 'caution', '5% is inclusive');
+  assert.equal(M.accuracyVerdict(5.1), 'poor');
+  for (const v of [null, undefined, NaN, Infinity]) assert.equal(M.accuracyVerdict(v), null);
+  assert.equal(M.VERDICT_GOOD_MAX, 3);
+  assert.equal(M.VERDICT_CAUTION_MAX, 5);
+});
+
+test('overThreshold: a target row is "기준 초과" only above 3% and only with data', () => {
+  assert.equal(M.overThreshold(3), false);
+  assert.equal(M.overThreshold(3.2), true);
+  assert.equal(M.overThreshold(null), false);
+});
+
+test('targetName: row-major 3x3 names; targetStates: done / current / upcoming', () => {
+  const names = M.targetPositions(1000, 800).map(M.targetName);
+  assert.deepEqual(names, ['왼쪽 위', '위 가운데', '오른쪽 위', '왼쪽 가운데', '가운데', '오른쪽 가운데', '왼쪽 아래', '아래 가운데', '오른쪽 아래']);
+  assert.deepEqual(M.targetStates(3, 9), ['done', 'done', 'done', 'current', 'upcoming', 'upcoming', 'upcoming', 'upcoming', 'upcoming']);
+  assert.deepEqual(M.targetStates(0, 2), ['current', 'upcoming']);
+});
+
+test('measure page shows the proposed thresholds as "참고 기준" and the step/verdict UI', () => {
+  const src = read('js/measure.js');
+  assert.match(src, /참고 기준/);
+  assert.match(src, /현재 결과/);
+  assert.match(src, /번째 점/);
+  assert.match(src, /점검 중단/);
+  assert.match(read('measure.html'), /href="\/css\/measure\.css"/);
+});

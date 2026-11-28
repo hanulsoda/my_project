@@ -1,0 +1,123 @@
+/* Parent report (Figma "30 Parent report & tools": phone 390 frames + A4 print frames). */
+.report-page { font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+.report-page p { margin: 0; }
+.print-only { display: none !important; }
+
+
+.report-page main.report { max-width: 720px; padding: var(--space-16) var(--space-16) var(--space-24); }
+.report-status { color: var(--text-muted); }
+.report-stack { display: flex; flex-direction: column; gap: var(--space-16); }
+.report-stack > .card, .report-pair > .card { margin: 0; }
+.report-card { display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-20); }
+.report-card h2, .suggest-box h2 { font-size: 20px; line-height: 1.4; margin: 0; color: var(--text); }
+.report-text { font-size: 16px; line-height: 1.6; color: var(--text); }
+.report-text-sm { font-size: 14px; line-height: 1.5; color: var(--text); }
+.report-lead { font-size: 18px; line-height: 1.6; color: var(--text); }
+.report-sub { font-size: 14px; line-height: 1.5; color: var(--text-muted); }
+.report-caption { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.report-section-title { font-size: 20px; line-height: 1.4; margin: 0 0 var(--space-16); color: var(--text); }
+
+/* Header card */
+.report-head { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-20); }
+.report-head h1 { font-size: 24px; line-height: 1.4; margin: 0; }
+.report-who { font-size: 16px; line-height: 1.6; color: var(--text-muted); }
+.report-badges { display: flex; gap: var(--space-8); padding: var(--space-4) 0 var(--space-8); }
+.report-head button { width: 100%; }
+
+/* Banner (info / warning) with round icon */
+.report-banner { display: flex; gap: var(--space-12); align-items: flex-start; margin: 0; padding: var(--space-12) var(--space-16); font-weight: 400; }
+.report-banner.info { border-color: var(--info); }
+.banner-icon { flex: none; width: 24px; height: 24px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; line-height: 1; color: var(--on-primary); background: var(--warning); }
+.banner.info .banner-icon { background: var(--info); }
+.banner-title { font-size: 16px; font-weight: 700; line-height: 1.6; }
+.banner-body { font-size: 14px; line-height: 1.5; color: var(--text); }
+#fail-banner { margin: 0; }
+
+/* Stat tiles: phone = 2 / 1 / 2 */
+.tile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-12); grid-template-areas: "wpm done" "lines lines" "reg skip"; }
+.area-wpm { grid-area: wpm; } .area-done { grid-area: done; } .area-lines { grid-area: lines; }
+.area-reg { grid-area: reg; } .area-skip { grid-area: skip; } .area-note { grid-area: note; }
+.tile-grid:not(:has(.area-wpm)) { grid-template-areas: none; }
+.stat-note { padding: var(--space-16); border: 1px dashed var(--border); border-radius: var(--radius-lg); font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.stat-note strong { display: block; margin-bottom: var(--space-4); font-size: 14px; color: var(--text); }
+
+/* Line map: long-dwell lines = highlight + 2px border + bold number (not colour only) */
+.line-map { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-4); }
+.line-map li { display: flex; align-items: center; gap: var(--space-8); }
+.line-no { width: 20px; flex: none; text-align: right; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.line-bar { flex: 1; height: 16px; display: flex; align-items: center; border-radius: var(--radius-sm); }
+.line-ink { width: 100%; height: 6px; border-radius: var(--radius-full); background: var(--border-strong); opacity: .45; }
+.line-map li.long .line-no { font-weight: 700; color: var(--text); }
+.line-map li.long .line-bar { background: var(--reading-highlight); border: 2px solid var(--warning); }
+.line-map li.long .line-ink { background: var(--reading-dim); opacity: 1; }
+
+/* Trend */
+.report-page .chart { display: block; max-width: 100%; }
+.chart-dot { stroke-width: 2; }
+.chart-dot.low { fill: var(--surface); }
+.chart-value { fill: var(--text); font-size: 12px; font-weight: 700; }
+.chart-label { font-size: 12px; }
+.trend-legend { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-16); font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.trend-legend > span { display: inline-flex; align-items: center; gap: var(--space-4); }
+.legend-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--primary); border: 2px solid var(--primary); }
+.legend-dot.hollow { background: var(--surface); }
+.report-pair { display: flex; flex-direction: column; gap: var(--space-16); }
+
+/* Suggestion box */
+.suggest-box { display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-20); background: var(--info-subtle); border: 1px solid var(--info); border-radius: var(--radius-lg); }
+.suggest-box h2 { color: var(--info); }
+
+/* Footer */
+.report-footer { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-8) var(--space-4) 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.report-footer strong { font-size: 14px; color: var(--text); }
+.report-footer.centered { text-align: center; padding: 0 var(--space-16) var(--space-8); }
+
+/* Expired / not found (Empty state, no action) */
+.report-empty { min-height: calc(100vh - 64px - 40px); display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-16); }
+.empty-card { margin: auto 0; display: flex; flex-direction: column; align-items: center; gap: var(--space-12); padding: var(--space-40) var(--space-32); text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius-lg); }
+.empty-illustration { width: 56px; height: 56px; border-radius: 50%; background: var(--info-subtle); }
+.empty-card h1 { font-size: 20px; line-height: 1.4; margin: 0; }
+.empty-card p { font-size: 16px; line-height: 1.6; color: var(--text-muted); }
+
+/* A4 (794x1123 frames) */
+@media print {
+  .print-only { display: revert !important; }
+  html, body.report-page { background: #fff; font-size: 12px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .report-page main.report { max-width: none; padding: 0; }
+  .report-stack { gap: 12px; }
+  .card, .stat-tile { box-shadow: none; }
+  .report-card, .suggest-box { padding: 14px 16px; gap: 8px; break-inside: avoid; }
+  .report-card h2, .suggest-box h2 { font-size: 16px; }
+  .report-text, .dot-list li { font-size: 13px; }
+
+  .report-head { flex-direction: row; justify-content: space-between; align-items: flex-end; padding: 0 0 12px; border: 0; border-bottom: 2px solid var(--text); border-radius: 0; }
+  .report-head h1 { font-size: 22px; }
+  .report-who { font-size: 13px; }
+  .report-head-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .report-badges { padding: 0; }
+  .report-head-brand { font-size: 13px; font-weight: 700; }
+  .report-banner { padding: 10px 16px; }
+
+  #glance { padding: 0; border: 0; }
+  .report-lead { font-size: 14px; }
+
+  .tile-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; grid-template-areas: "wpm lines done" "reg skip note"; }
+  .stat-tile { padding: 10px 14px; gap: 2px; }
+  .stat-number { font-size: 28px; }
+  .stat-label { font-size: 13px; }
+
+  .report-pair { flex-direction: row; align-items: stretch; gap: 12px; }
+  .report-pair > .card { flex: 1 1 0; min-width: 0; }
+  .line-map { gap: 0; }
+  .trend-card .chart { width: 100%; max-height: 165px; }
+  .report-text-sm { font-size: 12px; }
+  .line-bar { height: 12px; }
+  .line-ink { height: 5px; }
+  .line-no { font-size: 11px; line-height: 1.2; }
+  #lines-card .report-caption, .trend-card .report-sub { font-size: 11px; }
+
+  .report-footer { flex-direction: row; flex-wrap: wrap; gap: 4px; margin-top: auto; padding: 8px 0 0; border-top: 1px solid var(--border-strong); font-size: 11px; }
+  .report-footer strong { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .report-footer strong::after { content: " ·"; }
+  .report-footer span { color: var(--text-muted); }
+}
