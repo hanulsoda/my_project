@@ -3,85 +3,255 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>아이 목록 - 읽기 시선 기록</title>
 <link rel="stylesheet" href="/css/tokens.css">
 <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/teacher.css">
 </head>
-<body>
-<main>
-  <div class="row spread" style="margin-bottom:12px">
-    <h1 style="margin:0">아이 목록</h1>
-    <div class="row">
-      <span id="who" class="muted"></span>
-      <a class="btn secondary" href="/measure.html">정확도 점검</a>
-      <button id="logout" type="button" class="secondary">로그아웃</button>
-    </div>
-  </div>
-  <p id="msg" class="error" role="alert" hidden></p>
+<body class="teacher-page">
+<header class="topbar">
+  <span class="topbar-mark" aria-hidden="true"></span>
+  <span class="topbar-brand">다힘국어논술학원</span>
+  <span class="topbar-product">읽기 측정</span>
+  <span id="who" class="topbar-user"></span>
+  <button id="logout" type="button" class="ghost">로그아웃</button>
+</header>
+<nav class="tabbar" aria-label="메뉴">
+  <a class="tab" href="#" data-view="list">아이 목록</a>
+  <a class="tab" href="#teachers" data-view="teachers" hidden>선생님 관리</a>
+  <a class="tab" href="#audit" data-view="audit" hidden>활동 기록</a>
+  <a class="tab" href="/measure.html">정확도 점검</a>
+</nav>
 
-  <section id="admin-card" class="card" hidden>
-    <h2>선생님 초대 (관리자)</h2>
-    <form id="invite-form" class="row">
-      <label class="grow">초대할 이메일 <input id="invite-email" type="email" required></label>
-      <button type="submit">초대 링크 만들기</button>
-    </form>
-    <div id="invite-result" hidden>
-      <p class="muted">아래 링크를 선생님께 전달하세요. 7일 안에 한 번만 사용할 수 있습니다.</p>
-      <div class="row">
-        <input id="invite-link" class="link-input" readonly>
-        <button id="invite-copy" type="button" class="secondary">복사</button>
+<main class="t-main">
+  <div id="msg" class="banner danger" role="alert" hidden></div>
+
+  <!-- 아이 목록 -->
+  <section id="view-list" class="t-view" aria-labelledby="list-title">
+    <div class="page-head">
+      <div>
+        <h1 id="list-title">아이 목록</h1>
+        <p id="list-sub" class="page-sub"></p>
+      </div>
+      <div class="page-actions">
+        <a id="export" class="btn secondary" href="/api/children/export.csv" download>CSV 내보내기</a>
+        <button id="add-open" type="button">아이 추가</button>
       </div>
     </div>
+
+    <div id="consent-banner" class="banner warning t-banner" hidden>
+      <span class="banner-icon" aria-hidden="true">!</span>
+      <div>
+        <p id="consent-banner-title" class="banner-title"></p>
+        <p class="banner-body">서면 동의일을 입력해야 측정을 시작할 수 있습니다. 해당 행의 "동의일 입력"을 눌러 날짜를 기록하세요.</p>
+      </div>
+    </div>
+
+    <section id="student-card" class="card t-card" hidden>
+      <h2>다힘 학생</h2>
+      <p id="student-line" class="page-sub"></p>
+      <p id="link-note" class="page-sub" hidden>이 학생을 등록하려면 다힘 사이트의 학생 화면에서 "측정"을 눌러 들어와 주세요.</p>
+      <form id="link-form" class="field-grid" hidden>
+        <input id="link-student" type="hidden">
+        <div class="field"><label for="link-code">아이 코드</label><input id="link-code" maxlength="32" required></div>
+        <div class="field"><label for="link-initials">이니셜</label><input id="link-initials" maxlength="32" required></div>
+        <div class="field"><label for="link-band">학년대</label>
+          <select id="link-band">
+            <option value="elementary">초등</option>
+            <option value="middle">중등</option>
+            <option value="high">고등</option>
+          </select>
+        </div>
+        <div class="field"><label for="link-consent">보호자 동의일 (선택)</label><input id="link-consent" type="date"></div>
+        <div class="form-actions span-all">
+          <button type="submit">측정 대상으로 등록</button>
+          <p class="help">아직 측정 대상이 아닙니다. 학생 이름은 저장하지 않습니다. 학생 번호로만 연결됩니다.</p>
+        </div>
+      </form>
+      <p><button id="student-all" type="button" class="ghost">전체 아이 보기</button></p>
+    </section>
+
+    <section id="add-card" class="card t-card" hidden aria-labelledby="add-title">
+      <h2 id="add-title">아이 추가</h2>
+      <form id="add-form" class="field-grid" novalidate>
+        <div class="field">
+          <label for="add-code">아이 코드</label>
+          <input id="add-code" maxlength="32" required aria-describedby="add-code-help">
+          <p id="add-code-help" class="help">예: E-0312</p>
+        </div>
+        <div class="field">
+          <label for="add-initials">이니셜</label>
+          <input id="add-initials" maxlength="32" required aria-describedby="add-initials-help">
+          <p id="add-initials-help" class="help">이름 대신 이니셜만 입력합니다</p>
+        </div>
+        <div class="field">
+          <label for="add-band">학년대</label>
+          <select id="add-band">
+            <option value="elementary">초등</option>
+            <option value="middle">중등</option>
+            <option value="high">고등</option>
+          </select>
+          <p class="help">초등 · 중등 · 고등 중에서 선택</p>
+        </div>
+        <div class="field">
+          <label for="add-group">그룹 (선택)</label>
+          <input id="add-group" maxlength="32" list="group-list" autocomplete="off">
+          <datalist id="group-list"></datalist>
+          <p class="help">새 그룹은 이름을 입력해 만듭니다</p>
+        </div>
+        <div class="field">
+          <label for="add-consent">보호자 동의일 (선택)</label>
+          <input id="add-consent" type="date">
+          <p class="help">종이 동의를 받은 날짜. 비우면 측정할 수 없습니다</p>
+        </div>
+        <div class="field span-3">
+          <label for="add-note">메모 (선택)</label>
+          <input id="add-note" maxlength="500" autocomplete="off">
+        </div>
+        <div class="form-actions span-all">
+          <button type="submit">추가</button>
+          <button id="add-cancel" type="button" class="secondary">취소</button>
+          <p class="help">이름 대신 코드와 이니셜만 저장합니다. 보호자 종이 동의를 받은 날짜가 있어야 측정할 수 있습니다.</p>
+        </div>
+      </form>
+    </section>
+
+    <section class="card t-card filter-card" aria-label="찾기">
+      <div class="filter-row">
+        <div class="field search-field">
+          <label for="search">검색</label>
+          <input id="search" type="search" placeholder="코드 또는 이니셜로 검색" autocomplete="off">
+        </div>
+        <div class="field grow">
+          <span class="field-label" id="chips-label">그룹</span>
+          <div id="chips" class="chips" role="group" aria-labelledby="chips-label"></div>
+        </div>
+        <label class="choice"><input id="missing-only" type="checkbox"> 동의 없음만 보기</label>
+      </div>
+    </section>
+
+    <section class="card t-table-card" aria-label="아이 표">
+      <div class="table-scroll">
+        <table class="t-table child-table">
+          <thead>
+            <tr><th scope="col">아이 코드</th><th scope="col">이니셜</th><th scope="col">학년대</th><th scope="col">그룹</th>
+              <th scope="col">동의</th><th scope="col">최근 측정</th><th scope="col">작업</th></tr>
+          </thead>
+          <tbody id="children"></tbody>
+        </table>
+      </div>
+      <div id="empty" class="empty-state" hidden>
+        <p id="empty-title" class="empty-title">아직 등록된 아이가 없습니다</p>
+        <p id="empty-body" class="page-sub">"아이 추가"를 눌러 코드와 이니셜로 첫 아이를 등록하세요.</p>
+        <button id="empty-add" type="button">아이 추가</button>
+      </div>
+      <div class="table-foot">
+        <p id="page-caption" class="page-sub" aria-live="polite"></p>
+        <div class="row">
+          <button id="prev" type="button" class="secondary">이전</button>
+          <button id="next" type="button" class="secondary">다음</button>
+        </div>
+      </div>
+    </section>
   </section>
 
-  <section id="student-card" class="card" hidden>
-    <h2>다힘 학생</h2>
-    <p id="student-line" class="muted"></p>
-    <p id="link-note" class="muted" hidden>이 학생을 등록하려면 다힘 사이트의 학생 화면에서 "측정"을 눌러 들어와 주세요.</p>
-    <form id="link-form" class="row" hidden>
-      <input id="link-student" type="hidden">
-      <label>코드 <input id="link-code" maxlength="32" required></label>
-      <label>이니셜 <input id="link-initials" maxlength="32" required></label>
-      <label>학년대
-        <select id="link-band">
-          <option value="elementary">초등</option>
-          <option value="middle">중등</option>
-          <option value="high">고등</option>
-        </select>
-      </label>
-      <label>보호자 동의일 (선택) <input id="link-consent" type="date"></label>
-      <button type="submit">측정 대상으로 등록</button>
-      <p class="muted">아직 측정 대상이 아닙니다. 학생 이름은 저장하지 않습니다. 학생 번호로만 연결됩니다.</p>
-    </form>
+  <!-- 아이 상세 (built by children.js) -->
+  <section id="view-detail" class="t-view" hidden></section>
+
+  <!-- 선생님 관리 (원장) -->
+  <section id="view-teachers" class="t-view" hidden aria-labelledby="teachers-title">
+    <div class="page-head">
+      <div>
+        <h1 id="teachers-title">선생님 관리</h1>
+        <p id="teachers-sub" class="page-sub"></p>
+      </div>
+    </div>
+    <div id="teachers-msg" class="banner danger t-banner" role="alert" hidden>
+      <span class="banner-icon" aria-hidden="true">✕</span>
+      <div><p class="banner-title">비활성화할 수 없습니다</p><p id="teachers-msg-body" class="banner-body"></p></div>
+    </div>
+    <section class="card t-card">
+      <h2>선생님 목록</h2>
+      <p class="page-sub">다힘 사이트에서 처음 들어온 원장님과 선생님 계정입니다. 비활성화하면 다힘 사이트에서도 들어올 수 없습니다.</p>
+      <div class="table-scroll inset">
+        <table class="t-table">
+          <thead><tr><th scope="col">계정</th><th scope="col">역할</th><th scope="col">상태</th><th scope="col">아이 수</th>
+            <th scope="col">마지막 로그인</th><th scope="col">작업</th></tr></thead>
+          <tbody id="teachers"></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="admin-card" class="card t-card" hidden>
+      <h2>선생님 초대 (비상 로그인 전용)</h2>
+      <form id="invite-form" class="row">
+        <div class="field grow"><label for="invite-email">초대할 이메일</label><input id="invite-email" type="email" required></div>
+        <button type="submit">링크 만들기</button>
+      </form>
+      <div id="invite-result" hidden>
+        <p class="help">아래 링크를 선생님께 전달하세요. 7일 안에 한 번만 사용할 수 있습니다.</p>
+        <div class="row">
+          <input id="invite-link" class="link-input" readonly aria-label="초대 링크">
+          <button id="invite-copy" type="button" class="secondary">복사</button>
+        </div>
+      </div>
+    </section>
   </section>
 
-  <section class="card">
-    <h2>아이 추가</h2>
-    <form id="add-form" class="row">
-      <label>코드 <input id="add-code" maxlength="32" required></label>
-      <label>이니셜 <input id="add-initials" maxlength="32" required></label>
-      <label>학년대
-        <select id="add-band">
-          <option value="elementary">초등</option>
-          <option value="middle">중등</option>
-          <option value="high">고등</option>
-        </select>
-      </label>
-      <label>보호자 동의일 (선택) <input id="add-consent" type="date"></label>
-      <button type="submit">추가</button>
-    </form>
-    <p class="muted">이름 대신 코드와 이니셜만 저장합니다. 보호자 종이 동의를 받은 날짜가 있어야 측정할 수 있습니다.</p>
-  </section>
-
-  <section class="card">
-    <ul id="children" class="plain"></ul>
-    <p id="empty" class="muted" hidden>아직 등록된 아이가 없습니다.</p>
+  <!-- 활동 기록 (원장) -->
+  <section id="view-audit" class="t-view" hidden aria-labelledby="audit-title">
+    <div class="page-head">
+      <div>
+        <h1 id="audit-title">활동 기록</h1>
+        <p class="page-sub">최근 활동 500건입니다. 비밀번호와 링크 값은 기록에 남기지 않습니다.</p>
+      </div>
+    </div>
+    <div class="banner info t-banner">
+      <span class="banner-icon" aria-hidden="true">i</span>
+      <div><p class="banner-title">개인정보는 기록에 남기지 않습니다</p>
+        <p class="banner-body">아이는 코드로만 표시되며, 비밀번호와 링크 값은 저장하지 않습니다.</p></div>
+    </div>
+    <section class="card t-card">
+      <div class="filter-row audit-filters">
+        <div class="field"><label for="f-actor">누가</label><select id="f-actor"><option value="">전체</option></select></div>
+        <div class="field"><label for="f-action">활동 종류</label><select id="f-action"><option value="">전체</option></select></div>
+        <div class="field"><label for="f-from">시작일</label><input id="f-from" type="date"></div>
+        <div class="field"><label for="f-to">종료일</label><input id="f-to" type="date"></div>
+        <button id="f-reset" type="button" class="secondary">초기화</button>
+      </div>
+      <div class="table-scroll inset">
+        <table class="t-table">
+          <thead><tr><th scope="col">시각</th><th scope="col">누가</th><th scope="col">무엇</th><th scope="col">대상</th></tr></thead>
+          <tbody id="audit"></tbody>
+        </table>
+      </div>
+      <p id="audit-empty" class="page-sub empty-line" hidden>조건에 맞는 기록이 없습니다.</p>
+      <div class="table-foot flush">
+        <p id="audit-caption" class="page-sub" aria-live="polite"></p>
+        <div class="row">
+          <button id="audit-prev" type="button" class="secondary">이전</button>
+          <button id="audit-next" type="button" class="secondary">다음</button>
+        </div>
+      </div>
+    </section>
   </section>
 </main>
+
+<dialog id="confirm" class="t-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <h2 id="confirm-title"></h2>
+  <p id="confirm-body"></p>
+  <div class="dialog-actions">
+    <button id="confirm-cancel" type="button" class="secondary">취소</button>
+    <button id="confirm-ok" type="button" class="danger-fill"></button>
+  </div>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
 <script src="/js/dom.js"></script>
 <script src="/js/api.js"></script>
 <script src="/js/charts.js"></script>
 <script src="/js/metrics-view.js"></script>
+<script src="/js/teacher-view.js"></script>
 <script src="/js/children.js"></script>
 </body>
 </html>
