@@ -79,5 +79,6 @@
 - 인증서 `reading.dahim.kr` 발급 성공(만료 2027-02-26). 기존 주간 갱신 cron(`certbot renew`) 등록 확인.
 - `/opt/dahim/nginx/default.conf` 백업(`default.conf.bak_20261128_1140`) → `reading.nginx.conf` 덧붙임 → `nginx -t` 성공 → reload.
 - **장애:** reload 직후 https가 전부 TLS 협상 중에 끊김. `app.dahim.kr` 포함. 출석 화면(Edge 브라우저)의 5초 주기 요청이 02:41:24에 멈춰 02:44:19에 재개됨(약 3분). 백업으로 되돌려 `nginx -t` 후 reload하자 즉시 복구(TLSv1.3, 인증서 `CN = app.dahim.kr`, 요청 재개).
-- 지금 상태: **`default.conf`는 백업과 같은 원래 내용.** `dahim-reading` 컨테이너와 인증서는 남아 있고, 외부에서는 `reading.dahim.kr`로 접속되지 않음.
-- 원인: **미확인.** 추측으로 다시 적용하지 않는다. 별도 시험 컨테이너(loopback 8443, 운영과 같은 `nginx.conf`·마운트)에서 재현해 확인한 뒤에만 운영에 다시 적용한다.
+- 조사: 우리 블록을 덧붙인 설정을 **새로 시작한** 시험 컨테이너(loopback 8443, 운영과 같은 `nginx.conf`·마운트·이미지)에서 돌리면 `app`/`reading` 모두 TLSv1.3 정상. 시험 컨테이너에서 "원래 설정 시작 → 블록 덧붙임 → reload"를 재현해도 정상. 운영 컨테이너의 설정 파일 해시/inode는 호스트와 같고 이미지도 같고 인증서 폴더도 보임. **운영에서만 reload가 깨진 원인은 미확인.**
+- 02:50경 서버 시각 기준 적용 방식 변경: reload 대신 **`docker restart dahim-nginx` + 자동 원복 스크립트**(`deploy/oracle-shared-nginx/apply-nginx-block.sh`). 결과: 재시작 2초 후 `app=200`, `reading=200`, 자동 원복은 동작하지 않음. 이 시점부터 `/opt/dahim/nginx/default.conf`에는 `reading.dahim.kr` 블록이 들어 있다(백업은 `default.conf.bak_20261128_1140`, 적용 직전 사본 `default.conf.pre_reading_*`).
+- 남은 위험(미확인): 기존 주간 갱신 cron이 갱신 뒤 `docker exec dahim-nginx nginx -s reload`를 실행한다(`enable_ssl.sh`가 등록). **reload가 운영에서 깨질 수 있는 원인이 미확인이므로, 다음 cron 실행(월요일 03:00, 서버 시간대)에서 같은 장애가 재발할 수 있다.** reload만 단독으로 실행했을 때(설정 변경 없이) 문제가 있는지는 확인하지 않았다.
