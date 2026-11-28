@@ -1,0 +1,58 @@
+#cloud-config
+# First-boot setup for the stand-alone reading.dahim.kr server (Ubuntu, aarch64 or x86_64).
+# Installs Docker, opens ports 80/443, clones the repository, writes .env (the SSO secret is
+# generated HERE and never leaves this machine), waits until DNS for reading.dahim.kr points at
+# this VM, then starts the app and Caddy (automatic Let's Encrypt certificate).
+# Progress log: /var/log/reading-bootstrap.log
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - git
+  - curl
+  - dnsutils
+  - iptables-persistent
+write_files:
+  - path: /opt/reading-bootstrap.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -u
+      exec >>/var/log/reading-bootstrap.log 2>&1
+      echo "== $(date -u +%FT%TZ) bootstrap start"
+      BRANCH="ccr-d047b660-c42kqg"
+      HOST="reading.dahim.kr"
+      systemctl enable --now docker
+      # Oracle's Ubuntu image rejects everything but ssh in iptables: let web traffic in.
+      for p in 80 443; do iptables -C INPUT -p tcp --dport $p -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport $p -j ACCEPT; done
+      netfilter-persistent save || true
+      if [ ! -d /opt/reading/.git ]; then
+        git clone --depth 1 --branch "$BRANCH" https://github.com/hanulsoda/my_project.git /opt/reading
+      fi
+      cd /opt/reading/eye-tracker
+      if [ ! -f .env ]; then
+        SECRET="$(openssl rand -hex 32)"
+        umask 077
+        {
+          echo "SSO_SECRET='$SECRET'"
+          echo "ACADEMY_URL='https://dahim.kr/'"
+          echo "ALLOW_PASSWORD_LOGIN=0"
+          echo "DB_PATH=/app/data/db/app.db"
+          echo "NODE_ENV=production"
+        } > .env
+        chmod 600 .env
+      fi
+      MYIP="$(curl -4 -s -m 10 https://api.ipify.org || true)"
+      echo "my public ip: $MYIP"
+      # Let's Encrypt locks a name out after repeated failures, so wait for DNS (up to 4 hours).
+      for i in $(seq 1 720); do
+        got="$(dig +short "$HOST" A @1.1.1.1 | tail -1)"
+        [ -n "$MYIP" ] && [ "$got" = "$MYIP" ] && break
+        echo "[$i] waiting for DNS $HOST -> $MYIP (now: ${got:-none})"
+        sleep 20
+      done
+      docker compose up -d --build
+      echo "== $(date -u +%FT%TZ) bootstrap done"
+      docker compose ps
+runcmd:
+  - [ bash, -c, "nohup /opt/reading-bootstrap.sh >/dev/null 2>&1 &" ]
