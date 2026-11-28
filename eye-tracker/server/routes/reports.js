@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { applyQualityRule, isReferenceOnly } = require('../metrics');
 const { NOT_FOUND } = require('./children');
+const { audit } = require('../audit');
 
 const DAY_MS = 86400000;
 const DEFAULT_DAYS = 30;
@@ -31,6 +32,11 @@ function createReportsRouters({ db, now }) {
       'SELECT token, expires_at, revoked_at FROM share_links WHERE session_id = ? ORDER BY rowid DESC',
     ),
     insertLink: db.prepare('INSERT INTO share_links (token, session_id, expires_at) VALUES (?, ?, ?)'),
+    ownLink: db.prepare(
+      `SELECT l.session_id FROM share_links l
+       JOIN read_sessions s ON s.id = l.session_id JOIN children c ON c.id = s.child_id
+       WHERE l.token = ? AND c.teacher_id = ?`,
+    ),
     revoke: db.prepare(
       `UPDATE share_links SET revoked_at = ?
        WHERE token = ? AND session_id IN (
@@ -80,6 +86,7 @@ function createReportsRouters({ db, now }) {
     const token = crypto.randomBytes(24).toString('base64url');
     const expiresAt = now() + days * DAY_MS;
     q.insertLink.run(token, session.id, expiresAt);
+    audit(db, now, req.user.id, 'share.create', `session:${session.id}`, `days=${days}`);
     res.status(201).json({ token, url: `/report.html?token=${token}`, expiresAt });
   });
 
@@ -94,8 +101,10 @@ function createReportsRouters({ db, now }) {
 
   const share = express.Router();
   share.delete('/:token', (req, res) => {
-    const { changes } = q.revoke.run(now(), req.params.token, req.user.id);
-    if (!changes) return res.status(404).json(NOT_FOUND);
+    const link = q.ownLink.get(req.params.token, req.user.id);
+    if (!link) return res.status(404).json(NOT_FOUND);
+    q.revoke.run(now(), req.params.token, req.user.id);
+    audit(db, now, req.user.id, 'share.revoke', `session:${link.session_id}`);
     res.status(204).end();
   });
 

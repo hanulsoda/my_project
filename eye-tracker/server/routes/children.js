@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const { GRADE_BANDS, listPassages } = require('../passages');
+const { audit } = require('../audit');
 
 const MAX_LEN = 32;
 const NOT_FOUND = { error: 'not found' };
@@ -81,6 +82,8 @@ function createChildrenRouter({ db, now }) {
     const id = parseId(req.params.id);
     const changes = id === null ? 0 : q.remove.run(id, req.user.id).changes;
     if (!changes) return res.status(404).json(NOT_FOUND);
+    // The id only: the child's code and initials go with the deleted row, not into the log.
+    audit(db, now, req.user.id, 'child.delete', `child:${id}`);
     res.status(204).end();
   });
 

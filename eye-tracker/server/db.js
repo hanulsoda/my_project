@@ -10,10 +10,12 @@ CREATE TABLE IF NOT EXISTS users (
   pw_hash    TEXT NOT NULL,
   role       TEXT NOT NULL CHECK (role IN ('admin', 'teacher')),
   created_at INTEGER NOT NULL,
-  disabled_at INTEGER
+  disabled_at INTEGER,
+  last_login_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS invites (
   token      TEXT PRIMARY KEY,
+  id         INTEGER,
   email      TEXT NOT NULL,
   expires_at INTEGER NOT NULL,
   used_at    INTEGER
@@ -30,7 +32,9 @@ CREATE TABLE IF NOT EXISTS children (
   initials     TEXT NOT NULL,
   grade_band   TEXT NOT NULL,
   consent_date TEXT NOT NULL,
-  created_at   INTEGER NOT NULL
+  created_at   INTEGER NOT NULL,
+  group_name   TEXT,
+  note         TEXT
 );
 CREATE INDEX IF NOT EXISTS children_teacher ON children(teacher_id);
 CREATE UNIQUE INDEX IF NOT EXISTS children_teacher_code ON children(teacher_id, code);
@@ -44,7 +48,8 @@ CREATE TABLE IF NOT EXISTS read_sessions (
   screen_h     INTEGER NOT NULL,
   words_json   TEXT NOT NULL,
   samples_json TEXT NOT NULL,
-  metrics_json TEXT NOT NULL
+  metrics_json TEXT NOT NULL,
+  note         TEXT
 );
 CREATE INDEX IF NOT EXISTS read_sessions_child ON read_sessions(child_id);
 CREATE TABLE IF NOT EXISTS share_links (
@@ -54,13 +59,41 @@ CREATE TABLE IF NOT EXISTS share_links (
   revoked_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS share_links_session ON share_links(session_id);
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  at            INTEGER NOT NULL,
+  actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action        TEXT NOT NULL,
+  target        TEXT NOT NULL,
+  detail        TEXT
+);
 `;
 
 // Idempotent upgrades for databases created by an older schema (CREATE TABLE IF NOT EXISTS
 // leaves an existing table untouched).
 function migrate(db) {
-  const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-  if (!userCols.includes('disabled_at')) db.exec('ALTER TABLE users ADD COLUMN disabled_at INTEGER');
+  const addColumn = (table, column, type) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  };
+  addColumn('users', 'disabled_at', 'INTEGER');
+  addColumn('users', 'last_login_at', 'INTEGER');
+  addColumn('children', 'group_name', 'TEXT');
+  addColumn('children', 'note', 'TEXT');
+  addColumn('read_sessions', 'note', 'TEXT');
+  // invites predate the id handle (the token must never be exposed): number the old rows by rowid.
+  addColumn('invites', 'id', 'INTEGER');
+  db.exec('UPDATE invites SET id = rowid WHERE id IS NULL');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS invites_id ON invites(id)');
 }
 
 function openDb(file) {

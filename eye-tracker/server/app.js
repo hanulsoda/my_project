@@ -5,6 +5,8 @@ const { createAuth } = require('./auth');
 const { createChildrenRouter, createPassagesRouter } = require('./routes/children');
 const { createSessionsRouters } = require('./routes/sessions');
 const { createReportsRouters } = require('./routes/reports');
+const { createAdminRouter } = require('./routes/admin');
+const { createPasswordResetRouter } = require('./routes/password-reset');
 
 // `now` is the single clock for every expiry check, so tests can time-travel.
 function createApp({ db, now = Date.now }) {
@@ -25,6 +27,9 @@ function createApp({ db, now = Date.now }) {
   app.use('/api/children/:id/sessions', childSessions);
   app.use(express.json({ limit: '1mb' }));
 
+  app.use('/api/admin', createAdminRouter({ db, now }));
+  // Public: the one-time reset token is the credential, so it sits outside the guards above.
+  app.use('/api/password-reset', createPasswordResetRouter({ db, now }));
   app.use('/api/children', createChildrenRouter({ db, now }));
   app.use('/api/passages', createPassagesRouter());
   app.use('/api/children/:id/trend', reports.childTrend);

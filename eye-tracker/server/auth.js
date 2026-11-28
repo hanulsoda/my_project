@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const { promisify } = require('node:util');
 const express = require('express');
 const { createLoginLimiter } = require('./login-limiter');
+const { audit } = require('./audit');
 
 const scrypt = promisify(crypto.scrypt);
 const KEY_LEN = 64;
@@ -30,6 +31,7 @@ async function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(actual, expected);
 }
 
+const sha256Hex = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const normEmail = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
 const isValidPassword = (v) => typeof v === 'string' && v.length >= MIN_PASSWORD_LEN && v.length <= MAX_PASSWORD_LEN;
 
@@ -54,6 +56,7 @@ let dummyHash;
 
 function createAuth({ db, now = Date.now }) {
   const loginLimiter = createLoginLimiter({ now });
+  const inviteLimiter = createLoginLimiter({ now }); // keyed by sha256(token)
   const q = {
     userByEmail: db.prepare('SELECT id, email, pw_hash, role, disabled_at FROM users WHERE email = ?'),
     insertSession: db.prepare('INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
@@ -61,7 +64,10 @@ function createAuth({ db, now = Date.now }) {
     sessionUser: db.prepare(
       `SELECT u.id, u.email, u.role, u.disabled_at, s.expires_at FROM auth_sessions s
        JOIN users u ON u.id = s.user_id WHERE s.token = ?`),
-    insertInvite: db.prepare('INSERT INTO invites (token, email, expires_at) VALUES (?, ?, ?)'),
+    insertInvite: db.prepare(
+      `INSERT INTO invites (id, token, email, expires_at)
+       VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM invites), ?, ?, ?) RETURNING id`),
+    touchLogin: db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?'),
     invite: db.prepare('SELECT token, email, expires_at, used_at FROM invites WHERE token = ?'),
     useInvite: db.prepare('UPDATE invites SET used_at = ? WHERE token = ? AND used_at IS NULL'),
     insertUser: db.prepare("INSERT INTO users (email, pw_hash, role, created_at) VALUES (?, ?, 'teacher', ?)"),
@@ -124,6 +130,7 @@ function createAuth({ db, now = Date.now }) {
 
       const token = crypto.randomBytes(32).toString('hex');
       q.insertSession.run(token, user.id, now() + SESSION_TTL_MS);
+      q.touchLogin.run(now(), user.id);
       setSidCookie(res, token, SESSION_TTL_MS / 1000);
       res.json({ id: user.id, email: user.email, role: user.role });
     } catch (err) { next(err); }
@@ -148,17 +155,29 @@ function createAuth({ db, now = Date.now }) {
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'valid email required' });
     if (q.userByEmail.get(email)) return res.status(409).json({ error: 'account already exists' });
     const token = crypto.randomBytes(32).toString('base64url');
-    q.insertInvite.run(token, email, now() + INVITE_TTL_MS);
+    const { id } = q.insertInvite.get(token, email, now() + INVITE_TTL_MS);
+    audit(db, now, req.user.id, 'invite.create', `invite:${id}`, email);
     res.json({ token });
   });
 
   router.post('/api/invites/:token/accept', async (req, res, next) => {
     try {
+      // Per-token failure limit (key = hash, so the raw token never sits in memory): repeated
+      // unknown/used/expired answers for one token end in 429. A token that is currently valid is
+      // cleared, so a typo'd password can never lock out its rightful holder.
+      const key = sha256Hex(req.params.token);
+      const gate = inviteLimiter.check(key);
+      if (gate.blocked) {
+        res.set('Retry-After', String(gate.retryAfterSec));
+        return res.status(429).json({ error: 'too_many_attempts' });
+      }
+      inviteLimiter.recordFailure(key);
       const invite = q.invite.get(req.params.token);
       if (!invite) return res.status(404).json({ error: 'invite not found' });
       if (invite.used_at !== null || invite.expires_at <= now()) {
         return res.status(410).json({ error: 'invite expired or already used' });
       }
+      inviteLimiter.clear(key);
       const password = req.body?.password;
       if (!isValidPassword(password)) {
         return res.status(400).json({ error: `password must be ${MIN_PASSWORD_LEN}-${MAX_PASSWORD_LEN} characters` });
@@ -195,5 +214,5 @@ async function ensureFirstAdmin(db, { email, password, now = Date.now }) {
 }
 
 module.exports = {
-  createAuth, hashPassword, verifyPassword, ensureFirstAdmin, normEmail, isValidPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN,
+  createAuth, sha256Hex, hashPassword, verifyPassword, ensureFirstAdmin, normEmail, isValidPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN,
 };
