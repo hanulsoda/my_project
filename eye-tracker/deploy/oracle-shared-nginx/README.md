@@ -12,7 +12,10 @@
 - 비밀번호는 채팅이나 저장소에 올리지 마세요. `.env`는 서버에만 둡니다.
 
 ## 0. 준비
-1. Hostinger DNS에서 A 레코드 `reading` → 서버 공인 IP를 추가합니다. 서버에서 `getent hosts reading.dahim.kr`로 그 IP가 나오는지 확인합니다(안 나오면 아래 3번 인증서 발급이 실패합니다).
+1. **Cloudflare** DNS(dahim.kr 영역)에서 A 레코드를 추가합니다: 이름 `reading`, 값 서버 공인 IP.
+   - **프록시 상태는 "DNS 전용"(회색 구름)으로 시작하세요.** 인증서 발급과 첫 확인이 가장 단순합니다. 기존 `app` 레코드가 어떻게 되어 있는지 Cloudflare 화면에서 보고 같은 방식으로 맞추세요.
+   - 나중에 "프록시됨"(주황 구름)으로 바꾸려면 Cloudflare의 SSL/TLS 모드를 **Full (strict)** 로 해야 합니다. "Flexible"이면 Cloudflare가 서버에 http로 접속하고, 서버가 https로 되돌려 보내서 무한 리다이렉트가 납니다.
+   - 서버에서 `getent hosts reading.dahim.kr`로 그 IP가 나오는지 확인합니다(주황 구름이면 서버 IP가 아니라 Cloudflare 주소가 나옵니다. 인증서 발급은 회색 구름일 때 하세요).
 
 ## 1. 코드 받기와 `.env`
 ```bash

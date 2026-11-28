@@ -35,7 +35,9 @@
 
 ### 도메인 관련
 - `dahim.kr`은 Hostinger(`156.67.211.48`)를 가리킴(서버에서 이름 조회로 확인). 이 서버는 Oracle 서버와 **다른 서버**입니다.
+- **DNS는 Hostinger가 아니라 Cloudflare에서 관리한다**(사용자 말씀, 2026-11-28). 앞서 Hostinger에서 하라고 안내한 것은 틀렸다. 이 Cloudflare 영역의 레코드 목록은 아직 보지 못했다.
 - `reading.dahim.kr`은 2026-11-28 현재 어디에도 연결되어 있지 않음(이름 조회 결과 없음).
+- 이 작업 환경에서는 `app.dahim.kr`도 이름 조회 결과가 없었다. 레코드가 없어서인지 조회 환경 문제인지는 확인 안 됨.
 - 코드 저장소들에서 확인되는 부주소는 `z840.dahim.kr`(음성 합성/인식 호출) 하나뿐입니다. 이것이 Oracle 서버와 연결된 것인지는 확인 안 됨.
 
 ## 2. 확인 안 됨 (추측으로 진행하지 않는다)
@@ -57,12 +59,12 @@
 - 서버에는 **아무것도 설치하거나 변경하지 않았다.** 지금까지는 읽기 전용 명령만 실행했다.
 - 코드는 GitHub `hanulsoda/my_project`의 `ccr-d047b660-c42kqg` 브랜치와 PR #2(초안)에 있다. "서버에 올렸다"고 한 것은 GitHub를 뜻했고 Oracle 서버가 아니다.
 - 저장소의 `docs/deploy.md`는 **이 서버와 맞지 않는 가정**을 담고 있다: Oracle Linux/`opc` 계정, 서버 안에 Caddy를 함께 띄우는 구조. 실제는 Ubuntu 24.04/`ubuntu` 계정, 기존 nginx 사용. 이 서버용 절차는 nginx 설정을 확인한 뒤 새로 쓴다.
-- Hostinger DNS의 `reading` A 레코드는 아직 연결 여부가 확인되지 않았다. 만들 값은 `reading` → `129.203.151.34`.
+- Cloudflare DNS의 `reading` A 레코드는 아직 만들어지지 않았다(확인 안 됨). 만들 값은 `reading` → `129.203.151.34`, 처음에는 "DNS 전용"(회색 구름).
 
 ## 5. 다음 단계 (순서)
 1. (완료) nginx 설정 위치와 인증서 방식 확인.
 2. (완료) 이 서버용 파일 작성: `deploy/oracle-shared-nginx/`(compose, nginx 블록, 절차 README). 서버에서는 실행해 보지 않음.
-3. [사용자] Hostinger에서 A 레코드 `reading` → `129.203.151.34`를 추가하고, `dig +short reading.dahim.kr`로 확인한다.
+3. [사용자] **Cloudflare**에서 A 레코드 `reading` → `129.203.151.34`(DNS 전용)를 추가하고, `getent hosts reading.dahim.kr`로 확인한다.
 4. [사용자 확인 후 진행] 서버에 코드를 내려받아 컨테이너를 빌드·기동하고, nginx 설정을 추가한다(변경 전 백업).
 5. [사용자] 실제 아이/기기로 정확도 점검 페이지를 돌려 품질 기준(0.6)을 정한다.
 
