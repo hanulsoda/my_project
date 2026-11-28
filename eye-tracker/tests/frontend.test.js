@@ -162,14 +162,14 @@ test('static serving', async (t) => {
   t.after(srv.close);
 
   await t.test('pages and vendored WebGazer are served', async () => {
-    for (const p of ['/read.html', '/children.html', '/report.html', '/invite.html', '/index.html', '/vendor/webgazer.js', '/css/app.css', '/js/layout.js']) {
+    for (const p of ['/read.html', '/children.html', '/report.html', '/invite.html', '/login.html', '/index.html', '/vendor/webgazer.js', '/css/app.css', '/js/layout.js']) {
       const res = await fetch(srv.url + p);
       assert.equal(res.status, 200, p);
       await res.arrayBuffer();
     }
     const root = await fetch(srv.url + '/');
     assert.equal(root.status, 200);
-    assert.match(await root.text(), /<form/);
+    assert.match(await root.text(), /href="\/academy"/, 'the front page sends people to the academy site');
   });
 
   await t.test('face-mesh assets resolve under /vendor/mediapipe', async () => {

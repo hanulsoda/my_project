@@ -33,6 +33,26 @@
     </div>
   </section>
 
+  <section id="student-card" class="card" hidden>
+    <h2>다힘 학생</h2>
+    <p id="student-line" class="muted"></p>
+    <form id="link-form" class="row" hidden>
+      <input id="link-student" type="hidden">
+      <label>코드 <input id="link-code" maxlength="32" required></label>
+      <label>이니셜 <input id="link-initials" maxlength="32" required></label>
+      <label>학년대
+        <select id="link-band">
+          <option value="elementary">초등</option>
+          <option value="middle">중등</option>
+          <option value="high">고등</option>
+        </select>
+      </label>
+      <label>보호자 동의일 (선택) <input id="link-consent" type="date"></label>
+      <button type="submit">측정 대상으로 등록</button>
+      <p class="muted">아직 측정 대상이 아닙니다. 학생 이름은 저장하지 않습니다. 학생 번호로만 연결됩니다.</p>
+    </form>
+  </section>
+
   <section class="card">
     <h2>아이 추가</h2>
     <form id="add-form" class="row">
