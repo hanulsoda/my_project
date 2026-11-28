@@ -94,7 +94,8 @@
       h('div', { class: 'muted' }, summary.text));
   }
 
-  function sessionRow(s) {
+  // onReanalyzed: called after a successful "다시 분석" (the child's trend is rebuilt).
+  function sessionRow(s, onReanalyzed) {
     let summaryEl = sessionSummaryEl(s.metrics);
     const shareBox = h('div', { class: 'share-row', hidden: true });
     const toggle = h('button', { type: 'button', class: 'secondary' }, '공유 링크');
@@ -114,6 +115,7 @@
         summaryEl.replaceWith(fresh);
         summaryEl = fresh;
         redo.textContent = '다시 분석됨';
+        if (onReanalyzed) await onReanalyzed();
       } catch (err) {
         redo.textContent = '다시 분석';
         fail(err);
@@ -138,11 +140,18 @@
       ]);
     } catch (err) { return fail(err); }
 
-    const rows = sessions.slice().reverse().map((s) => sessionRow(s));
+    // The chart sits in its own holder so a reanalysis can redraw it from the server's trend.
+    const chartBox = h('div', {}, trendChart(trend));
+    async function refreshTrend() {
+      try {
+        chartBox.replaceChildren(trendChart(await api.get(`/api/children/${child.id}/trend`)));
+      } catch (err) { fail(err); }
+    }
+    const rows = sessions.slice().reverse().map((s) => sessionRow(s, refreshTrend));
 
     box.replaceChildren(
       h('h3', {}, '기준 지문 읽기 속도 추이 (WPM)'),
-      trendChart(trend),
+      chartBox,
       h('h3', {}, '측정 기록'),
       rows.length ? h('ul', { class: 'plain' }, rows) : h('p', { class: 'muted' }, '아직 측정 기록이 없습니다.'),
     );

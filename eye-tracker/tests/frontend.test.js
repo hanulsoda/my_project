@@ -257,6 +257,13 @@ test('report script loads nothing third-party and shows the response disclaimer'
   assert.doesNotMatch(src, /import\(|new Image|createElement\('script'\)|createElement\("script"\)/);
 });
 
+test('the 참고용 note says no line figures are shown', () => {
+  const html = read('report.html');
+  const note = html.match(/<p id="ref-note"[^>]*>([^<]*)<\/p>/)[1];
+  assert.match(note, /건너뛴 줄/);
+  assert.match(note, /줄 단위 결과/);
+});
+
 test('the per-word dwell strip is gone from the report; long-dwell lines are shown instead', () => {
   const html = read('report.html');
   assert.doesNotMatch(html, /words-card|단어별 머문 시간/);
@@ -269,6 +276,11 @@ test('teacher session list has a "다시 분석" button that calls the reanalyze
   const src = read('js/children.js');
   assert.match(src, /다시 분석/);
   assert.match(src, /api\.post\(`\/api\/sessions\/\$\{[^}]+\}\/reanalyze`/);
+  // the trend on screen is rebuilt from the server after a reanalysis
+  const handler = src.slice(src.indexOf('/reanalyze`'));
+  assert.match(handler.slice(0, 600), /onReanalyzed\(\)/);
+  assert.match(src, /sessionRow\(s, refreshTrend\)/);
+  assert.match(src, /async function refreshTrend[\s\S]{0,300}\/trend`/);
 });
 
 test('public/js never writes HTML strings (XSS-proof by construction)', () => {

@@ -27,7 +27,8 @@
           { label: '분당 읽은 어절 수 (WPM)', value: NO_FIGURE, caption: NO_FIGURE_CAPTION },
           { label: '끝까지 읽음', value: '판단 불가' },
           { label: '되돌아 읽은 횟수', value: NO_FIGURE },
-          { label: '건너뛴 줄', value: m.skippedLines },
+          // skipped lines depend on the line assignment just as much: not shown either
+          { label: '건너뛴 줄', value: NO_FIGURE },
         ],
       };
     }

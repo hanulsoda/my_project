@@ -33,7 +33,7 @@ test('reportDisplay: a partly read word-level measurement says so', () => {
   assert.equal(byLabel(reportDisplay({ ...word, completed: false }), /끝까지/).value, '일부만 읽음');
 });
 
-test('reportDisplay: line mode shows no WPM, no completion verdict, no regressions, only skipped lines', () => {
+test('reportDisplay: line mode shows no WPM, no completion verdict, no regressions, no skipped lines', () => {
   const v = reportDisplay(line);
   assert.equal(v.referenceOnly, true);
   assert.equal(v.banner, null);
@@ -42,7 +42,7 @@ test('reportDisplay: line mode shows no WPM, no completion verdict, no regressio
   assert.equal(wpm.caption, '참고 수치 없음');
   assert.equal(byLabel(v, /끝까지/).value, '판단 불가');
   assert.equal(byLabel(v, /되돌아/).value, '—');
-  assert.equal(byLabel(v, /건너뛴/).value, 2);
+  assert.equal(byLabel(v, /건너뛴/).value, '—', 'skipped lines depend on the line assignment too');
   assert.equal(byLabel(v, /^읽은 시간$/), undefined, 'reading time is word-derived: not shown');
   assert.equal(byLabel(v, /^읽은 어절 수$/), undefined);
   const text = JSON.stringify(v);
@@ -104,13 +104,14 @@ test('reportDisplay: reliable line metrics show line-level facts, not reference 
   assert.equal(byLabel(reportDisplay({ ...lineOk, completed: true }), /끝까지/).value, '예');
 });
 
-test('reportDisplay: line metrics with reliable === false are reference only, same figures as before', () => {
+test('reportDisplay: line metrics with reliable === false are reference only and show no line figures', () => {
   const v = reportDisplay(lineLow);
   assert.equal(v.referenceOnly, true);
   assert.equal(byLabel(v, /WPM/).value, '—');
   assert.equal(byLabel(v, /끝까지/).value, '판단 불가');
   assert.equal(byLabel(v, /되돌아/).value, '—');
-  assert.equal(byLabel(v, /건너뛴/).value, 1);
+  assert.equal(byLabel(v, /건너뛴/).value, '—');
+  assert.equal(byLabel(v, /읽은 줄 수/), undefined, 'lines read is not shown either');
   assert.equal(byLabel(v, /오래 머문 줄/), undefined);
   assert.ok(!JSON.stringify(v).includes('99'), 'no WPM leaks');
 });
