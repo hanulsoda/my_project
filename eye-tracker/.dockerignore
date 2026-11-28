@@ -1,0 +1,18 @@
+node_modules
+.git
+.gitignore
+.superpowers
+.env
+.env.*
+backups
+# user data stays out of the image; passages.json is code and is copied explicitly
+data/*
+!data/passages.json
+docs
+tests
+app
+skill
+deploy
+Dockerfile
+docker-compose.yml
+Caddyfile

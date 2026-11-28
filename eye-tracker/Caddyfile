@@ -1,0 +1,16 @@
+# Let's Encrypt certificate is issued and renewed automatically for this name
+# (needs DNS A record -> this VM and TCP 80/443 reachable from the internet).
+reading.dahim.kr {
+	encode gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		# The reading and accuracy pages need the camera: allow it for this site only.
+		# Never use camera=() here. No Content-Security-Policy on purpose: WebGazer's
+		# face-mesh/wasm needs would have to be tested on real browsers first.
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+	}
+
+	reverse_proxy app:3000
+}

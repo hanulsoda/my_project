@@ -1,0 +1,141 @@
+/* Measurement flow (read.html), Figma page "20 Measurement flow". Loaded after app.css.
+   Colours only on the reading text: no font, size, padding or line-height changes on #passage,
+   #passage-wrap or span.w, so the measured word boxes stay exactly as laid out by layout.js/fill.js. */
+
+body.reading { background: var(--surface-sunken); word-break: keep-all; }
+
+/* ---- shared pieces ------------------------------------------------------------------------- */
+/* Child-size button (Figma: Button lg with a 64px height and a UI/24 label). */
+button.xl, .btn.xl { min-height: 64px; padding: 0 var(--space-40); font-size: 24px; line-height: 1.4; }
+button.xl:disabled, button.xl:disabled:hover {
+  opacity: 1; background: var(--surface-muted); border-color: var(--surface-muted); color: var(--text-disabled);
+}
+.btn.ghost.lg, .btn.secondary.lg { font-size: 16px; }
+
+.icon-circle {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 80px; height: 80px; border-radius: var(--radius-full); background: var(--info-subtle); color: var(--info);
+}
+.icon-circle svg { width: 40px; height: 40px; }
+.icon-circle.warning { width: 96px; height: 96px; background: var(--warning-subtle); color: var(--warning); }
+.icon-circle.warning svg { width: 48px; height: 48px; }
+.icon-circle.success { width: 120px; height: 120px; background: var(--success-subtle); color: var(--success); }
+.icon-circle.success svg { width: 64px; height: 64px; }
+
+.heading { font-size: 32px; line-height: 1.3; font-weight: 700; color: var(--text); margin: 0; }
+.lead { font-size: 18px; line-height: 1.6; color: var(--text-muted); margin: 0; }
+
+/* Banner with an icon dot and title/body (Figma Banner 6:48). */
+.banner.with-icon { display: flex; gap: var(--space-12); align-items: flex-start; margin: 0; font-weight: 400; color: var(--text); }
+.banner .banner-icon {
+  flex: none; width: 24px; height: 24px; border-radius: 12px; background: var(--info); color: var(--on-primary);
+  font-size: 14px; font-weight: 700; line-height: 24px; text-align: center;
+}
+.banner .banner-title { display: block; font-size: 16px; line-height: 1.6; font-weight: 700; color: var(--info); }
+.banner .banner-body { display: block; font-size: 14px; line-height: 1.5; }
+
+/* ---- calm problem card: s-error, s-consent ------------------------------------------------ */
+.problem-card {
+  width: min(640px, 100%); display: flex; flex-direction: column; align-items: center; gap: var(--space-24);
+  padding: var(--space-48); background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-xl); box-shadow: var(--elev-1); text-align: center;
+}
+.problem-card .badge { border: 1px solid currentColor; }
+.badge.danger { background: var(--danger-subtle); color: var(--danger); }
+#s-error, #s-consent { padding: var(--space-48) var(--space-24); }
+
+/* ---- s-loading ------------------------------------------------------------------------------ */
+.loading-card { width: min(640px, 100%); display: flex; flex-direction: column; gap: var(--space-12); text-align: left; }
+.skeleton { height: 16px; border-radius: var(--radius-sm); background: var(--surface-muted); }
+.skeleton.w60 { width: 60%; }
+.skeleton.w80 { width: 80%; }
+.skeleton.w40 { width: 40%; }
+
+/* ---- s-setup (teacher) ---------------------------------------------------------------------- */
+#s-setup {
+  height: 100vh; overflow-y: auto; justify-content: safe center; align-items: stretch;
+  padding: var(--space-24) var(--space-40); text-align: left; gap: var(--space-16);
+}
+.setup-head h1 { font-size: 24px; line-height: 1.4; margin: 0; }
+.setup-head p { font-size: 14px; line-height: 1.5; color: var(--text-muted); margin: var(--space-4) 0 0; }
+.setup-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-24); align-items: stretch; }
+@media (max-width: 899px) { .setup-cols { grid-template-columns: 1fr; } #s-setup { padding: var(--space-24) var(--space-32); } }
+.setup-card {
+  display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-20); margin: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--elev-1);
+}
+.child-summary {
+  display: flex; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-16);
+  background: var(--surface-sunken); border-radius: var(--radius-md);
+}
+.child-summary strong { font-size: 20px; line-height: 1.4; }
+.child-summary p { flex: 1 1 auto; margin: 0; font-size: 16px; line-height: 1.6; color: var(--text-muted); }
+.child-summary .badge { border: 1px solid currentColor; white-space: nowrap; }
+.field-title, .setup-card legend { font-size: 14px; line-height: 1.5; font-weight: 700; color: var(--text); padding: 0; margin: 0; }
+.setup-card fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-8); }
+.setup-card fieldset.inline { flex-direction: row; flex-wrap: wrap; column-gap: var(--space-24); row-gap: 0; }
+.setup-card fieldset.inline legend { margin-bottom: var(--space-8); }
+/* Choice: the whole row is the hit area, at least 44px tall; help text indented under the label. */
+label.choice {
+  display: grid; grid-template-columns: 20px 1fr; column-gap: var(--space-8); align-items: center;
+  min-height: 44px; padding: 0 var(--space-4); font-size: 16px; line-height: 1.6; color: var(--text); cursor: pointer;
+}
+label.choice input { width: 20px; height: 20px; min-height: 0; margin: 0; accent-color: var(--primary); }
+label.choice .choice-help { grid-column: 2; font-size: 14px; line-height: 1.5; color: var(--text-muted); padding-bottom: var(--space-4); }
+label.select-field { display: flex; flex-direction: column; gap: var(--space-8); font-size: 14px; font-weight: 700; color: var(--text); }
+label.select-field select {
+  width: 100%; min-height: 48px; padding: var(--space-12) var(--space-16); font-size: 16px; font-weight: 400;
+  border-radius: var(--radius-md); border: 2px solid var(--primary); background: var(--primary-subtle);
+}
+#setup-error { margin: 0; }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-16); }
+
+/* ---- child screens: s-ready, s-sending, s-fail, s-finish ------------------------------------ */
+#s-ready, #s-sending, #s-fail, #s-finish { background: var(--reading-bg); padding: var(--space-40) var(--space-64); gap: var(--space-24); }
+#s-finish { gap: var(--space-32); }
+.hints { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-16) var(--space-24); }
+.hints li {
+  display: flex; align-items: center; gap: var(--space-12); padding: var(--space-12) var(--space-20);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  font-size: 20px; line-height: 1.4; font-weight: 700; color: var(--text);
+}
+.hints svg { width: 28px; height: 28px; flex: none; color: var(--primary); }
+.spinner {
+  width: 72px; height: 72px; border-radius: 50%; border: 6px solid var(--surface-muted); border-top-color: var(--primary);
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+#fail-text { font-size: 14px; line-height: 1.5; color: var(--text-muted); margin: 0; max-width: 560px; }
+#s-fail .lead { max-width: 560px; }
+.finish-text { font-size: 32px; line-height: 1.5; font-weight: 500; color: var(--text); margin: 0; }
+.finish-text span { display: block; }
+#s-finish .btn.ghost { margin-top: var(--space-40); }
+
+/* ---- calibration overlay (calibrate.js builds it; the ball centre is the target point) ------- */
+.calib-overlay { background: var(--reading-bg); }
+.calib-ball {
+  left: -24px; top: -24px; width: 48px; height: 48px;
+  background: radial-gradient(circle, var(--surface) 0 6px, var(--calibration-target) 6.5px);
+  box-shadow: 0 0 0 24px rgba(29, 36, 51, .18);
+}
+.calib-note { bottom: var(--space-40); font-size: 24px; line-height: 1.4; font-weight: 700; color: var(--text-muted); }
+
+/* ---- reading and practice ----------------------------------------------------------------- */
+#passage-wrap { background: var(--reading-bg); }
+#passage { color: var(--reading-text); }
+/* Gaze-hit word: colour only; the 4px "chip" padding is drawn with a shadow so no box moves. */
+#passage .w.gaze-hit {
+  background: var(--reading-highlight); color: var(--reading-text); border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 4px var(--reading-highlight);
+}
+/* Bottom bar: stays inside the 64px kept free under the text (bottom 12px + 48px button). */
+#done-bar { left: var(--space-24); right: var(--space-24); display: flex; align-items: center; justify-content: flex-end; gap: var(--space-24); }
+#done-bar button { font-size: 24px; line-height: 1.4; padding: 0 var(--space-40); min-width: 120px; flex: none; white-space: nowrap; }
+/* Two lines at most (16px x 1.45 = 46px), so the bar stays inside the reserved 64px. */
+#practice-note { display: none; order: -1; flex: 1 1 auto; margin: 0; font-size: 16px; line-height: 1.45; color: var(--text-muted); }
+#practice-note strong { display: block; color: var(--info); }
+#begin:not([hidden]) ~ #practice-note { display: block; }
+
+/* Students (signed in from the academy site) have no child list to go back to. */
+[data-role="student"] .teacher-only { display: none !important; }

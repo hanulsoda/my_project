@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>아이 목록 - 읽기 시선 기록</title>
+<link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<link rel="stylesheet" href="/css/dahim-skin.css">
+<link rel="stylesheet" href="/css/teacher.css">
+</head>
+<body class="dh-skin teacher-page">
+<div id="site-header"></div>
+
+<main class="cd-wrap t-main">
+  <div id="page-head">
+    <div class="dh-ph">
+      <div class="dh-ph-main">
+        <h1 class="dh-ph-title"><span class="dh-ph-icon" data-icon="eye" data-icon-size="18" aria-hidden="true"></span>읽기 시선 기록</h1>
+        <p id="page-sub" class="dh-ph-sub">아이가 글을 읽는 동안 눈이 어디를 따라가는지 기록해요. 선별 지표이며 진단이 아니에요.</p>
+      </div>
+      <div id="list-actions" class="dh-ph-actions" hidden>
+        <a id="export" class="cd-btn lg" href="/api/children/export.csv" download><span data-icon="download" aria-hidden="true"></span><span>CSV<span class="t-wide-only"> 내보내기</span></span></a>
+        <button id="add-open" type="button" class="cd-btn is-primary lg"><span data-icon="plus" aria-hidden="true"></span>아이 추가</button>
+      </div>
+    </div>
+    <nav class="dh-ph-tabs" aria-label="읽기 시선 기록 메뉴">
+      <a class="dh-ph-tab tab" href="#" data-view="list">아이 목록</a>
+      <a class="dh-ph-tab tab" href="#teachers" data-view="teachers" hidden data-admin-only>선생님 관리</a>
+      <a class="dh-ph-tab tab" href="#audit" data-view="audit" hidden data-admin-only>활동 기록</a>
+      <a class="dh-ph-tab tab" href="/measure.html">정확도 점검</a>
+    </nav>
+  </div>
+
+  <div id="msg" class="cd-error t-msg" role="alert" hidden><span data-icon="warn" aria-hidden="true"></span><span id="msg-text"></span></div>
+
+  <!-- 아이 목록 -->
+  <section id="view-list" class="t-view" aria-label="아이 목록">
+    <section id="student-card" class="cd-panel" hidden aria-labelledby="student-title">
+      <h2 id="student-title">다힘 학생</h2>
+      <p id="student-line" class="dh-ph-sub"></p>
+      <p id="link-note" class="dh-ph-sub" hidden>이 학생을 등록하려면 다힘 사이트의 학생 화면에서 "측정"을 눌러 들어와 주세요.</p>
+      <form id="link-form" class="cd-form t-form-grid" hidden>
+        <input id="link-student" type="hidden">
+        <div class="t-field"><label for="link-code">아이 코드</label><input id="link-code" maxlength="32" required></div>
+        <div class="t-field"><label for="link-initials">이니셜</label><input id="link-initials" maxlength="32" required></div>
+        <div class="t-field"><label for="link-band">학년대</label>
+          <select id="link-band">
+            <option value="elementary">초등</option>
+            <option value="middle">중등</option>
+            <option value="high">고등</option>
+          </select>
+        </div>
+        <div class="t-field"><label for="link-consent">보호자 서면 동의일 (선택)</label><input id="link-consent" type="date"></div>
+        <div class="t-form-actions span-all">
+          <button type="submit" class="cd-btn is-primary">측정 대상으로 등록</button>
+          <p class="t-help">아직 측정 대상이 아니에요. 학생 이름은 저장하지 않고 학생 번호로만 연결해요.</p>
+        </div>
+      </form>
+      <p class="t-student-all"><button id="student-all" type="button" class="cd-btn is-text">전체 아이 보기</button></p>
+    </section>
+
+    <section id="add-card" class="cd-panel" hidden aria-labelledby="add-title">
+      <h2 id="add-title">아이 추가</h2>
+      <form id="add-form" class="cd-form t-form-grid" novalidate>
+        <div class="t-field">
+          <label for="add-code">아이 코드</label>
+          <input id="add-code" maxlength="32" required aria-describedby="add-code-help">
+          <p id="add-code-help" class="t-help">예: E-0312</p>
+        </div>
+        <div class="t-field">
+          <label for="add-initials">이니셜</label>
+          <input id="add-initials" maxlength="32" required aria-describedby="add-initials-help">
+          <p id="add-initials-help" class="t-help">이름 대신 이니셜만 적어요</p>
+        </div>
+        <div class="t-field">
+          <label for="add-band">학년대</label>
+          <select id="add-band">
+            <option value="elementary">초등</option>
+            <option value="middle">중등</option>
+            <option value="high">고등</option>
+          </select>
+        </div>
+        <div class="t-field">
+          <label for="add-group">그룹 (선택)</label>
+          <input id="add-group" maxlength="32" list="group-list" autocomplete="off" aria-describedby="add-group-help">
+          <datalist id="group-list"></datalist>
+          <p id="add-group-help" class="t-help">새 그룹은 이름을 적으면 만들어져요</p>
+        </div>
+        <div class="t-field">
+          <label for="add-consent">보호자 서면 동의일 (선택)</label>
+          <input id="add-consent" type="date" aria-describedby="add-consent-help">
+          <p id="add-consent-help" class="t-help">종이 동의서를 받은 날짜. 비우면 측정할 수 없어요</p>
+        </div>
+        <div class="t-field span-3">
+          <label for="add-note">메모 (선택)</label>
+          <input id="add-note" maxlength="500" autocomplete="off">
+        </div>
+        <div class="t-form-actions span-all">
+          <button type="submit" class="cd-btn is-primary">추가</button>
+          <button id="add-cancel" type="button" class="cd-btn">취소</button>
+          <p class="t-help">이름 대신 코드와 이니셜만 저장해요. 보호자 서면 동의일이 있어야 측정할 수 있어요.</p>
+        </div>
+      </form>
+    </section>
+
+    <!-- 아이가 한 명도 없을 때: 시작하기 4단계 -->
+    <section id="start" class="cd-panel t-start" hidden aria-labelledby="start-title">
+      <div class="t-start-main">
+        <p class="t-start-kicker">시작하기 · 아직 등록된 아이가 없어요</p>
+        <h2 id="start-title" class="t-start-title">네 단계면 첫 보호자 리포트까지 보낼 수 있어요</h2>
+        <ol class="t-steps">
+          <li class="is-now">
+            <span class="t-step-no" aria-hidden="true">1</span>
+            <div>
+              <p class="t-step-title">아이 등록 <span class="cd-tag is-info">지금 할 일</span></p>
+              <p class="t-step-text">아이 코드와 이니셜만 적어요. 이름·생년월일은 받지 않아요.</p>
+              <button id="empty-add" type="button" class="cd-btn is-primary lg"><span data-icon="plus" aria-hidden="true"></span>첫 아이 등록하기</button>
+            </div>
+          </li>
+          <li>
+            <span class="t-step-no" aria-hidden="true">2</span>
+            <div><p class="t-step-title">보호자 서면 동의 기록</p><p class="t-step-text">종이 동의서를 받은 날짜를 적어요. 동의일이 없으면 측정할 수 없어요.</p></div>
+          </li>
+          <li>
+            <span class="t-step-no" aria-hidden="true">3</span>
+            <div><p class="t-step-title">측정 시작</p><p class="t-step-text">아이 상세에서 ‘측정 시작’을 눌러 지문을 읽게 해요.</p></div>
+          </li>
+          <li>
+            <span class="t-step-no" aria-hidden="true">4</span>
+            <div><p class="t-step-title">부모 리포트 공유</p><p class="t-step-text">측정 기록마다 보호자용 보고서 링크를 만들어 보내요(7·30·90일).</p></div>
+          </li>
+        </ol>
+      </div>
+      <aside class="t-start-side" aria-labelledby="what-title">
+        <h3 id="what-title">무엇을 기록하나요</h3>
+        <dl class="t-what">
+          <dt>분당 읽은 어절 수</dt><dd>1분 동안 눈이 지나간 어절 수예요.</dd>
+          <dt>읽은 줄 · 끝까지 읽음</dt><dd>몇 줄을 따라갔는지, 마지막 줄까지 갔는지 봐요.</dd>
+          <dt>앞 줄로 되돌아간 횟수</dt><dd>읽던 곳을 놓쳐 위로 돌아간 횟수예요.</dd>
+          <dt>건너뛴 줄 · 오래 머문 줄</dt><dd>빠뜨린 줄과 유난히 오래 본 줄이에요.</dd>
+        </dl>
+        <p class="t-what-note"><span data-icon="info" aria-hidden="true"></span>선별 지표이며 진단이 아니에요. 걱정되는 점이 있으면 보호자께 전문가 상담을 권해 주세요.</p>
+      </aside>
+    </section>
+
+    <section id="tiles" class="cd-panel t-tiles" aria-label="요약" hidden></section>
+
+    <div id="filters" class="t-filters" hidden>
+      <div class="t-search">
+        <span data-icon="search" aria-hidden="true"></span>
+        <input id="search" type="search" class="cd-input" placeholder="코드나 이니셜로 찾기" aria-label="코드나 이니셜로 찾기" autocomplete="off">
+      </div>
+      <div id="chips" class="t-chips" role="group" aria-label="그룹"></div>
+      <label class="cd-check t-missing"><input id="missing-only" type="checkbox"> 동의 기록이 필요한 아이만</label>
+    </div>
+    <div id="stale-note" class="cd-msg t-stale-note" hidden>
+      <span data-icon="info" aria-hidden="true"></span><span id="stale-note-text"></span>
+      <button id="stale-clear" type="button" class="cd-btn is-text">모두 보기</button>
+    </div>
+
+    <div id="table-box" hidden>
+      <div class="cd-table-wrap">
+        <table id="child-table" class="cd-table child-table">
+          <thead>
+            <tr><th scope="col"><span class="col-wide-label">아이 코드</span><span class="col-narrow-label">아이</span></th><th scope="col" class="col-wide">이니셜</th>
+              <th scope="col"><span class="col-wide-label">학년대</span><span class="col-narrow-label">학년대 · 그룹</span></th><th scope="col" class="col-wide">그룹</th>
+              <th scope="col">동의</th><th scope="col">최근 측정</th><th scope="col">작업</th></tr>
+          </thead>
+          <tbody id="children"></tbody>
+        </table>
+        <div id="empty" class="t-empty" hidden>
+          <p id="empty-title" class="cd-empty-title">조건에 맞는 아이가 없어요</p>
+          <p id="empty-body" class="dh-ph-sub"></p>
+        </div>
+      </div>
+      <div id="table-foot" class="t-table-foot">
+        <p id="page-caption" class="t-caption" aria-live="polite"></p>
+        <div class="t-pager">
+          <button id="prev" type="button" class="cd-btn">이전</button>
+          <button id="next" type="button" class="cd-btn">다음</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 아이 상세 (built by children.js) -->
+  <section id="view-detail" class="t-view" hidden></section>
+
+  <!-- 선생님 관리 (원장) -->
+  <section id="view-teachers" class="t-view" hidden aria-label="선생님 관리">
+    <div id="teachers-status" class="t-chip-row"></div>
+    <div id="teachers-msg" class="cd-error" role="alert" hidden>
+      <span data-icon="warn" aria-hidden="true"></span>
+      <div><strong>비활성화할 수 없어요. </strong><span id="teachers-msg-body"></span></div>
+    </div>
+    <p class="cd-msg"><span data-icon="info" aria-hidden="true"></span><span>다힘 사이트에서 처음 들어온 원장님과 선생님 계정이에요. 비활성화하면 다힘 사이트에서도 이 도구에 들어올 수 없어요.</span></p>
+    <div class="cd-table-wrap">
+      <table class="cd-table">
+        <thead><tr><th scope="col">계정</th><th scope="col">역할</th><th scope="col">상태</th><th scope="col">맡은 아이</th>
+          <th scope="col">마지막 로그인</th><th scope="col">작업</th></tr></thead>
+        <tbody id="teachers"></tbody>
+      </table>
+    </div>
+    <p class="t-caption">선생님 계정은 다힘 사이트에서 만들어요. 이 화면에서는 들어오는 것만 막거나 풀 수 있어요.</p>
+    <section id="admin-card" class="cd-panel" hidden aria-labelledby="invite-title">
+      <h2 id="invite-title">선생님 초대 (비상 로그인 전용)</h2>
+      <form id="invite-form" class="cd-form t-invite">
+        <div class="t-field"><label for="invite-email">초대할 이메일</label><input id="invite-email" type="email" required></div>
+        <button type="submit" class="cd-btn is-primary">링크 만들기</button>
+      </form>
+      <div id="invite-result" hidden>
+        <p class="t-help">아래 링크를 선생님께 전해 주세요. 7일 안에 한 번만 쓸 수 있어요.</p>
+        <div class="t-invite">
+          <input id="invite-link" class="cd-input" readonly aria-label="초대 링크">
+          <button id="invite-copy" type="button" class="cd-btn">복사</button>
+        </div>
+      </div>
+    </section>
+  </section>
+
+  <!-- 활동 기록 (원장) -->
+  <section id="view-audit" class="t-view" hidden aria-label="활동 기록">
+    <div class="cd-form t-audit-filters">
+      <div class="t-field"><label for="f-actor">누가</label><select id="f-actor"><option value="">전체</option></select></div>
+      <div class="t-field"><label for="f-action">활동 종류</label><select id="f-action"><option value="">전체</option></select></div>
+      <div class="t-field t-date-field"><label for="f-from">시작일</label><input id="f-from" type="date"></div>
+      <div class="t-field t-date-field"><label for="f-to">종료일</label><input id="f-to" type="date"></div>
+      <button id="f-reset" type="button" class="cd-btn">초기화</button>
+    </div>
+    <p class="cd-msg"><span data-icon="info" aria-hidden="true"></span><span>개인정보는 기록에 남기지 않아요. 아이는 코드로만 보이고, 비밀번호와 링크 값은 저장하지 않아요.</span></p>
+    <div class="cd-table-wrap">
+      <table id="audit-table" class="cd-table">
+        <thead><tr><th scope="col">시각</th><th scope="col">누가</th><th scope="col">무엇을</th><th scope="col">대상</th></tr></thead>
+        <tbody id="audit"></tbody>
+      </table>
+      <p id="audit-empty" class="t-empty" hidden>조건에 맞는 기록이 없어요.</p>
+    </div>
+    <div class="t-table-foot">
+      <p id="audit-caption" class="t-caption" aria-live="polite"></p>
+      <div class="t-pager">
+        <button id="audit-prev" type="button" class="cd-btn">이전</button>
+        <button id="audit-next" type="button" class="cd-btn">다음</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="confirm" class="t-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <div class="t-dialog-head">
+    <span class="t-dialog-icon" data-icon="warn" aria-hidden="true"></span>
+    <h2 id="confirm-title"></h2>
+  </div>
+  <p id="confirm-body"></p>
+  <div id="confirm-list" class="t-dialog-list" hidden>
+    <p class="t-dialog-list-label">지워지는 것</p>
+    <p id="confirm-items"></p>
+  </div>
+  <div class="t-dialog-actions">
+    <button id="confirm-cancel" type="button" class="cd-btn">취소</button>
+    <button id="confirm-ok" type="button" class="cd-btn is-danger-fill"></button>
+  </div>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/js/dom.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/site-header.js"></script>
+<script src="/js/metrics-view.js"></script>
+<script src="/js/teacher-view.js"></script>
+<script src="/js/children.js"></script>
+</body>
+</html>
