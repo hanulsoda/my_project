@@ -196,6 +196,21 @@ test('reading sessions', async (t) => {
     assert.equal(stored.lineDwellMs.length, 1, 'raw metrics are stored');
   });
 
+  await t.test('off-text gaze: one fixation on the line, three far below it is 참고용 with hidden line arrays', async () => {
+    // One fixation on a word, then three fixations on empty screen 485 px below the line. A single
+    // line cannot tell an offset from looking elsewhere, so this must not come out reliable.
+    const stray = [];
+    for (let k = 0; k < 75; k++) stray.push({ t: 1000 + k * STEP, x: 300 + 200 * Math.floor(k / 25), y: 600 });
+    const samples = [...readAll(WORDS.slice(0, 1)), ...stray];
+    const posted = await (await upload(cookieA, child, payload({ samples }))).json();
+    assert.equal(posted.metrics.reliable, false);
+    assert.deepEqual(posted.metrics.lineDwellMs, [], 'POST body applies the quality rule');
+    assert.deepEqual(posted.metrics.longDwellLines, []);
+    const d = await (await call(srv, 'GET', `/api/sessions/${posted.id}`, cookieA)).json();
+    assert.equal(d.metrics.reliable, false);
+    assert.deepEqual(d.metrics.lineDwellMs, []);
+  });
+
   await t.test('list is chronological, omits samples/words, and applies the quality rule', async () => {
     const c = await makeChild(cookieA);
     const first = await (await upload(cookieA, c, payload())).json();
