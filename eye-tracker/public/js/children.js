@@ -84,6 +84,50 @@
     );
   }
 
+  // ---- one session in the list ------------------------------------------------------------
+  // The summary line is its own element so "다시 분석" can refresh it in place (the share box and
+  // its open/closed state stay as they are).
+  function sessionSummaryEl(metrics) {
+    const summary = sessionSummary(metrics);
+    return h('div', {},
+      summary.badge ? h('span', { class: 'badge warn' }, '참고용') : null,
+      h('div', { class: 'muted' }, summary.text));
+  }
+
+  function sessionRow(s) {
+    let summaryEl = sessionSummaryEl(s.metrics);
+    const shareBox = h('div', { class: 'share-row', hidden: true });
+    const toggle = h('button', { type: 'button', class: 'secondary' }, '공유 링크');
+    toggle.addEventListener('click', async () => {
+      shareBox.hidden = !shareBox.hidden;
+      if (!shareBox.hidden) await renderShares(s, shareBox);
+    });
+    const redo = h('button', { type: 'button', class: 'secondary', title: '저장된 시선 기록을 지금의 분석 방법으로 다시 계산합니다' }, '다시 분석');
+    redo.addEventListener('click', async () => {
+      showMsg('');
+      redo.disabled = true;
+      redo.textContent = '분석 중…';
+      try {
+        const res = await api.post(`/api/sessions/${s.id}/reanalyze`);
+        s.metrics = res.metrics;
+        const fresh = sessionSummaryEl(s.metrics);
+        summaryEl.replaceWith(fresh);
+        summaryEl = fresh;
+        redo.textContent = '다시 분석됨';
+      } catch (err) {
+        redo.textContent = '다시 분석';
+        fail(err);
+      } finally {
+        redo.disabled = false;
+      }
+    });
+    return h('li', { class: 'session' },
+      h('div', { class: 'row spread' },
+        h('div', {}, `${fmtDateTime(s.startedAt)} · ${KIND_LABEL[s.kind] || s.kind} `, summaryEl),
+        h('div', { class: 'row' }, redo, toggle)),
+      shareBox);
+  }
+
   // ---- detail of one child ----------------------------------------------------------------
   async function renderDetail(child, box) {
     let sessions; let trend;
@@ -94,23 +138,7 @@
       ]);
     } catch (err) { return fail(err); }
 
-    const rows = sessions.slice().reverse().map((s) => {
-      const summary = sessionSummary(s.metrics);
-      const shareBox = h('div', { class: 'share-row', hidden: true });
-      const toggle = h('button', { type: 'button', class: 'secondary' }, '공유 링크');
-      toggle.addEventListener('click', async () => {
-        shareBox.hidden = !shareBox.hidden;
-        if (!shareBox.hidden) await renderShares(s, shareBox);
-      });
-      return h('li', { class: 'session' },
-        h('div', { class: 'row spread' },
-          h('div', {},
-            `${fmtDateTime(s.startedAt)} · ${KIND_LABEL[s.kind] || s.kind} `,
-            summary.badge ? h('span', { class: 'badge warn' }, '참고용') : null,
-            h('div', { class: 'muted' }, summary.text)),
-          toggle),
-        shareBox);
-    });
+    const rows = sessions.slice().reverse().map((s) => sessionRow(s));
 
     box.replaceChildren(
       h('h3', {}, '기준 지문 읽기 속도 추이 (WPM)'),

@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
 const express = require('express');
-const { applyQualityRule } = require('../metrics');
+const { applyQualityRule, isReferenceOnly } = require('../metrics');
 const { NOT_FOUND } = require('./children');
 
 const DAY_MS = 86400000;
@@ -46,11 +46,15 @@ function createReportsRouters({ db, now }) {
     ),
   };
 
-  // Only line-level figures: no word arrays ever leave through the trend.
+  // Only summary figures: no per-line or per-word arrays ever leave through the trend. `reliable`
+  // tells the chart which points are 참고용 (legacy rows: detail === 'line' was reference only).
   function trendFor(childId) {
     return q.trend.all(childId).map((r) => {
       const m = applyQualityRule(JSON.parse(r.metrics_json));
-      return { startedAt: r.started_at, wpm: m.wpm, regressions: m.regressions, skippedLines: m.skippedLines, quality: m.quality };
+      return {
+        startedAt: r.started_at, wpm: m.wpm, regressions: m.regressions, skippedLines: m.skippedLines,
+        quality: m.quality, reliable: !isReferenceOnly(m),
+      };
     });
   }
 

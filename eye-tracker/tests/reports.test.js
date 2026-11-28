@@ -61,8 +61,25 @@ test('trend, share links, parent report', async (t) => {
     const trend = await res.json();
     assert.equal(trend.length, 3, 'ref1, ref2 and the zero-sample reference session; the new-kind one is excluded');
     for (let k = 1; k < trend.length; k++) assert.ok(trend[k].startedAt >= trend[k - 1].startedAt);
-    assert.deepEqual(Object.keys(trend[0]).sort(), ['quality', 'regressions', 'skippedLines', 'startedAt', 'wpm']);
+    assert.deepEqual(Object.keys(trend[0]).sort(), ['quality', 'regressions', 'reliable', 'skippedLines', 'startedAt', 'wpm']);
     assert.equal(trend[2].quality, 0);
+    assert.deepEqual(trend.map((p) => p.reliable), [true, true, false]);
+  });
+
+  await t.test('trend: legacy rows without `reliable` keep the old meaning (detail "line" is reference only)', async () => {
+    const c3 = (await (await call(srv, 'POST', '/api/children', cookieA, {
+      code: 'R-LEGACY', initials: 'CD', gradeBand: 'elementary', consentDate: '2026-03-02',
+    })).json()).id;
+    for (let k = 0; k < 2; k++) {
+      assert.equal((await call(srv, 'POST', `/api/children/${c3}/sessions`, cookieA, payload())).status, 201);
+      srv.clock.advance(1000);
+    }
+    const rows = srv.db.prepare('SELECT id FROM read_sessions WHERE child_id = ? ORDER BY started_at').all(c3);
+    const legacy = (detail) => JSON.stringify({ wpm: 100, regressions: 1, skippedLines: 0, quality: 0.7, detail, dwellMsByWord: [1], longDwellWords: [] });
+    srv.db.prepare('UPDATE read_sessions SET metrics_json = ? WHERE id = ?').run(legacy('word'), rows[0].id);
+    srv.db.prepare('UPDATE read_sessions SET metrics_json = ? WHERE id = ?').run(legacy('line'), rows[1].id);
+    const trend = await (await call(srv, 'GET', `/api/children/${c3}/trend`, cookieA)).json();
+    assert.deepEqual(trend.map((p) => p.reliable), [true, false]);
   });
 
   await t.test('trend: 2 reference + 1 new session gives 2 entries', async () => {

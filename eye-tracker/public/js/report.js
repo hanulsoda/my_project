@@ -2,7 +2,7 @@
 // Public parent report. No login, no third-party requests: one same-origin fetch that sends no
 // cookies and no referrer. Every value is inserted with textContent.
 (function () {
-  const { h, trendChart, dwellStrip, reportDisplay } = window.ReadingApp;
+  const { h, trendChart, reportDisplay } = window.ReadingApp;
   const $ = (id) => document.getElementById(id);
   const GRADE = { elementary: '초등', middle: '중등', high: '고등' };
 
@@ -21,27 +21,20 @@
 
   function render(data) {
     const m = data.session.metrics;
-    const referenceOnly = m.detail === 'line';
     const date = new Date(data.session.startedAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
 
     $('who').textContent = `${data.child.initials} (${data.child.code}) · ${GRADE[data.child.gradeBand] || ''} · ${date}`;
     $('disclaimer').textContent = data.disclaimer;
 
-    // reportDisplay decides what may be shown: no word-derived figures for reference-only
-    // sessions, and a plain "measure again" banner when the measurement failed.
+    // reportDisplay decides what may be shown: reference-only (reliable === false) sessions get
+    // no WPM, completion or regression figures, and a failed one a plain "measure again" banner.
+    // Line-level facts (lines read, long-dwell lines) are cards too; there is no per-word view.
     const view = reportDisplay(m);
     $('ref-badge').hidden = !view.referenceOnly;
     $('ref-note').hidden = !view.referenceOnly;
     $('fail-banner').textContent = view.banner || '';
     $('fail-banner').hidden = !view.banner;
     $('metrics').replaceChildren(...view.cards.map((c) => metric(c.label, c.value, c.caption)));
-
-    const showWords = !referenceOnly && !view.banner && m.dwellMsByWord.length > 0;
-    $('words-card').hidden = !showWords;
-    if (showWords) {
-      $('words').replaceChildren(dwellStrip(m.dwellMsByWord, m.longDwellWords));
-      $('long-count').textContent = `오래 머문 단어: ${m.longDwellWords.length}개`;
-    }
 
     $('trend').replaceChildren(trendChart(data.trend));
     $('status').hidden = true;

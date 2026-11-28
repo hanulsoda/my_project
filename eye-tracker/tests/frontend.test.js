@@ -250,10 +250,25 @@ test('report script loads nothing third-party and shows the response disclaimer'
   assert.match(src, /\.disclaimer/, 'disclaimer text comes from the response');
   assert.match(src, /410[\s\S]*만료되었거나 폐기된 링크입니다/);
   assert.match(src, /404[\s\S]*존재하지 않는 링크입니다/);
-  assert.match(src, /detail === 'line'/, 'reference-only mode is driven by metrics.detail');
+  assert.doesNotMatch(src, /detail === 'line'/, 'detail is always "line" now: it cannot decide reference-only mode');
+  assert.match(src, /view\.referenceOnly/, 'reference-only mode comes from reportDisplay (reliable === false)');
   assert.match(read('report.html'), /참고용/);
   assert.match(src, /no-referrer|credentials/, 'report fetch must not send the teacher cookie');
   assert.doesNotMatch(src, /import\(|new Image|createElement\('script'\)|createElement\("script"\)/);
+});
+
+test('the per-word dwell strip is gone from the report; long-dwell lines are shown instead', () => {
+  const html = read('report.html');
+  assert.doesNotMatch(html, /words-card|단어별 머문 시간/);
+  assert.doesNotMatch(read('js/report.js'), /dwellStrip|dwellMsByWord/);
+  assert.doesNotMatch(read('js/charts.js'), /dwellStrip/);
+  assert.match(read('js/metrics-view.js'), /오래 머문 줄/);
+});
+
+test('teacher session list has a "다시 분석" button that calls the reanalyze endpoint', () => {
+  const src = read('js/children.js');
+  assert.match(src, /다시 분석/);
+  assert.match(src, /api\.post\(`\/api\/sessions\/\$\{[^}]+\}\/reanalyze`/);
 });
 
 test('public/js never writes HTML strings (XSS-proof by construction)', () => {

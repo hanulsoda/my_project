@@ -68,8 +68,6 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 .chart-dot.low { fill: #fff; }
 /* Failed measurement: shown instead of numbers. */
 .banner { margin: 0 0 12px; padding: 12px 14px; border: 1px solid #d9822b; border-radius: 8px; background: #fff4e5; color: #6b3d00; font-weight: 600; }
-.dwell-bar { fill: #9fb2d9; }
-.dwell-bar.long { fill: #d9822b; }
 
 /* Reading page */
 body.reading { background: #fff; overflow: hidden; }

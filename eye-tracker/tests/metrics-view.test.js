@@ -82,7 +82,59 @@ test('sessionSummary: reference-only sessions in the teacher list carry the 참�
   assert.doesNotMatch(f.text, /WPM/);
 });
 
+// Line metrics (server/line-metrics.js): detail is always 'line'; `reliable` decides 참고용.
+const lineOk = {
+  wpm: 98.6, wordsRead: 52, completed: false, durationSec: 31.6, regressions: 2, skippedLines: 1, quality: 0.72,
+  reliable: true, detail: 'line', linesRead: 6, totalLines: 8, lineDwellMs: [1, 2, 3, 4, 5, 6, 0, 0],
+  longDwellLines: [1, 4], driftPx: 120, dwellMsByWord: [], longDwellWords: [],
+};
+const lineLow = { ...lineOk, quality: 0.31, reliable: false, lineDwellMs: [], longDwellLines: [] };
+
+test('reportDisplay: reliable line metrics show line-level facts, not reference only despite detail "line"', () => {
+  const v = reportDisplay(lineOk);
+  assert.equal(v.referenceOnly, false);
+  assert.equal(v.banner, null);
+  assert.equal(byLabel(v, /WPM/).value, 99);
+  assert.equal(byLabel(v, /읽은 줄 수/).value, '6 / 8');
+  assert.equal(byLabel(v, /끝까지/).value, '일부만 읽음');
+  assert.equal(byLabel(v, /앞 줄로 되돌아간 횟수/).value, 2);
+  assert.equal(byLabel(v, /건너뛴/).value, 1);
+  assert.equal(byLabel(v, /오래 머문 줄/).value, '2, 5번째 줄', 'line numbers are 1-based');
+  assert.equal(byLabel(reportDisplay({ ...lineOk, longDwellLines: [] }), /오래 머문 줄/).value, '없음');
+  assert.equal(byLabel(reportDisplay({ ...lineOk, completed: true }), /끝까지/).value, '예');
+});
+
+test('reportDisplay: line metrics with reliable === false are reference only, same figures as before', () => {
+  const v = reportDisplay(lineLow);
+  assert.equal(v.referenceOnly, true);
+  assert.equal(byLabel(v, /WPM/).value, '—');
+  assert.equal(byLabel(v, /끝까지/).value, '판단 불가');
+  assert.equal(byLabel(v, /되돌아/).value, '—');
+  assert.equal(byLabel(v, /건너뛴/).value, 1);
+  assert.equal(byLabel(v, /오래 머문 줄/), undefined);
+  assert.ok(!JSON.stringify(v).includes('99'), 'no WPM leaks');
+});
+
+test('sessionSummary: reliable line metrics list the line-level facts; unreliable ones get the badge', () => {
+  const s = sessionSummary(lineOk);
+  assert.equal(s.badge, false);
+  for (const re of [/99 WPM/, /읽은 줄 6\/8/, /일부만 읽음/, /앞 줄로 되돌아감 2회/, /건너뛴 줄 1/, /오래 머문 줄 2, 5/, /0\.72/]) {
+    assert.match(s.text, re);
+  }
+  assert.doesNotMatch(sessionSummary({ ...lineOk, longDwellLines: [] }).text, /오래 머문/);
+  const low = sessionSummary(lineLow);
+  assert.equal(low.badge, true);
+  assert.doesNotMatch(low.text, /WPM/);
+  assert.match(low.text, /참고 수치 없음/);
+});
+
 const pt = (k, wpm, quality, extra = {}) => ({ startedAt: 1000 * k, wpm, quality, ...extra });
+
+test('splitTrend: a `reliable` flag decides when present; points without it keep the old rule', () => {
+  const s = splitTrend([pt(0, 100, 0.55, { reliable: true }), pt(1, 100, 0.9, { reliable: false }), pt(2, 90, 0.9), pt(3, 80, 0.5)]);
+  assert.deepEqual(s.hollow.map((e) => e.k), [1, 3]);
+  assert.deepEqual(s.segments.map((seg) => seg.map((e) => e.k)), [[0], [2]]);
+});
 
 test('splitTrend: low-quality points are hollow, break the polyline and stay out of the y scale', () => {
   const pts = [pt(0, 100, 0.9), pt(1, 110, 0.8), pt(2, 5000, 0.3), pt(3, 120, 0.9), pt(4, 130, 0.7)];

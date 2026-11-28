@@ -13,9 +13,9 @@
 
   const fmtDate = (ms) => new Date(ms).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
 
-  // A point is reliable only at word-level quality. Trend rows carry `quality` (and may carry
-  // `detail`); a missing `detail` is derived from quality < 0.6, the server's own threshold.
-  const isReliable = (p) => p.detail !== 'line' && p.quality >= LOW_QUALITY;
+  // Trend rows carry `reliable` (the server's 참고용 rule). Points without it (older servers) fall
+  // back to the old rule: word-level detail and quality >= 0.6.
+  const isReliable = (p) => (typeof p.reliable === 'boolean' ? p.reliable : p.detail !== 'line' && p.quality >= LOW_QUALITY);
 
   // Splits trend points (oldest first) for drawing. `k` is the index in the input, which fixes the
   // x position. segments: runs of reliable points to connect (a reference-only point ends a run);
@@ -83,27 +83,7 @@
     return svg;
   }
 
-  // Per-word dwell strip for the parent report: one bar per word in reading order, long dwells
-  // highlighted. dwellMsByWord: number[]; longDwellWords: word indexes.
-  function dwellStrip(dwellMsByWord, longDwellWords) {
-    const W = 520; const H = 90; const base = H - 8;
-    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': '단어별 머문 시간' });
-    const n = dwellMsByWord.length;
-    if (n === 0) return svg;
-    const maxMs = Math.max(1, ...dwellMsByWord);
-    const long = new Set(longDwellWords);
-    const bw = W / n;
-    dwellMsByWord.forEach((ms, k) => {
-      const bh = (ms / maxMs) * (H - 16);
-      svg.append(svgEl('rect', {
-        x: k * bw, y: base - bh, width: Math.max(bw - 1, 1), height: Math.max(bh, ms > 0 ? 1 : 0),
-        class: long.has(k) ? 'dwell-bar long' : 'dwell-bar',
-      }));
-    });
-    return svg;
-  }
-
-  const exported = { trendChart, dwellStrip, splitTrend };
+  const exported = { trendChart, splitTrend };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) root.ReadingApp = Object.assign(root.ReadingApp || {}, exported);
 })(typeof window !== 'undefined' ? window : undefined);
