@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
-const { computeMetrics, applyQualityRule } = require('../metrics');
+const { applyQualityRule } = require('../metrics');
+const { computeLineMetrics } = require('../line-metrics');
 const { getPassage } = require('../passages');
 const { NOT_FOUND } = require('./children');
 
@@ -69,6 +70,10 @@ function createSessionsRouters({ db, now }) {
       `SELECT s.* FROM read_sessions s JOIN children c ON c.id = s.child_id
        WHERE s.id = ? AND c.teacher_id = ?`,
     ),
+    updateMetrics: db.prepare(
+      `UPDATE read_sessions SET metrics_json = ?
+       WHERE id = ? AND child_id IN (SELECT id FROM children WHERE teacher_id = ?)`,
+    ),
   };
 
   const childSessions = express.Router({ mergeParams: true });
@@ -91,7 +96,7 @@ function createSessionsRouters({ db, now }) {
     const v = validateUpload(req.body);
     if (v.error) return res.status(v.status ?? 400).json({ error: v.error });
 
-    const metrics = computeMetrics(v.samples, v.words, v.screen);
+    const metrics = computeLineMetrics(v.samples, v.words, v.screen);
     const { lastInsertRowid } = q.insert.run(
       req.child.id, v.passage.id, v.passage.kind, now(), v.screen.w, v.screen.h,
       JSON.stringify(v.words), JSON.stringify(v.samples), JSON.stringify(metrics),
@@ -127,6 +132,19 @@ function createSessionsRouters({ db, now }) {
       samples: JSON.parse(r.samples_json),
       metrics: applyQualityRule(JSON.parse(r.metrics_json)),
     });
+  });
+
+  // Recomputes the metrics of a stored session with the current analysis (e.g. rows stored with the
+  // old word-level metrics). Samples were validated and sorted at upload; they are used as stored.
+  sessions.post('/:id/reanalyze', (req, res) => {
+    const id = parseId(req.params.id);
+    const r = id === null ? undefined : q.get.get(id, req.user.id);
+    if (!r) return res.status(404).json(NOT_FOUND);
+    const metrics = computeLineMetrics(
+      JSON.parse(r.samples_json), JSON.parse(r.words_json), { w: r.screen_w, h: r.screen_h },
+    );
+    q.updateMetrics.run(JSON.stringify(metrics), r.id, req.user.id);
+    res.json({ id: r.id, metrics: applyQualityRule(metrics) });
   });
 
   return { childSessions, sessions };

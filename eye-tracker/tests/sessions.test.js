@@ -2,6 +2,8 @@
 const { startTestServer } = require('./helpers');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { computeMetrics } = require('../server/metrics');
+const { computeLineMetrics } = require('../server/line-metrics');
 
 function call(srv, method, path, cookie, body) {
   return fetch(srv.url + path, {
@@ -86,10 +88,14 @@ test('reading sessions', async (t) => {
     assert.equal(typeof body.id, 'number');
     assert.equal(body.metrics.wordsRead, 5);
     assert.equal(body.metrics.completed, true);
-    assert.equal(body.metrics.detail, 'word');
-    assert.ok(body.metrics.quality >= 0.6);
-    assert.equal(body.metrics.dwellMsByWord.length, 5, 'high quality keeps word-level dwell in the POST body');
-    assert.ok(body.metrics.dwellMsByWord.every((v) => v > 0));
+    assert.equal(body.metrics.detail, 'line');
+    assert.equal(body.metrics.reliable, true);
+    assert.ok(body.metrics.quality >= 0.5);
+    assert.equal(body.metrics.linesRead, 1);
+    assert.equal(body.metrics.totalLines, 1);
+    assert.equal(body.metrics.lineDwellMs.length, 1, 'a reliable session keeps line-level dwell in the POST body');
+    assert.ok(body.metrics.lineDwellMs[0] > 0);
+    assert.deepEqual(body.metrics.dwellMsByWord, [], 'word-level dwell is no longer computed');
     sessionId = body.id;
   });
 
@@ -142,13 +148,15 @@ test('reading sessions', async (t) => {
     assert.equal(metrics.wordsRead, 0);
     assert.deepEqual(metrics.dwellMsByWord, [], 'POST body applies the quality rule');
     assert.deepEqual(metrics.longDwellWords, []);
+    assert.equal(metrics.reliable, false);
+    assert.deepEqual(metrics.lineDwellMs, []);
     const detail = await (await call(srv, 'GET', `/api/sessions/${id}`, cookieA)).json();
     assert.deepEqual(detail.metrics.dwellMsByWord, []);
     assert.deepEqual(detail.metrics.longDwellWords, []);
     assert.equal(detail.metrics.quality, 0);
   });
 
-  await t.test('GET /api/sessions/:id: full detail; word-level data kept when quality is high', async () => {
+  await t.test('GET /api/sessions/:id: full detail; line-level data kept when reliable', async () => {
     const res = await call(srv, 'GET', `/api/sessions/${sessionId}`, cookieA);
     assert.equal(res.status, 200);
     const d = await res.json();
@@ -160,26 +168,32 @@ test('reading sessions', async (t) => {
     assert.deepEqual(d.screen, SCREEN);
     assert.equal(d.words.length, 5);
     assert.equal(d.samples.length, readAll(WORDS).length);
-    assert.equal(d.metrics.detail, 'word');
-    assert.equal(d.metrics.dwellMsByWord.length, 5);
-    assert.ok(d.metrics.dwellMsByWord.every((v) => v > 0));
+    assert.equal(d.metrics.reliable, true);
+    assert.equal(d.metrics.lineDwellMs.length, 1);
+    assert.ok(d.metrics.lineDwellMs[0] > 0);
   });
 
-  await t.test('low-quality session: detail hides word-level arrays but keeps the rest', async () => {
-    // One fixation on a word, then three fixations on empty screen: 1/4 assigned => quality 0.25.
-    const stray = [];
-    for (let k = 0; k < 75; k++) stray.push({ t: 1000 + k * STEP, x: 300 + 200 * Math.floor(k / 25), y: 600 });
-    const samples = [...readAll(WORDS.slice(0, 1)), ...stray];
-    const posted = await (await upload(cookieA, child, payload({ samples }))).json();
-    assert.equal(posted.metrics.detail, 'line');
-    assert.deepEqual(posted.metrics.dwellMsByWord, [], 'POST body applies the quality rule');
-    assert.deepEqual(posted.metrics.longDwellWords, []);
+  // Gaze found for the whole passage, then lost for three times as long: valid ratio ~0.24.
+  const lowQualitySamples = () => {
+    const read = readAll(WORDS);
+    const lost = Array.from({ length: 3 * read.length }, (_, k) => ({ t: read.length * STEP + k * STEP, x: null, y: null }));
+    return [...read, ...lost];
+  };
+
+  await t.test('low-quality session: detail hides line-level arrays but keeps the rest', async () => {
+    const posted = await (await upload(cookieA, child, payload({ samples: lowQualitySamples() }))).json();
+    assert.equal(posted.metrics.reliable, false);
+    assert.deepEqual(posted.metrics.lineDwellMs, [], 'POST body applies the quality rule');
+    assert.deepEqual(posted.metrics.longDwellLines, []);
+    assert.equal(posted.metrics.wordsRead, 5, 'line-level figures stay');
     const { id } = posted;
     const d = await (await call(srv, 'GET', `/api/sessions/${id}`, cookieA)).json();
-    assert.equal(d.metrics.detail, 'line');
-    assert.deepEqual(d.metrics.dwellMsByWord, []);
-    assert.deepEqual(d.metrics.longDwellWords, []);
-    assert.ok(d.metrics.quality < 0.6);
+    assert.equal(d.metrics.reliable, false);
+    assert.deepEqual(d.metrics.lineDwellMs, []);
+    assert.deepEqual(d.metrics.longDwellLines, []);
+    assert.ok(d.metrics.quality < 0.5);
+    const stored = JSON.parse(srv.db.prepare('SELECT metrics_json FROM read_sessions WHERE id = ?').get(id).metrics_json);
+    assert.equal(stored.lineDwellMs.length, 1, 'raw metrics are stored');
   });
 
   await t.test('list is chronological, omits samples/words, and applies the quality rule', async () => {
@@ -197,8 +211,8 @@ test('reading sessions', async (t) => {
     for (const s of list) assert.deepEqual(Object.keys(s).sort(), ['id', 'kind', 'metrics', 'passageId', 'startedAt']);
     assert.ok(list[0].startedAt < list[1].startedAt && list[1].startedAt < list[2].startedAt);
     assert.equal(list[1].kind, 'new');
-    assert.equal(list[0].metrics.dwellMsByWord.length, 5);
-    assert.deepEqual(list[1].metrics.dwellMsByWord, []);
+    assert.equal(list[0].metrics.lineDwellMs.length, 1);
+    assert.deepEqual(list[1].metrics.lineDwellMs, []);
   });
 
   await t.test('list is ordered by started_at even when ids are not', async () => {
@@ -246,6 +260,60 @@ test('reading sessions', async (t) => {
     const { id } = await (await upload(cookieA, c, payload())).json();
     assert.equal((await call(srv, 'DELETE', `/api/children/${c}`, cookieA)).status, 204);
     assert.equal((await call(srv, 'GET', `/api/sessions/${id}`, cookieA)).status, 404);
+  });
+
+  const reanalyze = (cookie, id) => call(srv, 'POST', `/api/sessions/${id}/reanalyze`, cookie);
+  const storedMetrics = (id) => srv.db.prepare('SELECT metrics_json FROM read_sessions WHERE id = ?').get(id).metrics_json;
+
+  await t.test('reanalyze: an old-format (word-level) row gets the line fields, stored and returned', async () => {
+    const { id } = await (await upload(cookieA, child, payload())).json();
+    const legacy = computeMetrics(readAll(WORDS), WORDS, SCREEN);
+    assert.equal(legacy.detail, 'word');
+    srv.db.prepare('UPDATE read_sessions SET metrics_json = ? WHERE id = ?').run(JSON.stringify(legacy), id);
+
+    const res = await reanalyze(cookieA, id);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.id, id);
+    assert.equal(body.metrics.detail, 'line');
+    assert.equal(body.metrics.reliable, true);
+    assert.equal(body.metrics.linesRead, 1);
+    assert.equal(body.metrics.totalLines, 1);
+    assert.equal(body.metrics.lineDwellMs.length, 1);
+    const stored = JSON.parse(storedMetrics(id));
+    assert.deepEqual(stored, computeLineMetrics(readAll(WORDS), WORDS, SCREEN), 'recomputed from the stored samples/words/screen');
+    const d = await (await call(srv, 'GET', `/api/sessions/${id}`, cookieA)).json();
+    assert.deepEqual(d.metrics, body.metrics);
+  });
+
+  await t.test('reanalyze is idempotent', async () => {
+    const { id } = await (await upload(cookieA, child, payload())).json();
+    const first = await (await reanalyze(cookieA, id)).json();
+    const before = storedMetrics(id);
+    const second = await (await reanalyze(cookieA, id)).json();
+    assert.deepEqual(second, first);
+    assert.equal(storedMetrics(id), before);
+  });
+
+  await t.test('reanalyze applies the quality rule to its response but stores raw metrics', async () => {
+    const { id } = await (await upload(cookieA, child, payload({ samples: lowQualitySamples() }))).json();
+    const body = await (await reanalyze(cookieA, id)).json();
+    assert.equal(body.metrics.reliable, false);
+    assert.deepEqual(body.metrics.lineDwellMs, []);
+    assert.equal(JSON.parse(storedMetrics(id)).lineDwellMs.length, 1);
+  });
+
+  await t.test('reanalyze: login required; foreign teacher, admin, unknown and bad ids get the shared 404; row unchanged', async () => {
+    const { id } = await (await upload(cookieA, child, payload())).json();
+    srv.db.prepare('UPDATE read_sessions SET metrics_json = ? WHERE id = ?').run('{"marker":1}', id);
+    assert.equal((await reanalyze(null, id)).status, 401);
+    const notFound = await (await call(srv, 'GET', '/api/sessions/999999', cookieA)).json();
+    for (const [cookie, target] of [[cookieB, id], [adminCookie, id], [cookieA, 999999], [cookieA, 'abc']]) {
+      const res = await reanalyze(cookie, target);
+      assert.equal(res.status, 404);
+      assert.deepEqual(await res.json(), notFound);
+    }
+    assert.equal(storedMetrics(id), '{"marker":1}');
   });
 
   await t.test('malformed input: 400, never a crash', async () => {
