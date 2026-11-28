@@ -52,6 +52,18 @@ test('csvCell / toCsv', () => {
   assert.equal(csvCell('=1,2'), '"\'=1,2"', 'prefixed, then quoted');
   assert.equal(csvCell('a=b'), 'a=b', 'only a leading trigger matters');
   assert.equal(csvCell("'=x"), "'=x", 'already starts with a quote: not a formula');
+  // The trigger is judged after leading whitespace too, and LF and full-width look-alikes count.
+  assert.equal(csvCell(' =1+1'), "' =1+1");
+  assert.equal(csvCell('  \t@x'), "'  \t@x");
+  assert.equal(csvCell('\n=1+1'), '"\'\n=1+1"');
+  assert.equal(csvCell('\u3000=1+1'), "'\u3000=1+1", 'ideographic space then formula');
+  for (const lead of ['＝', '＋', '－', '＠']) assert.equal(csvCell(`${lead}1+1`), `'${lead}1+1`, lead);
+  assert.equal(csvCell(' safe'), ' safe');
+  assert.equal(csvCell('a =1'), 'a =1');
+  // Numbers stay numbers: a negative figure is never prefixed.
+  assert.equal(csvCell(-5), '-5');
+  assert.equal(csvCell(-0.5), '-0.5');
+  assert.equal(toCsv([['n', -3]]), '\uFEFFn,-3\r\n');
   assert.equal(toCsv([['a', 'b'], ['1', '=2']]), '﻿a,b\r\n1,\'=2\r\n');
 });
 
@@ -96,7 +108,10 @@ test('GET /api/children/export.csv', async (t) => {
   // Hostile text everywhere a teacher can type.
   await addChild(cookieA, { code: '=HYPERLINK("x")', initials: '@SUM(1)', group: '+1,"q"' });
   await addChild(cookieA, { code: '-1+1', initials: 'a,b', group: 'two\nlines' });
-  await addChild(cookieA, { code: '\tTAB', initials: '\rCR', group: '한글' });
+  // The API trims codes and initials, so a tab/CR-led value can only come from older rows: write it directly.
+  const legacy = await addChild(cookieA, { code: 'LEGACY', initials: 'LG', group: '한글' });
+  srv.db.prepare('UPDATE children SET code = ?, initials = ? WHERE id = ?').run('\tTAB', '\rCR', legacy);
+  await addChild(cookieA, { code: ' =1+1', initials: '＝SUM', group: '＠x' });
   // Another teacher's data must never show up.
   const b1 = await addChild(cookieB, { code: 'B-SECRET', initials: 'ZZ', group: 'B-GROUP', consentDate: '2026-03-02' });
   addSession(b1, 'reference', t0, reliable({ wpm: 77 }));
@@ -140,7 +155,7 @@ test('GET /api/children/export.csv', async (t) => {
     assert.deepEqual(byCode['A-4'], ['A-4', 'W4', 'elementary', '', '', '1', iso(t0), '71', '', '', 'true']);
     assert.deepEqual(byCode['A-5'], ['A-5', 'W5', 'elementary', '', '', '1', iso(t0), '', '', '', 'false']);
     assert.deepEqual(byCode['A-6'], ['A-6', 'N6', 'elementary', '', '', '1', iso(t0 + 5 * DAY), '', '', '', '']);
-    assert.equal(rows.length, 1 + 9, 'header plus this teacher\'s nine children');
+    assert.equal(rows.length, 1 + 10, 'header plus this teacher\'s ten children');
     assert.ok(rows.every((r) => r.length === HEADER.length));
   });
 
@@ -152,16 +167,17 @@ test('GET /api/children/export.csv', async (t) => {
   await t.test('quoting and formula injection: hostile cells are neutralised and still round-trip', async () => {
     const raw = (await body(cookieA));
     const rows = parseCsv(raw.slice(1)).slice(1);
-    const hostile = rows.slice(6, 9);
+    const hostile = rows.slice(6, 10);
     assert.deepEqual(hostile.map((r) => r.slice(0, 4)), [
       ["'=HYPERLINK(\"x\")", "'@SUM(1)", 'elementary', "'+1,\"q\""],
       ["'-1+1", 'a,b', 'elementary', 'two\nlines'],
       ["'\tTAB", "'\rCR", 'elementary', '한글'],
+      ["'=1+1", "'＝SUM", 'elementary', "'＠x"],
     ]);
     // Raw bytes: the quote characters really are doubled, and no cell starts with a trigger.
     assert.ok(raw.includes('"\'=HYPERLINK(""x"")"'));
     for (const row of rows) {
-      for (const cell of row) assert.doesNotMatch(cell, /^[=+\-@\t\r]/, `unprotected cell ${JSON.stringify(cell)}`);
+      for (const cell of row) assert.doesNotMatch(cell.trimStart(), /^[=+\-@＝＋－＠\t\r\n]/, `unprotected cell ${JSON.stringify(cell)}`);
     }
   });
 

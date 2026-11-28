@@ -29,7 +29,7 @@ function createApp({ db, now = Date.now }) {
 
   app.use('/api/admin', createAdminRouter({ db, now }));
   // Public: the one-time reset token is the credential, so it sits outside the guards above.
-  app.use('/api/password-reset', createPasswordResetRouter({ db, now }));
+  app.use('/api/password-reset', createPasswordResetRouter({ db, now, clearLoginLimit: auth.clearLoginLimit }));
   app.use('/api/children', createChildrenRouter({ db, now }));
   app.use('/api/passages', createPassagesRouter());
   app.use('/api/children/:id/trend', reports.childTrend);

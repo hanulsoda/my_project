@@ -19,12 +19,15 @@ function isValidIsoDate(s) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
-function isLabel(v) {
-  return typeof v === 'string' && v.trim().length > 0 && v.length <= MAX_LEN;
+// code and initials: the trimmed value (1..MAX_LEN chars), or null when invalid.
+function parseLabel(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length > 0 && t.length <= MAX_LEN ? t : null;
 }
 
 // Optional free-text fields: null, '' or blank clears (stored as NULL). `group` is trimmed (it is
-// matched exactly by the list filter); `note` is kept as typed.
+// matched exactly by the list filter); `note` is kept as typed. code and initials are trimmed too.
 function parseGroup(v) {
   if (v === null || v === undefined) return { value: null };
   if (typeof v !== 'string') return { error: `group must be a string up to ${MAX_LEN} chars, or null to clear` };
@@ -129,8 +132,10 @@ function createChildrenRouter({ db, now }) {
     const { code, initials, gradeBand, consentDate } = req.body ?? {};
     const group = parseGroup(req.body?.group);
     const note = parseNote(req.body?.note);
-    if (!isLabel(code)) return res.status(400).json({ error: `code must be a non-empty string up to ${MAX_LEN} chars` });
-    if (!isLabel(initials)) return res.status(400).json({ error: `initials must be a non-empty string up to ${MAX_LEN} chars` });
+    const cleanCode = parseLabel(code);
+    const cleanInitials = parseLabel(initials);
+    if (cleanCode === null) return res.status(400).json({ error: `code must be a non-empty string up to ${MAX_LEN} chars` });
+    if (cleanInitials === null) return res.status(400).json({ error: `initials must be a non-empty string up to ${MAX_LEN} chars` });
     if (!GRADE_BANDS.includes(gradeBand)) return res.status(400).json({ error: `gradeBand must be one of ${GRADE_BANDS.join('|')}` });
     if (consentDate != null && !isValidIsoDate(consentDate)) return res.status(400).json({ error: 'consentDate must be a valid YYYY-MM-DD date' });
     if (group.error) return res.status(400).json({ error: group.error });
@@ -138,7 +143,7 @@ function createChildrenRouter({ db, now }) {
 
     try {
       const { lastInsertRowid } = q.insert.run(
-        req.user.id, code, initials, gradeBand, consentDate ?? '', now(), group.value, note.value,
+        req.user.id, cleanCode, cleanInitials, gradeBand, consentDate ?? '', now(), group.value, note.value,
       );
       res.status(201).json(toChild(q.get.get(lastInsertRowid, req.user.id)));
     } catch (err) {
@@ -163,12 +168,14 @@ function createChildrenRouter({ db, now }) {
       consentDate: row.consent_date, group: row.group_name, note: row.note,
     };
     if (sent('code')) {
-      if (!isLabel(body.code)) return res.status(400).json({ error: `code must be a non-empty string up to ${MAX_LEN} chars` });
-      next.code = body.code;
+      const c = parseLabel(body.code);
+      if (c === null) return res.status(400).json({ error: `code must be a non-empty string up to ${MAX_LEN} chars` });
+      next.code = c;
     }
     if (sent('initials')) {
-      if (!isLabel(body.initials)) return res.status(400).json({ error: `initials must be a non-empty string up to ${MAX_LEN} chars` });
-      next.initials = body.initials;
+      const i = parseLabel(body.initials);
+      if (i === null) return res.status(400).json({ error: `initials must be a non-empty string up to ${MAX_LEN} chars` });
+      next.initials = i;
     }
     if (sent('gradeBand')) {
       if (!GRADE_BANDS.includes(body.gradeBand)) return res.status(400).json({ error: `gradeBand must be one of ${GRADE_BANDS.join('|')}` });

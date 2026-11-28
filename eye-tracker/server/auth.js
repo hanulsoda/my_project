@@ -200,7 +200,10 @@ function createAuth({ db, now = Date.now }) {
     } catch (err) { next(err); }
   });
 
-  return { router, requireTeacher, requireAdmin, authenticate };
+  // A password reset ends any login lockout the account had collected (key = normalized email).
+  const clearLoginLimit = (email) => loginLimiter.clear(normEmail(email));
+
+  return { router, requireTeacher, requireAdmin, authenticate, clearLoginLimit };
 }
 
 // Creates the first admin account when the users table is empty. Returns true if created.

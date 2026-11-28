@@ -39,7 +39,7 @@ function createAdminRouter({ db, now }) {
        FROM users u WHERE u.id = ?`),
     expireResets: db.prepare('UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL'),
     insertReset: db.prepare(
-      'INSERT INTO password_resets (user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)'),
+      'INSERT INTO password_resets (user_id, token_hash, created_at, expires_at, created_by) VALUES (?, ?, ?, ?, ?) RETURNING id'),
     pendingInvites: db.prepare(
       'SELECT id, email, expires_at FROM invites WHERE used_at IS NULL AND expires_at > ? ORDER BY id'),
     revokeInvite: db.prepare('UPDATE invites SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?'),
@@ -88,14 +88,19 @@ function createAdminRouter({ db, now }) {
 
   // One-time reset link. Only sha256(token) is stored; a new link retires the user's earlier
   // unused ones (those answer 410 like any spent link).
+  // A disabled account gets no link: a reset must never be a way back in, and enabling is its own
+  // explicit, audited step.
   router.post('/teachers/:id/reset-link', loadTeacher, (req, res) => {
+    if (req.target.disabled_at !== null) {
+      return res.status(409).json({ error: '비활성화된 계정은 재설정할 수 없습니다. 먼저 활성화해 주세요' });
+    }
     const token = crypto.randomBytes(24).toString('base64url');
     const expiresAt = now() + RESET_TTL_MS;
-    db.transaction(() => {
+    const resetId = db.transaction(() => {
       q.expireResets.run(now(), req.target.id);
-      q.insertReset.run(req.target.id, sha256Hex(token), now(), expiresAt);
+      return q.insertReset.get(req.target.id, sha256Hex(token), now(), expiresAt, req.user.id).id;
     })();
-    audit(db, now, req.user.id, 'reset.create', `user:${req.target.id}`);
+    audit(db, now, req.user.id, 'reset.create', `user:${req.target.id}`, `reset=${resetId}`);
     res.status(201).json({ url: `/reset.html?token=${token}`, expiresAt });
   });
 

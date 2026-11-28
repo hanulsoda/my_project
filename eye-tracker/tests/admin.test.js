@@ -470,3 +470,94 @@ test('audit log', async (t) => {
     assert.equal(srv.db.prepare("SELECT detail FROM audit_log WHERE action = 'x.long'").get().detail.length, 200);
   });
 });
+
+test('reset links: concurrency, disabled accounts, audit linkage, login limiter', async (t) => {
+  const srv = await startTestServer();
+  t.after(srv.close);
+  const adminCookie = await srv.loginAs('admin');
+  const adminId = idOf(srv, emailOf(srv, adminCookie));
+  const mk = async () => {
+    const cookie = await srv.loginAs('teacher');
+    const email = emailOf(srv, cookie);
+    return { cookie, email, id: idOf(srv, email) };
+  };
+  const link = async (id) => {
+    const res = await call(srv, 'POST', `/api/admin/teachers/${id}/reset-link`, adminCookie);
+    assert.equal(res.status, 201);
+    return new URL((await res.json()).url, 'http://x').searchParams.get('token');
+  };
+  const reset = (token, password) => call(srv, 'POST', `/api/password-reset/${token}`, null, { password });
+
+  await t.test('4 simultaneous uses of one valid link: exactly one 200, three 410', async () => {
+    const u = await mk();
+    const token = await link(u.id);
+    const results = await Promise.all([0, 1, 2, 3].map(() => reset(token, 'brand-new-password')));
+    assert.deepEqual(results.map((r) => r.status).sort(), [200, 410, 410, 410]);
+    assert.equal(srv.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'reset.use'").get().n, 1, 'one audit row, not four');
+    assert.equal((await login(srv, u.email, 'brand-new-password')).status, 200);
+  });
+
+  await t.test('a disabled account gets no link: 409 with a clear message, nothing created; enabling allows it again', async () => {
+    const u = await mk();
+    await call(srv, 'POST', `/api/admin/teachers/${u.id}/disable`, adminCookie);
+    const before = srv.db.prepare('SELECT COUNT(*) AS n FROM password_resets').get().n;
+    const res = await call(srv, 'POST', `/api/admin/teachers/${u.id}/reset-link`, adminCookie);
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), { error: '비활성화된 계정은 재설정할 수 없습니다. 먼저 활성화해 주세요' });
+    assert.equal(srv.db.prepare('SELECT COUNT(*) AS n FROM password_resets').get().n, before);
+    await call(srv, 'POST', `/api/admin/teachers/${u.id}/enable`, adminCookie);
+    assert.equal((await call(srv, 'POST', `/api/admin/teachers/${u.id}/reset-link`, adminCookie)).status, 201);
+  });
+
+  await t.test('a reset never re-enables an account that was disabled after the link was made', async () => {
+    const u = await mk();
+    const token = await link(u.id);
+    await call(srv, 'POST', `/api/admin/teachers/${u.id}/disable`, adminCookie);
+    assert.equal((await reset(token, 'brand-new-password')).status, 200);
+    assert.notEqual(srv.db.prepare('SELECT disabled_at FROM users WHERE id = ?').get(u.id).disabled_at, null, 'still disabled');
+    assert.equal((await login(srv, u.email, 'brand-new-password')).status, 401);
+  });
+
+  await t.test('audit: reset.create and reset.use name the reset id, reset.use also the creating admin; never the token', async () => {
+    const u = await mk();
+    const token = await link(u.id);
+    const resetId = srv.db.prepare('SELECT id, created_by FROM password_resets WHERE token_hash = ?').get(sha256(token));
+    assert.equal(resetId.created_by, adminId);
+    await reset(token, 'brand-new-password');
+    const rows = srv.db.prepare("SELECT * FROM audit_log WHERE target = ? AND action IN ('reset.create', 'reset.use') ORDER BY id DESC LIMIT 2").all(`user:${u.id}`);
+    const [use, create] = rows;
+    assert.equal(create.action, 'reset.create');
+    assert.equal(create.detail, `reset=${resetId.id}`);
+    assert.equal(use.action, 'reset.use');
+    assert.equal(use.detail, `reset=${resetId.id} created_by=${adminId}`);
+    for (const r of rows) assert.ok(!JSON.stringify(r).includes(token));
+  });
+
+  await t.test('a successful reset clears the login lockout for that email', async () => {
+    const u = await mk();
+    for (let i = 0; i < 10; i++) assert.equal((await login(srv, u.email, 'wrong-password')).status, 401);
+    assert.equal((await login(srv, u.email, TEST_PASSWORD)).status, 429, 'locked out');
+    const token = await link(u.id);
+    assert.equal((await reset(token, 'brand-new-password')).status, 200);
+    assert.equal((await login(srv, u.email, 'brand-new-password')).status, 200, 'no waiting out the window');
+  });
+});
+
+test('revoking an already revoked share link is idempotent: no second audit row, revoked_at kept', async (t) => {
+  const srv = await startTestServer();
+  t.after(srv.close);
+  const cookie = await srv.loginAs('teacher');
+  const child = await (await call(srv, 'POST', '/api/children', cookie, { code: 'R-1', initials: 'KJ', gradeBand: 'elementary', consentDate: '2026-03-02' })).json();
+  const sid = srv.db.prepare(
+    `INSERT INTO read_sessions (child_id, passage_id, kind, started_at, screen_w, screen_h, words_json, samples_json, metrics_json)
+     VALUES (?, 'p', 'new', 1, 1280, 720, '[]', '[]', '{}')`,
+  ).run(child.id).lastInsertRowid;
+  const share = await (await call(srv, 'POST', `/api/sessions/${sid}/share`, cookie, {})).json();
+  assert.equal((await call(srv, 'DELETE', `/api/share/${share.token}`, cookie)).status, 204);
+  const stamp = srv.db.prepare('SELECT revoked_at FROM share_links WHERE token = ?').get(share.token).revoked_at;
+  srv.clock.advance(5000);
+  assert.equal((await call(srv, 'DELETE', `/api/share/${share.token}`, cookie)).status, 204, 'still 204');
+  assert.equal(srv.db.prepare('SELECT revoked_at FROM share_links WHERE token = ?').get(share.token).revoked_at, stamp);
+  assert.equal(srv.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'share.revoke'").get().n, 1);
+  assert.equal((await call(srv, 'DELETE', '/api/share/unknown-token', cookie)).status, 404);
+});

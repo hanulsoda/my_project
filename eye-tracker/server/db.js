@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS password_resets (
   token_hash TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
-  used_at    INTEGER
+  used_at    INTEGER,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id);
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -94,6 +95,20 @@ function migrate(db) {
   addColumn('invites', 'id', 'INTEGER');
   db.exec('UPDATE invites SET id = rowid WHERE id IS NULL');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS invites_id ON invites(id)');
+  addColumn('password_resets', 'created_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+
+  // One child code per teacher, ignoring case and surrounding spaces. If rows already collide
+  // that way the index cannot be built: leave the data alone, warn, and start anyway (the exact
+  // children_teacher_code index still applies; the API trims codes on write).
+  const ci = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'children_teacher_code_ci'").get();
+  if (!ci) {
+    const clash = db.prepare('SELECT 1 FROM children GROUP BY teacher_id, lower(trim(code)) HAVING COUNT(*) > 1 LIMIT 1').get();
+    if (clash) {
+      console.warn('[db] children_teacher_code_ci not created: some teacher already has child codes that differ only by case or spaces; fix them and restart');
+    } else {
+      db.exec('CREATE UNIQUE INDEX children_teacher_code_ci ON children(teacher_id, lower(trim(code)))');
+    }
+  }
 }
 
 function openDb(file) {

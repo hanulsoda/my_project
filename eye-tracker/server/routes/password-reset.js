@@ -7,10 +7,11 @@ const { audit } = require('../audit');
 // PUBLIC (the one-time token is the credential): POST /api/password-reset/:token {password}.
 // Same answers as invite acceptance: 404 unknown, 410 used or expired. Failures are counted per
 // token hash with the login limiter; a currently valid link is never locked by a bad password.
-function createPasswordResetRouter({ db, now }) {
+function createPasswordResetRouter({ db, now, clearLoginLimit = () => {} }) {
   const limiter = createLoginLimiter({ now });
   const q = {
-    byHash: db.prepare('SELECT id, user_id, expires_at, used_at FROM password_resets WHERE token_hash = ?'),
+    byHash: db.prepare('SELECT id, user_id, expires_at, used_at, created_by FROM password_resets WHERE token_hash = ?'),
+    email: db.prepare('SELECT email FROM users WHERE id = ?'),
     claim: db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ? AND used_at IS NULL'),
     setPassword: db.prepare('UPDATE users SET pw_hash = ? WHERE id = ?'),
     dropSessions: db.prepare('DELETE FROM auth_sessions WHERE user_id = ?'),
@@ -49,10 +50,13 @@ function createPasswordResetRouter({ db, now }) {
         if (q.claim.run(now(), reset.id).changes === 0) return 'used';
         q.setPassword.run(pwHash, reset.user_id);
         q.dropSessions.run(reset.user_id); // every old login ends with the old password
-        audit(db, now, reset.user_id, 'reset.use', `user:${reset.user_id}`);
+        // Ids only, so the create and use rows can be matched; never the token or its hash.
+        audit(db, now, reset.user_id, 'reset.use', `user:${reset.user_id}`, `reset=${reset.id} created_by=${reset.created_by ?? 'none'}`);
         return 'ok';
       })();
       if (outcome === 'used') return res.status(410).json({ error: 'reset link expired or already used' });
+      const user = q.email.get(reset.user_id);
+      if (user) clearLoginLimit(user.email);
       res.json({ ok: true });
     } catch (err) { next(err); }
   });

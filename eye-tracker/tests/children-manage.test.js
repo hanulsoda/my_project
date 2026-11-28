@@ -171,3 +171,48 @@ test('children: group, note and partial updates', async (t) => {
     assert.doesNotMatch(text, /SECRET-CHILD-NOTE|SECRET-GROUP/);
   });
 });
+
+test('children: code, initials and group are trimmed; duplicate codes ignore case and surrounding spaces', async (t) => {
+  const srv = await startTestServer();
+  t.after(srv.close);
+  const cookieA = await srv.loginAs('teacher');
+  const cookieB = await srv.loginAs('teacher');
+  const post = (cookie, body) => call(srv, 'POST', '/api/children', cookie, { gradeBand: 'elementary', initials: 'KJ', ...body });
+
+  await t.test('POST stores trimmed values', async () => {
+    const res = await post(cookieA, { code: '  M1  ', initials: ' KJ ', group: '  반  ' });
+    assert.equal(res.status, 201);
+    const c = await res.json();
+    assert.deepEqual([c.code, c.initials, c.group], ['M1', 'KJ', '반']);
+    const row = srv.db.prepare('SELECT code, initials, group_name FROM children WHERE id = ?').get(c.id);
+    assert.deepEqual({ ...row }, { code: 'M1', initials: 'KJ', group_name: '반' });
+  });
+
+  await t.test("' M1 ' and 'm1' are duplicates of 'M1' (409), for POST and PATCH; another teacher may reuse it", async () => {
+    for (const code of [' M1 ', 'm1', 'M1', ' m1']) {
+      assert.equal((await post(cookieA, { code })).status, 409, JSON.stringify(code));
+    }
+    assert.equal((await post(cookieB, { code: 'm1' })).status, 201);
+    const other = await (await post(cookieA, { code: 'M2' })).json();
+    for (const code of [' M1 ', 'm1']) {
+      assert.equal((await call(srv, 'PATCH', `/api/children/${other.id}`, cookieA, { code })).status, 409, `PATCH ${JSON.stringify(code)}`);
+    }
+    assert.equal(srv.db.prepare('SELECT code FROM children WHERE id = ?').get(other.id).code, 'M2');
+    // Changing only the case of its own code is allowed.
+    const own = await call(srv, 'PATCH', `/api/children/${other.id}`, cookieA, { code: '  m2 ' });
+    assert.equal(own.status, 200);
+    assert.equal((await own.json()).code, 'm2');
+  });
+
+  await t.test('PATCH trims initials, code and group; blank-after-trim is still 400', async () => {
+    const c = await (await post(cookieA, { code: 'T-1' })).json();
+    const res = await call(srv, 'PATCH', `/api/children/${c.id}`, cookieA, { code: ' T-2 ', initials: '  LS ', group: ' g ' });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual([body.code, body.initials, body.group], ['T-2', 'LS', 'g']);
+    for (const bad of [{ code: '   ' }, { initials: '\t' }, { code: ` ${'x'.repeat(33)} ` }]) {
+      assert.equal((await call(srv, 'PATCH', `/api/children/${c.id}`, cookieA, bad)).status, 400, JSON.stringify(bad));
+    }
+    assert.equal((await post(cookieA, { code: ` ${'y'.repeat(32)} ` })).status, 201, '32 chars plus padding is fine');
+  });
+});

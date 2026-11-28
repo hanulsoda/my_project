@@ -39,7 +39,7 @@ function createReportsRouters({ db, now }) {
     ),
     revoke: db.prepare(
       `UPDATE share_links SET revoked_at = ?
-       WHERE token = ? AND session_id IN (
+       WHERE token = ? AND revoked_at IS NULL AND session_id IN (
          SELECT s.id FROM read_sessions s JOIN children c ON c.id = s.child_id WHERE c.teacher_id = ?)`,
     ),
     report: db.prepare(
@@ -103,8 +103,10 @@ function createReportsRouters({ db, now }) {
   share.delete('/:token', (req, res) => {
     const link = q.ownLink.get(req.params.token, req.user.id);
     if (!link) return res.status(404).json(NOT_FOUND);
-    q.revoke.run(now(), req.params.token, req.user.id);
-    audit(db, now, req.user.id, 'share.revoke', `session:${link.session_id}`);
+    // Revoking a revoked link keeps the first stamp and writes no second audit row (still 204).
+    if (q.revoke.run(now(), req.params.token, req.user.id).changes > 0) {
+      audit(db, now, req.user.id, 'share.revoke', `session:${link.session_id}`);
+    }
     res.status(204).end();
   });
 

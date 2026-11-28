@@ -53,7 +53,7 @@ test('fresh database has every management column and table', () => {
   assert.ok(cols(db, 'children').includes('group_name'));
   assert.ok(cols(db, 'children').includes('note'));
   assert.ok(cols(db, 'read_sessions').includes('note'));
-  assert.deepEqual(cols(db, 'password_resets'), ['id', 'user_id', 'token_hash', 'created_at', 'expires_at', 'used_at']);
+  assert.deepEqual(cols(db, 'password_resets'), ['id', 'user_id', 'token_hash', 'created_at', 'expires_at', 'used_at', 'created_by']);
   assert.deepEqual(cols(db, 'audit_log'), ['id', 'at', 'actor_user_id', 'action', 'target', 'detail']);
   db.close();
 });
@@ -84,6 +84,57 @@ test('old-schema database: every column and table is added, data is kept, a seco
     assert.equal(again.prepare('SELECT COUNT(*) AS n FROM password_resets').get().n, 1);
     assert.deepEqual(again.prepare('SELECT id FROM invites ORDER BY id').all().map((i) => i.id), invites.map((i) => i.id).sort((a, b) => a - b));
     again.close();
+  });
+});
+
+const indexNames = (db, table) => db.prepare(`PRAGMA index_list(${table})`).all().map((i) => i.name);
+
+test('password_resets without created_by (first release of the table) gains it, rows kept', () => {
+  withOldDb((file) => {
+    const old = new Database(file);
+    old.exec(`CREATE TABLE password_resets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER);`);
+    old.prepare("INSERT INTO password_resets (user_id, token_hash, created_at, expires_at) VALUES (1, 'h1', 1, 2)").run();
+    old.close();
+    const db = openDb(file);
+    assert.ok(cols(db, 'password_resets').includes('created_by'));
+    assert.deepEqual({ ...db.prepare('SELECT token_hash, created_by FROM password_resets').get() }, { token_hash: 'h1', created_by: null });
+    db.close();
+    openDb(file).close();
+  });
+});
+
+test('a case/whitespace-insensitive unique code index per teacher exists on fresh and clean old databases', () => {
+  const fresh = openDb(':memory:');
+  assert.ok(indexNames(fresh, 'children').includes('children_teacher_code_ci'));
+  fresh.close();
+  withOldDb((file) => {
+    const db = openDb(file);
+    assert.ok(indexNames(db, 'children').includes('children_teacher_code_ci'));
+    db.prepare("INSERT INTO users (email, pw_hash, role, created_at) VALUES ('u2@example.test', 'h', 'teacher', 1)").run();
+    const ins = db.prepare("INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at) VALUES (?, ?, 'X', 'low', '', 1)");
+    ins.run(1, 'M1');
+    assert.throws(() => ins.run(1, 'm1'), /UNIQUE/);
+    assert.throws(() => ins.run(1, ' M1 '), /UNIQUE/);
+    ins.run(2, 'm1'); // another teacher may reuse it
+    db.close();
+  });
+});
+
+test('pre-existing case/space duplicates: the index is skipped with a warning, startup does not fail, data kept', (t) => {
+  withOldDb((file) => {
+    const old = new Database(file);
+    old.prepare("INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at) VALUES (1, 'm1', 'DUP', 'low', '', 1), (1, ' M1', 'DUP2', 'low', '', 1)").run();
+    old.close();
+    const warn = t.mock.method(console, 'warn', () => {});
+    const db = openDb(file);
+    assert.ok(!indexNames(db, 'children').includes('children_teacher_code_ci'), 'no index created');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM children').get().n, 3, 'nothing deleted or merged');
+    assert.equal(warn.mock.callCount(), 1);
+    assert.match(String(warn.mock.calls[0].arguments[0]), /children_teacher_code_ci/);
+    db.close();
+    openDb(file).close(); // still starts the second time
   });
 });
 
