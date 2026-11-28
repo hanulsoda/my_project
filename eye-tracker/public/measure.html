@@ -6,17 +6,31 @@
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex">
 <title>정확도 점검 - 읽기 시선 기록</title>
+<link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
 <link rel="stylesheet" href="/css/tokens.css">
 <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/dahim-skin.css">
 <link rel="stylesheet" href="/css/measure.css">
 </head>
-<body class="measure-page">
-<header id="topbar" class="topbar">
-  <span class="topbar-mark" aria-hidden="true"></span>
-  <span class="topbar-brand">다힘국어논술학원</span>
-  <span class="topbar-product">읽기 측정</span>
-  <span id="who" class="topbar-user"></span>
-</header>
+<body class="dh-skin measure-page">
+<!-- Site header, page head and tabs; hidden while the "준비됐나요?" screen is up (measure.js). -->
+<div id="topbar" class="dh-site-top-wrap">
+  <div id="site-header"></div>
+  <div class="cd-wrap measure-head">
+    <div class="dh-ph">
+      <div class="dh-ph-main">
+        <p class="dh-ph-title"><span class="dh-ph-icon" data-icon="eye" data-icon-size="18" aria-hidden="true"></span>읽기 시선 기록</p>
+        <p class="dh-ph-sub">기기에서 시선이 화면의 어디까지 맞는지 점검해요. 결과는 이 화면에만 남고 서버로 보내지 않아요.</p>
+      </div>
+    </div>
+    <nav class="dh-ph-tabs" aria-label="읽기 시선 기록 메뉴">
+      <a class="dh-ph-tab" href="/children.html">아이 목록</a>
+      <a class="dh-ph-tab" href="/children.html#teachers" hidden data-admin-only>선생님 관리</a>
+      <a class="dh-ph-tab" href="/children.html#audit" hidden data-admin-only>활동 기록</a>
+      <a class="dh-ph-tab on" href="/measure.html" aria-current="page">정확도 점검</a>
+    </nav>
+  </div>
+</div>
 
 <main class="measure">
   <section id="s-loading"><p>불러오는 중…</p></section>
@@ -187,6 +201,7 @@
 <script src="/vendor/webgazer.js"></script>
 <script src="/js/dom.js"></script>
 <script src="/js/api.js"></script>
+<script src="/js/site-header.js"></script>
 <script src="/js/calibrate.js"></script>
 <script src="/js/capture.js"></script>
 <script src="/js/measure-math.js"></script>

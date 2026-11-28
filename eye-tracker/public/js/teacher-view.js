@@ -69,10 +69,12 @@
     ];
   }
 
-  // query: matches code or initials (case-insensitive); group: null = all, '' = no group.
-  function filterChildren(children, { query = '', group = ALL, missingOnly = false } = {}) {
+  // query: matches code or initials (case-insensitive); group: null = all, '' = no group;
+  // onlyIds: a Set of child ids to keep (the "오래 측정 안 한 아이" tile), or null for all.
+  function filterChildren(children, { query = '', group = ALL, missingOnly = false, onlyIds = null } = {}) {
     const q = query.trim().toLowerCase();
     return children.filter((c) => {
+      if (onlyIds && !onlyIds.has(c.id)) return false;
       if (q && !c.code.toLowerCase().includes(q) && !c.initials.toLowerCase().includes(q)) return false;
       if (group === NO_GROUP && c.group) return false;
       if (group !== ALL && group !== NO_GROUP && c.group !== group) return false;
@@ -90,6 +92,61 @@
 
   const pageCaption = (pg, unit = '명') => (pg.total === 0 ? `0${unit}` : `${pg.total}${unit} 중 ${pg.from}–${pg.to}${unit} 표시`);
 
+  // ---- list summary tiles -----------------------------------------------------------------
+  // The list API gives each child's consent date but no measurement dates, so the page reads
+  // every child's session list (GET /api/children/:id/sessions) and passes the newest startedAt
+  // per child here. Days are Korean calendar days; a week starts on Monday 00:00 Korean time.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const KST_MS = 9 * 60 * 60 * 1000;
+  const STALE_DAYS = 30;
+  const kstDay = (ms) => Math.floor((ms + KST_MS) / DAY_MS); // days since 1970-01-01 (a Thursday)
+
+  function weekStartKst(now) {
+    const d = kstDay(now);
+    return (d - ((d + 3) % 7)) * DAY_MS - KST_MS;
+  }
+
+  // Whole Korean calendar days between `ms` and `now` (0 = today).
+  const daysAgo = (ms, now) => kstDay(now) - kstDay(ms);
+  const agoLabel = (ms, now) => { const n = daysAgo(ms, now); return n <= 0 ? '오늘' : `${n}일 전`; };
+
+  // Never measured, or the last measurement is more than 30 days old.
+  const isStale = (lastAt, now, days = STALE_DAYS) => lastAt === null || lastAt === undefined || daysAgo(lastAt, now) > days;
+
+  function lastMeasuredAt(sessions) {
+    if (!sessions || sessions.length === 0) return null;
+    return sessions.reduce((a, s) => Math.max(a, s.startedAt), -Infinity);
+  }
+
+  // "11월 23일(월)부터"
+  function fmtWeekStart(ms) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: TZ, month: 'numeric', day: 'numeric' })
+      .formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+    const dow = '일월화수목금토'[new Date(ms + KST_MS).getUTCDay()];
+    return `${parts.month}월 ${parts.day}일(${dow})부터`;
+  }
+
+  // lastBy: Map child id -> newest startedAt (null = no session). A child missing from the map is
+  // still loading: the two date-based counts are then null ("…" on screen).
+  // Children without a consent date are counted in needConsent only: they cannot be measured yet.
+  function summaryTiles(children, lastBy, now) {
+    const groups = new Set(children.filter((c) => c.group).map((c) => c.group));
+    const needConsent = children.filter((c) => !c.consentDate).map((c) => c.id);
+    const known = children.every((c) => lastBy.has(c.id));
+    const weekStart = weekStartKst(now);
+    const measured = known ? children.filter((c) => { const t = lastBy.get(c.id); return t !== null && t >= weekStart; }).length : null;
+    const stale = known ? children.filter((c) => c.consentDate && isStale(lastBy.get(c.id), now)).map((c) => c.id) : null;
+    return {
+      total: children.length,
+      groups: groups.size,
+      noGroup: children.filter((c) => !c.group).length,
+      weekStart,
+      measuredThisWeek: measured,
+      needConsent,
+      stale,
+    };
+  }
+
   // ---- trend ------------------------------------------------------------------------------
   const isReliablePoint = (p) => (typeof p.reliable === 'boolean' ? p.reliable : p.detail !== 'line' && p.quality >= 0.6);
 
@@ -99,6 +156,40 @@
     const refs = points.filter((p) => !isReliablePoint(p));
     const avg = reliable.length ? Math.round(reliable.reduce((a, p) => a + p.wpm, 0) / reliable.length) : null;
     return { avg, n: reliable.length, latestReference: refs.length ? refs[refs.length - 1] : null };
+  }
+
+  // Layout of the detail trend chart (oldest first). Reliable points get a y and are joined by one
+  // line; 참고용 points keep their x slot with no value. The y range is a round range around the
+  // reliable values (at most four steps); `base` is the first reliable value (the dashed line).
+  function trendPlot(points, { width = 760, height = 180, left = 44, right = 28, top = 28, bottom = 30 } = {}) {
+    const items = points.map((p) => ({ startedAt: p.startedAt, reliable: isReliablePoint(p), wpm: isReliablePoint(p) ? Math.round(p.wpm) : null }));
+    const vals = items.filter((i) => i.reliable).map((i) => i.wpm);
+    let lo = 0; let hi = 100; let step = 25;
+    if (vals.length) {
+      const min = Math.min(...vals); const max = Math.max(...vals);
+      for (const s of [10, 20, 25, 50, 100, 200, 500]) {
+        lo = Math.max(0, Math.floor((min - 5) / s) * s);
+        hi = Math.ceil((max + 5) / s) * s;
+        step = s;
+        if ((hi - lo) / s <= 4) break;
+      }
+    }
+    const n = items.length;
+    const xAt = (k) => (n <= 1 ? (left + width - right) / 2 : left + (k * (width - left - right)) / (n - 1));
+    const yAt = (v) => top + ((hi - v) / (hi - lo)) * (height - top - bottom);
+    const ticks = [];
+    for (let v = lo; v <= hi; v += step) ticks.push({ v, y: yAt(v) });
+    items.forEach((it, k) => { it.x = xAt(k); it.y = it.reliable ? yAt(it.wpm) : null; });
+    const rel = items.filter((i) => i.reliable);
+    return {
+      width, height, top, bottom, left, right, ticks, items,
+      line: rel.map((i) => `${i.x},${i.y}`).join(' '),
+      base: rel.length ? { v: rel[0].wpm, y: rel[0].y } : null,
+      first: rel.length ? rel[0].wpm : null,
+      last: rel.length ? rel[rel.length - 1].wpm : null,
+      reliableCount: rel.length,
+      referenceCount: items.length - rel.length,
+    };
   }
 
   // ---- share links ------------------------------------------------------------------------
@@ -162,6 +253,7 @@
   const exported = {
     sessionState, sessionStats, latestSummary, childStats, groupChips, filterChildren, paginate, pageCaption,
     trendStats, shareStatus, maskToken, accountLabel, ROLE_LABEL, actionLabel, ACTION_LABEL, filterAudit, fmtKst, NO_GROUP,
+    weekStartKst, daysAgo, agoLabel, isStale, lastMeasuredAt, fmtWeekStart, summaryTiles, trendPlot, STALE_DAYS,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) root.ReadingApp = Object.assign(root.ReadingApp || {}, exported);

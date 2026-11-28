@@ -42,7 +42,11 @@ test('children page: academy student registration form and logout to the academy
   assert.match(html, /측정 대상으로 등록/);
   assert.doesNotMatch(html, /id="link-name"|이름 <input/, 'no field for the student\'s real name');
   const js = read('js/children.js');
-  assert.match(js, /location\.href = '\/academy'/);
+  // LOGOUT lives in the shared site header: POST /api/logout, then the academy site.
+  const header = read('js/site-header.js');
+  assert.match(header, /fetch\('\/api\/logout', \{ method: 'POST'/);
+  assert.match(header, /location\.href = '\/academy'/);
+  assert.match(js, /siteHeader\.mount\(/);
   assert.match(js, /externalStudentId: studentId/);
   assert.match(js, /me\.launchStudentId/, 'a teacher registers only the signed launch student number');
   assert.match(html, /id="link-note"/);

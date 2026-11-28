@@ -128,30 +128,122 @@ test('fmtKst formats in Korean time', () => {
   assert.equal(tv.fmtKst(Date.parse('2026-11-28T16:00:00Z'), false), '2026-11-29');
 });
 
-test('children page: design D2 structure, no real-name field, delete keeps the permanent warning', () => {
+test('children page: design D2 v2 structure, no real-name field, delete keeps the permanent warning', () => {
   const html = read('children.html');
-  assert.match(html, /<link rel="stylesheet" href="\/css\/app\.css">\s*<link rel="stylesheet" href="\/css\/teacher\.css">/);
+  assert.match(html, /<link rel="stylesheet" href="\/css\/dahim-skin\.css">\s*<link rel="stylesheet" href="\/css\/teacher\.css">/);
+  assert.match(html, /<script src="\/js\/site-header\.js"><\/script>/, 'the academy header module');
+  assert.match(html, /id="site-header"/);
   assert.match(html, /<script src="\/js\/teacher-view\.js"><\/script>\s*<script src="\/js\/children\.js">/);
   for (const id of ['add-form', 'add-code', 'add-initials', 'add-group', 'search', 'chips', 'missing-only', 'children', 'empty',
-    'export', 'view-detail', 'view-teachers', 'teachers', 'view-audit', 'audit', 'confirm', 'toast']) {
+    'export', 'view-detail', 'view-teachers', 'teachers', 'view-audit', 'audit', 'confirm', 'toast',
+    'start', 'empty-add', 'tiles', 'stale-note', 'stale-clear', 'confirm-cancel', 'confirm-ok']) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
   assert.match(html, /href="\/api\/children\/export\.csv"/);
   assert.match(html, /data-view="teachers" hidden/, 'director tabs start hidden');
   assert.doesNotMatch(html, /(?:실명|이름)\s*<input|id="[a-z-]*name"/);
   const js = read('js/children.js');
-  assert.match(js, /영구 삭제되며 되돌릴 수 없습니다/);
+  assert.match(js, /영구 삭제되며 되돌릴 수 없어요/);
+  assert.match(js, /summaryTiles\(children, lastBy, Date\.now\(\)\)/, 'the tiles are counted in the browser from the list data');
   assert.match(js, /confirmDialog\(\{\s*title: `\$\{child\.code\} 아이를 삭제할까요\?`/);
   assert.match(js, /me\.role !== 'admin'/, 'teacher / director tabs follow the role');
   assert.match(js, /\/api\/admin\/teachers\/\$\{t\.id\}\/\$\{t\.disabled \? 'enable' : 'disable'\}/);
   assert.doesNotMatch(js, /reset-link/, 'no legacy reset-link UI');
 });
 
-test('front page uses the foundation look and still sends people to the academy', () => {
+test('front page uses the academy skin and still sends people to the academy', () => {
   const html = read('index.html');
-  assert.match(html, /class="topbar"/);
+  assert.match(html, /class="dh-header"/);
+  assert.match(html, /href="\/css\/dahim-skin\.css"/);
   assert.match(html, /href="\/css\/teacher\.css"/);
   assert.match(html, /다힘 사이트에서 들어오세요/);
   assert.match(html, /href="\/academy"/);
   assert.doesNotMatch(html, /<form|password/);
+});
+
+test('weekStartKst: Monday 00:00 Korean time, whatever the viewer clock zone', () => {
+  const mon = Date.parse('2026-11-23T00:00:00+09:00');
+  assert.equal(tv.weekStartKst(Date.parse('2026-11-28T15:00:00+09:00')), mon, 'Saturday');
+  assert.equal(tv.weekStartKst(Date.parse('2026-11-29T23:59:00+09:00')), mon, 'Sunday still belongs to the week that began Monday');
+  assert.equal(tv.weekStartKst(mon), mon, 'Monday midnight starts the week');
+  assert.equal(tv.weekStartKst(mon - 1), Date.parse('2026-11-16T00:00:00+09:00'), 'one millisecond earlier is last week');
+  // Sunday 20:00 UTC is already Monday 05:00 in Korea
+  assert.equal(tv.weekStartKst(Date.parse('2026-11-29T20:00:00Z')), Date.parse('2026-11-30T00:00:00+09:00'));
+  assert.equal(tv.fmtWeekStart(mon), '11월 23일(월)부터');
+});
+
+test('daysAgo / agoLabel count Korean calendar days', () => {
+  const now = Date.parse('2026-11-28T10:00:00+09:00');
+  assert.equal(tv.daysAgo(Date.parse('2026-11-28T00:10:00+09:00'), now), 0);
+  assert.equal(tv.agoLabel(Date.parse('2026-11-28T00:10:00+09:00'), now), '오늘');
+  assert.equal(tv.daysAgo(Date.parse('2026-11-27T23:50:00+09:00'), now), 1, 'yesterday evening is one day ago');
+  assert.equal(tv.agoLabel(Date.parse('2026-11-26T14:05:00+09:00'), now), '2일 전');
+});
+
+test('isStale: never measured, or more than 30 days (not 30 exactly)', () => {
+  const now = Date.parse('2026-11-28T10:00:00+09:00');
+  assert.equal(tv.STALE_DAYS, 30);
+  assert.equal(tv.isStale(null, now), true, 'never measured');
+  assert.equal(tv.isStale(undefined, now), true);
+  assert.equal(tv.isStale(Date.parse('2026-10-29T09:00:00+09:00'), now), false, '30 days ago is not yet stale');
+  assert.equal(tv.isStale(Date.parse('2026-10-28T23:00:00+09:00'), now), true, '31 days ago is stale');
+  assert.equal(tv.isStale(Date.parse('2026-11-27T09:00:00+09:00'), now), false);
+  assert.equal(tv.lastMeasuredAt([]), null);
+  assert.equal(tv.lastMeasuredAt([{ startedAt: 5 }, { startedAt: 9 }, { startedAt: 7 }]), 9);
+});
+
+test('summaryTiles: the four list tiles from the list and the newest measurement per child', () => {
+  const now = Date.parse('2026-11-28T10:00:00+09:00');
+  const at = (s) => Date.parse(`${s}+09:00`);
+  const kids = [
+    kid(1, 'E-0312', 'ㄱㅁ', { group: '3학년 읽기반' }),
+    kid(2, 'E-0317', 'ㅅㅇ', { group: '3학년 읽기반' }),
+    kid(3, 'E-0408', 'ㅈㅎ', { group: '4학년 읽기반', consentDate: null }),
+    kid(4, 'M-0105', 'ㅇㅈ', { group: '중등 A반' }),
+    kid(5, 'M-0113', 'ㅂㄷ', { group: '중등 A반' }),
+    kid(6, 'H-0021', 'ㄴㅅ'),
+  ];
+  const last = new Map([[1, at('2026-11-26T14:05:00')], [2, at('2026-11-24T10:20:00')], [3, null],
+    [4, at('2026-11-23T00:00:00')], [5, at('2026-10-19T10:00:00')], [6, null]]);
+  const t = tv.summaryTiles(kids, last, now);
+  assert.equal(t.total, 6);
+  assert.equal(t.groups, 3);
+  assert.equal(t.noGroup, 1);
+  assert.equal(t.weekStart, at('2026-11-23T00:00:00'));
+  assert.equal(t.measuredThisWeek, 3, 'Monday 00:00 counts as this week');
+  assert.deepEqual(t.needConsent, [3]);
+  assert.deepEqual(t.stale, [5, 6], 'no-consent children are only in the consent tile');
+  // still loading one child's sessions: date-based counts are unknown, the rest is ready
+  const partial = tv.summaryTiles(kids, new Map([[1, null]]), now);
+  assert.equal(partial.measuredThisWeek, null);
+  assert.equal(partial.stale, null);
+  assert.deepEqual(partial.needConsent, [3]);
+  const none = tv.summaryTiles([], new Map(), now);
+  assert.deepEqual([none.total, none.groups, none.measuredThisWeek, none.stale.length], [0, 0, 0, 0]);
+});
+
+test('filterChildren: onlyIds keeps the tile\'s children and combines with the other filters', () => {
+  const kids = [kid(1, 'E-1', 'A', { group: 'g' }), kid(2, 'E-2', 'B'), kid(3, 'M-3', 'C', { group: 'g' })];
+  const ids = (f) => tv.filterChildren(kids, f).map((c) => c.id);
+  assert.deepEqual(ids({ onlyIds: new Set([2, 3]) }), [2, 3]);
+  assert.deepEqual(ids({ onlyIds: new Set([2, 3]), group: 'g' }), [3]);
+  assert.deepEqual(ids({ onlyIds: null }), [1, 2, 3]);
+});
+
+test('trendPlot: one line through reliable points, 참고용 keeps a slot with no value', () => {
+  const p = (d, wpm, reliable) => ({ startedAt: Date.parse(`2026-${d}T14:00:00+09:00`), wpm, reliable });
+  const plot = tv.trendPlot([p('10-02', 80, true), p('10-16', 93, true), p('10-30', 40, false), p('11-24', 999, false), p('11-26', 86, true)]);
+  assert.deepEqual(plot.items.map((i) => i.wpm), [80, 93, null, null, 86]);
+  assert.equal(plot.items[2].y, null);
+  assert.equal(plot.line.split(' ').length, 3, 'only reliable points are joined');
+  assert.deepEqual([plot.first, plot.last, plot.reliableCount, plot.referenceCount], [80, 86, 3, 2]);
+  assert.equal(plot.base.v, 80);
+  const vs = plot.ticks.map((t) => t.v);
+  assert.ok(vs[0] <= 80 && vs[vs.length - 1] >= 93 && vs.length <= 5, `ticks ${vs}`);
+  assert.ok(vs[vs.length - 1] < 999, 'a 참고용 value never stretches the axis');
+  const xs = plot.items.map((i) => i.x);
+  assert.ok(xs.every((x, k) => k === 0 || x > xs[k - 1]), 'x grows with time order');
+  const empty = tv.trendPlot([p('10-02', 50, false)]);
+  assert.equal(empty.base, null);
+  assert.equal(empty.line, '');
 });

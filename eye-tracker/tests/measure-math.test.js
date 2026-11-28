@@ -136,7 +136,13 @@ test('formatResult: all-no-data run says so instead of printing numbers', () => 
 
 test('measure.html and measure.js: stay on the origin and keep the same page rules', () => {
   const html = read('measure.html');
-  assert.doesNotMatch(html, /https?:\/\//);
+  // The only absolute URL is the Pretendard font stylesheet the academy site loads (same URL);
+  // scripts and everything else stay on the origin.
+  const PRETENDARD = 'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css';
+  assert.doesNotMatch(html.split(PRETENDARD).join(''), /https?:\/\//);
+  assert.match(html, new RegExp(`<link rel="stylesheet" crossorigin href="${PRETENDARD.replace(/[.?]/g, '\\$&')}">`));
+  for (const m of html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)) assert.match(m[1], /^\/(?!\/)/, `script ${m[1]} stays on the origin`);
+  assert.match(html, /src="\/js\/site-header\.js"/, 'wrapped in the site header');
   assert.match(html, /src="\/vendor\/webgazer\.js"/);
   assert.match(html, /src="\/js\/measure-math\.js"/);
   assert.match(html, /src="\/js\/measure\.js"/);
@@ -150,6 +156,10 @@ test('measure.html and measure.js: stay on the origin and keep the same page rul
   assert.match(src, /pagehide/);
   // The only request is GET /api/me through api.js; nothing is uploaded.
   assert.doesNotMatch(src, /api\.(post|patch|del)|fetch\(|sendBeacon|XMLHttpRequest|WebSocket|\.innerHTML|toDataURL|captureStream|MediaRecorder|drawImage/);
+  // The shared header adds no request of its own: its only one is POST /api/logout when LOGOUT is pressed.
+  const header = read('js/site-header.js');
+  assert.deepEqual([...header.matchAll(/fetch\(([^,)]+)/g)].map((m) => m[1]), ["'/api/logout'"]);
+  assert.doesNotMatch(header, /sendBeacon|XMLHttpRequest|WebSocket|new Image|api\.(get|post)/);
 });
 
 test('accuracyVerdict: proposed levels <=3% good, <=5% caution, above poor; no data -> null', () => {

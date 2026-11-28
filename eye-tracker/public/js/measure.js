@@ -18,6 +18,8 @@
   ];
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  RA.siteHeader.mount('site-header', { crumb: '정확도 점검' });
+
   let cameraOn = false;
   let running = false;
 
@@ -223,7 +225,7 @@
     // Teacher-only: api.get sends a 401 to the login page.
     try {
       const me = await api.get('/api/me');
-      $('who').textContent = me && me.email ? me.email : '';
+      RA.siteHeader.setRole(me && me.role);
     } catch (err) {
       if (err.status === 401) return; // redirecting
       return showError('불러오지 못했습니다', err.message);

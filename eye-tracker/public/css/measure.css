@@ -1,8 +1,9 @@
 /* Accuracy check (Figma "30 Parent report & tools": 정확도 점검 준비 / 9개 점 / 결과, 도움말). */
-.measure-page { font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+/* Wrapped in the site header and page tabs (dahim-skin.css), which also set the font and colours. */
 .measure-page p { margin: 0; }
-.topbar-user { margin-left: auto; font-size: 14px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.measure-page main.measure { max-width: 1088px; padding: var(--space-32); }
+.measure-head { padding-bottom: 0; }
+.measure-head .dh-ph-tabs { margin-bottom: 0; }
+.measure-page main.measure { max-width: 1280px; padding: var(--space-24) 20px 64px; }
 .measure-page h1 { font-size: 24px; line-height: 1.4; margin: 0; }
 .lead { font-size: 16px; line-height: 1.6; }
 .muted-text { color: var(--text-muted); }
@@ -12,7 +13,7 @@
 .dot-list.small li { font-size: 14px; line-height: 1.5; color: var(--text-muted); }
 
 /* Prepare */
-.setup-card { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-16); padding: var(--space-24); }
+.setup-card { max-width: 720px; margin: 0; display: flex; flex-direction: column; gap: var(--space-16); padding: var(--space-24); }
 .field { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 .field label { font-size: 14px; font-weight: 700; color: var(--text); }
 .field input { height: 44px; padding: 0 var(--space-12); font-size: 16px; width: 100%; }
@@ -123,5 +124,4 @@
 }
 @media (max-width: 600px) {
   .field-row, .summary-tiles { display: flex; flex-direction: column; }
-  .topbar-product { display: none; }
 }
