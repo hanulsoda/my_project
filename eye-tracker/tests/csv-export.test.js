@@ -181,14 +181,15 @@ test('GET /api/children/export.csv', async (t) => {
     }
   });
 
-  await t.test('tenancy: another teacher\'s children never appear; admin has no bypass', async () => {
+  await t.test('tenancy: another teacher\'s children never appear; the director exports every child', async () => {
     const text = await (await get(cookieA)).text();
     assert.doesNotMatch(text, /B-SECRET|B-GROUP|ZZ/);
     const own = parseCsv((await body(cookieB)).slice(1));
     assert.deepEqual(own.slice(1).map((r) => r[0]), ['B-SECRET']);
     assert.deepEqual(own[1].slice(7), ['77', '5', '6', 'true']);
     const admin = parseCsv((await body(adminCookie)).slice(1));
-    assert.deepEqual(admin, [HEADER], 'header only');
+    assert.deepEqual(admin[0], HEADER);
+    assert.ok(admin.some((r) => r[0] === 'B-SECRET') && admin.some((r) => r[0] === 'A-1'), 'the director sees all (docs/sso.md)');
   });
 
   await t.test('the export carries no ids, teacher data, notes or session payloads', async () => {

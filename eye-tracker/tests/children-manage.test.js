@@ -38,8 +38,9 @@ test('children: group, note and partial updates', async (t) => {
     assert.deepEqual(await detail.json(), a1);
   });
 
-  await t.test('detail is teacher-scoped: foreign, unknown, non-numeric and admin all get the shared 404', async () => {
-    for (const [cookie, id] of [[cookieB, a1.id], [adminCookie, a1.id], [cookieA, 999999], [cookieA, 'abc']]) {
+  await t.test('detail is teacher-scoped: foreign, unknown and non-numeric get the shared 404; the director sees it', async () => {
+    assert.equal((await call(srv, 'GET', `/api/children/${a1.id}`, adminCookie)).status, 200, 'director sees every child');
+    for (const [cookie, id] of [[cookieB, a1.id], [adminCookie, 999999], [cookieA, 999999], [cookieA, 'abc']]) {
       const res = await call(srv, 'GET', `/api/children/${id}`, cookie);
       assert.equal(res.status, 404);
       assert.equal(await res.text(), NOT_FOUND_BODY);
@@ -131,9 +132,9 @@ test('children: group, note and partial updates', async (t) => {
     assert.equal((await call(srv, 'PATCH', `/api/children/${a2.id}`, cookieA, { code: 'B-ONLY' })).status, 200, 'unique per teacher');
   });
 
-  await t.test('tenancy: another teacher, admin and unknown ids get the shared 404 and change nothing', async () => {
+  await t.test('tenancy: another teacher and unknown ids get the shared 404 and change nothing', async () => {
     const before = JSON.stringify(row(a1.id));
-    for (const cookie of [cookieB, adminCookie]) {
+    for (const cookie of [cookieB]) {
       const res = await call(srv, 'PATCH', `/api/children/${a1.id}`, cookie, { group: 'hijack', note: 'hijack', code: 'HIJ' });
       assert.equal(res.status, 404);
       assert.equal(await res.text(), NOT_FOUND_BODY);
@@ -154,7 +155,7 @@ test('children: group, note and partial updates', async (t) => {
     assert.deepEqual(await names(cookieA, '?group=%ED%86%A0'), [], 'exact match, not a prefix');
     assert.deepEqual(await names(cookieA, `?group=${encodeURIComponent('토요반 ')}`), [], 'no trimming of the query');
     assert.deepEqual(await names(cookieA, '?group=nobody'), []);
-    assert.deepEqual(await names(adminCookie, `?group=${encodeURIComponent('토요반')}`), [], 'admin has no bypass');
+    assert.deepEqual(await names(adminCookie, `?group=${encodeURIComponent('토요반')}`), ['G-1', 'C-1'], 'the director sees every teacher\'s group');
     assert.ok((await names(cookieA, '')).length > 1, 'no filter lists everything');
     assert.equal((await call(srv, 'GET', '/api/children?group=a&group=b', cookieA)).status, 400);
   });

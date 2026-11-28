@@ -156,3 +156,52 @@ test('deleting a user keeps the audit rows it acted in, with the actor cleared',
   assert.deepEqual({ ...db.prepare('SELECT actor_user_id, action FROM audit_log').get() }, { actor_user_id: null, action: 'child.delete' });
   db.close();
 });
+
+test('SSO schema: external ids, nonces and student sessions on a fresh database', () => {
+  const db = openDb(':memory:');
+  assert.ok(cols(db, 'users').includes('external_id'));
+  assert.ok(cols(db, 'children').includes('external_student_id'));
+  assert.deepEqual(cols(db, 'sso_nonces'), ['nonce', 'expires_at']);
+  assert.deepEqual(cols(db, 'student_sessions'), ['token_hash', 'child_id', 'external_student_id', 'expires_at']);
+  db.close();
+});
+
+test('SSO migration on an OLD-schema database: columns added as NULL, unique when set, sessions kept, idempotent', () => {
+  withOldDb((file) => {
+    const old = new Database(file);
+    old.prepare("INSERT INTO auth_sessions (token, user_id, expires_at) VALUES ('old-session', 1, 9999999999999)").run();
+    old.close();
+    const db = openDb(file);
+    assert.equal(db.prepare('SELECT external_id FROM users').get().external_id, null);
+    assert.equal(db.prepare('SELECT external_student_id FROM children').get().external_student_id, null);
+    assert.equal(db.prepare('SELECT user_id FROM auth_sessions WHERE token = ?').get('old-session').user_id, 1, 'existing logins survive');
+
+    // Several NULLs are fine; a repeated value is not.
+    const addUser = db.prepare("INSERT INTO users (email, pw_hash, role, created_at, external_id) VALUES (?, '!sso', 'teacher', 1, ?)");
+    addUser.run('a@sso.invalid', null);
+    addUser.run('b@sso.invalid', 'teacher:12');
+    assert.throws(() => addUser.run('c@sso.invalid', 'teacher:12'), /UNIQUE/);
+    const addChild = db.prepare("INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at, external_student_id) VALUES (1, ?, 'X', 'low', '', 1, ?)");
+    addChild.run('N1', null);
+    addChild.run('N2', null);
+    addChild.run('S1', '0123');
+    assert.throws(() => addChild.run('S2', '0123'), /UNIQUE/);
+    db.close();
+
+    const again = openDb(file); // second open is a no-op
+    assert.equal(again.prepare("SELECT COUNT(*) AS n FROM children WHERE external_student_id = '0123'").get().n, 1);
+    assert.ok(indexNames(again, 'users').includes('users_external_id'));
+    assert.ok(indexNames(again, 'children').includes('children_external_student_id'));
+    again.close();
+  });
+});
+
+test('student sessions go with their child', () => {
+  const db = openDb(':memory:');
+  db.prepare("INSERT INTO users (email, pw_hash, role, created_at) VALUES ('t@example.test', 'h', 'teacher', 1)").run();
+  db.prepare("INSERT INTO children (teacher_id, code, initials, grade_band, consent_date, created_at, external_student_id) VALUES (1, 'C', 'X', 'elementary', '', 1, '0123')").run();
+  db.prepare("INSERT INTO student_sessions (token_hash, child_id, external_student_id, expires_at) VALUES ('h', 1, '0123', 5)").run();
+  db.prepare('DELETE FROM children WHERE id = 1').run();
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM student_sessions').get().n, 0);
+  db.close();
+});

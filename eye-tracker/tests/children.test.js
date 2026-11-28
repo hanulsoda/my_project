@@ -35,7 +35,7 @@ test('children', async (t) => {
       { code: body.code, initials: body.initials, gradeBand: body.gradeBand, consentDate: body.consentDate },
       VALID,
     );
-    assert.deepEqual(Object.keys(body).sort(), ['code', 'consentDate', 'createdAt', 'gradeBand', 'group', 'id', 'initials', 'note']);
+    assert.deepEqual(Object.keys(body).sort(), ['code', 'consentDate', 'createdAt', 'externalStudentId', 'gradeBand', 'group', 'id', 'initials', 'note']);
     childId = body.id;
   });
 
@@ -46,7 +46,9 @@ test('children', async (t) => {
     const listB = await (await call(srv, 'GET', '/api/children', cookieB)).json();
     assert.deepEqual(listB.map((c) => c.code), ['B-01']);
     const listAdmin = await (await call(srv, 'GET', '/api/children', adminCookie)).json();
-    assert.deepEqual(listAdmin, [], 'admin has no bypass');
+    // The director (role admin) sees every child, with its owner (docs/sso.md, visibility rules).
+    assert.deepEqual(listAdmin.map((c) => c.code), ['A-01', 'B-01'], 'the director sees all');
+    assert.ok(listAdmin.every((c) => Number.isInteger(c.teacherId)));
   });
 
   await t.test('consentDate is optional and null until set', async () => {
@@ -121,8 +123,8 @@ test('children', async (t) => {
     assert.equal(del.status, 404);
     assert.equal(await del.text(), unknownBody);
 
-    const adminDel = await call(srv, 'DELETE', `/api/children/${childId}`, adminCookie);
-    assert.equal(adminDel.status, 404, 'admin has no bypass');
+    const adminGet = await call(srv, 'GET', `/api/children/${childId}`, adminCookie);
+    assert.equal(adminGet.status, 200, 'the director sees every child');
 
     const row = srv.db.prepare('SELECT consent_date FROM children WHERE id = ?').get(childId);
     assert.equal(row.consent_date, '2026-03-02', 'untouched by the other teacher');

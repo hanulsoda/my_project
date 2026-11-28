@@ -21,20 +21,25 @@ function toTeacher(r) {
     createdAt: r.created_at,
     lastLoginAt: r.last_login_at,
     childCount: r.child_count,
+    externalId: r.external_id ?? null, // "teacher:12" for accounts made by the academy sign-in
   };
 }
 
 // Mounted at /api/admin behind requireAdmin (app.js). Account upkeep reuses the operator CLI's
 // helpers so the web and the CLI cannot drift apart. Nothing here returns a hash or a token
 // except the one-time reset link, which is the point of that call.
-function createAdminRouter({ db, now }) {
+// Listing and disabling/enabling accounts always works (a disabled account is refused at /sso
+// too). Reset links and invites are the legacy password flows: they exist only with
+// config.allowPasswordLogin (ALLOW_PASSWORD_LOGIN=1).
+function createAdminRouter({ db, now, config = {} }) {
+  const legacy = config.allowPasswordLogin === true;
   const q = {
     teachers: db.prepare(
-      `SELECT u.id, u.email, u.role, u.disabled_at, u.created_at, u.last_login_at,
+      `SELECT u.id, u.email, u.role, u.disabled_at, u.created_at, u.last_login_at, u.external_id,
               (SELECT COUNT(*) FROM children c WHERE c.teacher_id = u.id) AS child_count
        FROM users u ORDER BY u.id`),
     teacher: db.prepare(
-      `SELECT u.id, u.email, u.role, u.disabled_at, u.created_at, u.last_login_at,
+      `SELECT u.id, u.email, u.role, u.disabled_at, u.created_at, u.last_login_at, u.external_id,
               (SELECT COUNT(*) FROM children c WHERE c.teacher_id = u.id) AS child_count
        FROM users u WHERE u.id = ?`),
     expireResets: db.prepare('UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL'),
@@ -90,7 +95,7 @@ function createAdminRouter({ db, now }) {
   // unused ones (those answer 410 like any spent link).
   // A disabled account gets no link: a reset must never be a way back in, and enabling is its own
   // explicit, audited step.
-  router.post('/teachers/:id/reset-link', loadTeacher, (req, res) => {
+  if (legacy) router.post('/teachers/:id/reset-link', loadTeacher, (req, res) => {
     if (req.target.disabled_at !== null) {
       return res.status(409).json({ error: '비활성화된 계정은 재설정할 수 없습니다. 먼저 활성화해 주세요' });
     }
@@ -104,13 +109,13 @@ function createAdminRouter({ db, now }) {
     res.status(201).json({ url: `/reset.html?token=${token}`, expiresAt });
   });
 
-  router.get('/invites', (req, res) => {
+  if (legacy) router.get('/invites', (req, res) => {
     res.json(q.pendingInvites.all(now()).map((i) => ({ id: i.id, email: i.email, expiresAt: i.expires_at })));
   });
 
   // Revoking retires the invite the way using it would (its link then answers 410) and keeps the
   // row, so an id is never handed out twice.
-  router.delete('/invites/:id', (req, res) => {
+  if (legacy) router.delete('/invites/:id', (req, res) => {
     const id = parseId(req.params.id);
     const changes = id === null ? 0 : q.revokeInvite.run(now(), id, now()).changes;
     if (!changes) return res.status(404).json(NOT_FOUND);

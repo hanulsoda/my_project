@@ -77,6 +77,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
   target        TEXT NOT NULL,
   detail        TEXT
 );
+-- Single-use academy entry tokens: only the nonce is kept (never the token), until exp + skew.
+CREATE TABLE IF NOT EXISTS sso_nonces (
+  nonce      TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+);
+-- A student's sign-in from the academy site. Kept apart from auth_sessions (which only ever
+-- resolve to a users row), so a student cookie can never pass as a teacher. Only sha256 of the
+-- cookie value is stored. external_student_id must still match the child on every request.
+CREATE TABLE IF NOT EXISTS student_sessions (
+  token_hash          TEXT PRIMARY KEY,
+  child_id            INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+  external_student_id TEXT NOT NULL,
+  expires_at          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS student_sessions_child ON student_sessions(child_id);
 `;
 
 // Idempotent upgrades for databases created by an older schema (CREATE TABLE IF NOT EXISTS
@@ -96,6 +111,12 @@ function migrate(db) {
   db.exec('UPDATE invites SET id = rowid WHERE id IS NULL');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS invites_id ON invites(id)');
   addColumn('password_resets', 'created_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+  // Single sign-on: "director:admin" / "teacher:12" for academy-provisioned accounts, and the
+  // academy student number on a child. Unique when set; NULL for everything that predates SSO.
+  addColumn('users', 'external_id', 'TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_external_id ON users(external_id) WHERE external_id IS NOT NULL');
+  addColumn('children', 'external_student_id', 'TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS children_external_student_id ON children(external_student_id) WHERE external_student_id IS NOT NULL');
 
   // One child code per teacher, ignoring case and surrounding spaces. If rows already collide
   // that way the index cannot be built: leave the data alone, warn, and start anyway (the exact

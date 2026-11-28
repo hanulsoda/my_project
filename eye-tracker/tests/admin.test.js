@@ -68,7 +68,7 @@ test('GET /api/admin/teachers', async (t) => {
     const rows = JSON.parse(text);
     assert.equal(rows.length, 3);
     for (const r of rows) {
-      assert.deepEqual(Object.keys(r).sort(), ['childCount', 'createdAt', 'disabled', 'email', 'id', 'lastLoginAt', 'role']);
+      assert.deepEqual(Object.keys(r).sort(), ['childCount', 'createdAt', 'disabled', 'email', 'externalId', 'id', 'lastLoginAt', 'role']);
     }
     const row = rows.find((r) => r.email === teacherEmail);
     assert.equal(row.id, tid);
