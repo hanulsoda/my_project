@@ -645,8 +645,11 @@ function longDwell(lineDwellMs, layout) {
 }
 
 // One-line passages carry no vertical structure: progress must at least look like reading, i.e.
-// x moving left to right within passes and covering a good part of the line.
+// a few passes with x moving left to right, covering a good part of the line.
 function sweepLooksLikeReading(counted, fixations, layout) {
+  // passes are cut at leftward jumps, so any gaze makes rightward runs: also require a sane number
+  // of them (reading the line, maybe once more), not endless sweeps or random gaze
+  if (counted.length > PASSES_PER_LINE_MAX) return false;
   const corrs = [];
   const xs = [];
   for (const q of counted) {

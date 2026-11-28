@@ -584,6 +584,13 @@ test('a stare is never a reading: not reliable, and a one-line stare is not comp
   }
   const still = notReading((t, rng, normal) => ({ x: 640 + normal() * 15, y: 400 + normal() * 15 }), 1)(1);
   assert.equal(computeLineMetrics(still.samples, still.L.words, LAPTOP).completed, false);
+  // 30 s of sweeps or random gaze on a one-line passage is not "read to the end" either
+  for (const build of [notReading(sweepsAtOneHeight(), 1), notReading((t, rng) => ({ x: rng() * 1280, y: rng() * 1100 }), 1)]) {
+    for (let seed = 1; seed <= 5; seed++) {
+      const b = build(seed);
+      assert.equal(computeLineMetrics(b.samples, b.L.words, LAPTOP).completed, false, `seed ${seed}`);
+    }
+  }
 });
 
 test('too few fixations per line is 참고용, not a guess', () => {
