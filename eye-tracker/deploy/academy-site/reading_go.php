@@ -10,9 +10,10 @@ declare(strict_types=1);
 
 // ---- 설정 (학원 서버에 맞게 고치세요) ---------------------------------------------------
 const READING_BASE_URL = 'https://reading.dahim.kr';
-const ACADEMY_LOGIN_URL = '/login.php';  // 로그인 안 된 사람을 보낼 다힘 로그인 주소
+const ACADEMY_LOGIN_URL = '/';  // 로그인 안 된 사람을 보낼 다힘 주소(첫 화면에서 로그인)
 // 비밀값: 환경변수 DAHIM_READING_SECRET, 없으면 웹 루트 밖의 PHP 파일(return '...';)
-const READING_SECRET_FILE = '/home/dahim/private/reading_secret.php';
+// 기본값: 이 파일이 웹 폴더(public_html)에 있으면, 그 바로 위 폴더의 reading_secret.php (웹에서 안 보이는 곳)
+const READING_SECRET_FILE = __DIR__ . '/../reading_secret.php';
 // 선생님 "맡은 반" 확인 함수(drs_scope/drs_ok)가 있는 파일. 없으면 선생님의 학생 지정은 막힙니다.
 const READING_SCOPE_LIB = __DIR__ . '/admin/lib/drill_scope.php';
 // ------------------------------------------------------------------------------------------
