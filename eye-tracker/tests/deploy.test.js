@@ -136,12 +136,16 @@ test('docs/deploy.md: password reset via the admin CLI, ADMIN_PASSWORD quoting t
   assert.match(d, /웹 화면은 없/, 'states plainly that there is no web UI for it');
 });
 
-test('docs/accuracy-protocol.md: devices, threshold rule tied to metrics.js, screening-only wording', () => {
+test('docs/accuracy-protocol.md: devices, threshold rule tied to line-metrics.js, screening-only wording', () => {
   const d = read('docs/accuracy-protocol.md');
   for (const t of ['iPad', 'Safari', 'Android', 'Chrome', 'Edge']) assert.match(d, new RegExp(t), t);
-  const threshold = read('server/metrics.js').match(/QUALITY_WORD_THRESHOLD\s*=\s*([0-9.]+)/)[1];
+  const threshold = read('server/line-metrics.js').match(/LINE_RELIABLE_MIN\s*=\s*([0-9.]+)/)[1];
   assert.ok(d.includes(threshold), `mentions the current threshold ${threshold}`);
-  assert.match(d, /server\/metrics\.js/);
+  assert.match(d, /server\/line-metrics\.js/);
+  assert.match(d, /LINE_RELIABLE_MIN/);
+  assert.doesNotMatch(d, /QUALITY_WORD_THRESHOLD/, 'the word-level threshold is no longer what the product uses');
+  assert.match(d, /154/, 'records the real laptop result');
+  assert.match(d, /90%/, 'states the line-level target');
   assert.match(d, /measure\.html/);
   assert.match(d, /줄 단위/);
   assert.match(d, /단어 단위/);
